@@ -1,0 +1,27 @@
+{
+  "name": "pointerviz",
+  "version": "2.2.1",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:core": "node test/core.test.js",
+    "test:integration": "node test/roundtrip.test.js",
+    "test:layout": "node --test test/layout.test.js",
+    "test:flow-integration": "node --test test/flow-integration.test.js",
+    "test": "node test/core.test.js && node test/roundtrip.test.js && node --test test/layout.test.js test/flow-integration.test.js"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "web-tree-sitter": "^0.25.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^5.4.0"
+  }
+}
