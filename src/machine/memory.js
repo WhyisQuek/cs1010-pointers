@@ -7,7 +7,7 @@
  * allocations remain in snapshots so dangling-pointer provenance is visible.
  */
 import {
-  isArray, isPointer, isPrimitive, isStruct, resolveStructType, typeEquals, typeToString,
+  isArray, isPointer, isPrimitive, isStruct, resolveStructType, typeEquals, typeToString, validateObjectType,
 } from '../language/types.js';
 
 let nextAllocationId = 0;
@@ -52,6 +52,7 @@ export function addAllocation(state, {
   storage = { kind: 'stack', frameId: 'main' }, alive = true, value = null,
 } = {}) {
   if (!type) throw new Error('allocation requires a type');
+  validateObjectType(type, state.structTypes);
   const allocation = {
     id, name, type: structuredClone(type), storage: structuredClone(storage), alive,
     value: value ? structuredClone(value) : makeDefaultValue(type, state.structTypes),
@@ -82,10 +83,14 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
   let value = allocation.value;
   let label = allocationDisplayName(state, allocation);
 
-  for (const part of targetRef.path ?? []) {
+  const path = targetRef.path ?? [];
+  for (let i = 0; i < path.length; i++) {
+    const part = path[i];
+    if (part === '$onePast') return { allocation, type, value: null, ref: targetRef, onePast: i === path.length - 1, invalid: i !== path.length - 1, label: `${label} + 1 (one-past)` };
     if (isArray(type)) {
       if (!Number.isInteger(part) || part < 0 || part >= type.length) {
-        return { allocation, type: type.of, value: null, ref: targetRef, onePast: part === type.length, invalid: part !== type.length, label: `${label}[${part}]` };
+        const onePast = part === type.length && i === path.length - 1;
+        return { allocation, type: type.of, value: null, ref: targetRef, onePast, invalid: !onePast, label: `${label}[${part}]` };
       }
       value = value.elements[part]; type = type.of; label += `[${part}]`; continue;
     }
@@ -101,6 +106,8 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
 }
 
 export function setRefValue(state, targetRef, nextValue) {
+  const resolved = resolveRef(state, targetRef, { allowDead: false });
+  if (resolved.invalid || resolved.onePast) throw new Error('write outside object bounds');
   const allocation = getAllocation(state, targetRef.allocationId);
   if (!allocation.alive) throw new Error(`write through pointer to an object whose lifetime has ended`);
   const path = targetRef.path ?? [];

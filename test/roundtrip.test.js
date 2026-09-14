@@ -6,6 +6,8 @@
 import { initParser, interpret } from '../src/pipeline/interpreter.js';
 import { generate } from '../src/pipeline/codegen.js';
 import { equivalent } from '../src/pipeline/equivalence.js';
+import assert from 'node:assert/strict';
+import { resolveRef } from '../src/machine/memory.js';
 
 const programs = [
   'int main() { int a = 10; int *b = &a; }',
@@ -118,5 +120,67 @@ try {
   console.log(`${!result.equal && result.diffs.length ? 'PASS' : 'FAIL'}  grading rejects wrong pointer graph`);
   if (result.equal) fail++;
 } catch (e) { console.log(`ERROR grading sanity: ${e.message}`); fail++; }
+
+try {
+  const result = interpret(`
+    int *(identity)(int *p) { return p; }
+    int **identity2(int **p) { return p; }
+    int *empty(void) { return NULL; }
+    int main(void) {
+      int x = 1;
+      int *p = identity(&x);
+      int **pp = identity2(&p);
+      **pp = 42;
+      int *nothing = empty();
+    }
+  `);
+  const allocation = name => result.state.allocations.find(a => a.name === name);
+  assert.equal(allocation('x').value.value, 42);
+  assert.equal(allocation('p').value.target.allocationId, allocation('x').id);
+  assert.equal(allocation('pp').value.target.allocationId, allocation('p').id);
+  assert.equal(allocation('nothing').value.kind, 'null');
+  assert.throws(() => interpret('int *bad(void) { return 7; } int main(void) { int *p = bad(); }'), /cannot assign int to int \*/);
+  assert.throws(() => interpret('int (*bad(void))(int) { return NULL; } int main(void) {}'), /function pointer declarators are not supported/);
+  console.log('PASS  pointer return types preserve depth, identity, null, and type checking');
+} catch (e) { console.log(`ERROR pointer return integration: ${e.message}`); fail++; }
+
+try {
+  const result = interpret(`
+    typedef struct Node { int value; struct Node *next; } Node;
+    Node *reverse(Node *head) {
+      if (!head || !head->next) return head;
+      Node *next = head->next;
+      Node *new_head = reverse(next);
+      next->next = head;
+      head->next = NULL;
+      return new_head;
+    }
+    int main(void) {
+      Node *a = malloc(sizeof(Node));
+      Node *b = malloc(sizeof(Node));
+      Node *c = malloc(sizeof(Node));
+      Node *d = malloc(sizeof(Node));
+      a->value = 10; a->next = b;
+      b->value = 20; b->next = c;
+      c->value = 30; c->next = d;
+      d->value = 40; d->next = NULL;
+      Node *newHead = reverse(a);
+      Node *empty = reverse(NULL);
+    }
+  `);
+  const allocation = name => result.state.allocations.find(a => a.name === name);
+  let link = allocation('newHead').value;
+  for (const [name, value] of [['d', 40], ['c', 30], ['b', 20], ['a', 10]]) {
+    assert.deepEqual(link.target, allocation(name).value.target);
+    const node = resolveRef(result.state, link.target).value;
+    assert.equal(node.fields.value.value, value);
+    link = node.fields.next;
+  }
+  assert.equal(link.kind, 'null');
+  assert.equal(allocation('empty').value.kind, 'null');
+  assert.equal(result.state.frames.filter(f => f.name === 'reverse').length, 5);
+  assert.ok(result.state.frames.filter(f => f.name === 'reverse').every(f => !f.active));
+  console.log('PASS  recursive struct pointer return reverses all four links and handles an empty list');
+} catch (e) { console.log(`ERROR recursive pointer return integration: ${e.message}`); fail++; }
 
 process.exitCode = fail ? 1 : 0;

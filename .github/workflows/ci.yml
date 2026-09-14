@@ -19,5 +19,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        env:
+          POINTERVIZ_REQUIRE_NATIVE: ${{ runner.os == 'Linux' && '1' || '' }}
       - run: npm run build
-

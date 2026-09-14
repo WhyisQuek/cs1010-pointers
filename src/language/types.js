@@ -5,7 +5,7 @@
  * struct without embedding the whole definition recursively. Program/state
  * registries retain the complete struct definitions.
  */
-import { MAX_ARRAY_LENGTH } from './limits.js';
+import { MAX_ARRAY_LENGTH, MAX_OBJECT_SCALARS } from './limits.js';
 
 export const primitive = (name) => ({ kind: 'primitive', name });
 export const pointer = (to) => ({ kind: 'pointer', to: structuredClone(to) });
@@ -20,6 +20,23 @@ export const structType = (name, fields) => ({ kind: 'struct', name, fields: str
 
 export const INT = primitive('int');
 export const CHAR = primitive('char');
+
+/** Bound the total storage of nested aggregates, not just each array dimension. */
+export function validateObjectType(type, structs = {}, visiting = new Set()) {
+  if (isPointer(type) || isPrimitive(type)) return 1;
+  let count;
+  if (isArray(type)) {
+    if (!Number.isInteger(type.length) || type.length < 1 || type.length > MAX_ARRAY_LENGTH) throw new Error('invalid array length');
+    count = type.length * validateObjectType(type.of, structs, visiting);
+  } else if (isStruct(type)) {
+    if (visiting.has(type.name)) throw new Error(`recursive by-value struct '${type.name}'`);
+    const fields = resolveStructType(type, structs).fields;
+    if (!fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
+    count = fields.reduce((n, f) => n + validateObjectType(f.type, structs, new Set([...visiting, type.name])), 0);
+  } else throw new Error('unsupported object type');
+  if (count > MAX_OBJECT_SCALARS) throw new Error(`object exceeds ${MAX_OBJECT_SCALARS} scalar subobjects`);
+  return count;
+}
 
 export function cloneType(type) { return structuredClone(type); }
 
@@ -56,7 +73,9 @@ export function sizeOf(type, structTypes = {}) {
       case 'char': return 1;
       case 'short': return 2;
       case 'int': return 4;
+      case 'unsigned int': return 4;
       case 'long': return 8;
+      case 'unsigned long': return 8;
       case 'float': return 4;
       case 'double': return 8;
       default: throw new Error(`sizeof(${type.name}) is not defined in PointerViz Mini-C`);
@@ -67,10 +86,25 @@ export function sizeOf(type, structTypes = {}) {
   if (type.kind === 'struct') {
     const def = resolveStructType(type, structTypes);
     if (!def.fields) throw new Error(`unknown struct '${type.name}'`);
-    // PointerViz intentionally omits ABI padding; this is a teaching-machine size.
-    return def.fields.reduce((n, f) => n + sizeOf(f.type, structTypes), 0);
+    let offset = 0;
+    for (const f of def.fields) {
+      offset = alignUp(offset, alignmentOf(f.type, structTypes));
+      offset += sizeOf(f.type, structTypes);
+    }
+    return alignUp(offset, alignmentOf(type, structTypes));
   }
   throw new Error(`sizeof unsupported type ${JSON.stringify(type)}`);
+}
+
+const alignUp = (n, alignment) => Math.ceil(n / alignment) * alignment;
+export function alignmentOf(type, structTypes = {}) {
+  if (isArray(type)) return alignmentOf(type.of, structTypes);
+  if (isStruct(type)) {
+    const def = resolveStructType(type, structTypes);
+    if (!def.fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
+    return Math.max(...def.fields.map(f => alignmentOf(f.type, structTypes)));
+  }
+  return sizeOf(type, structTypes);
 }
 
 export function typeToString(type) {
@@ -78,7 +112,7 @@ export function typeToString(type) {
   if (type.kind === 'primitive') return type.name;
   if (type.kind === 'pointer') return `${typeToString(type.to)} *`;
   if (type.kind === 'array') return `${typeToString(type.of)} [${type.length}]`;
-  if (type.kind === 'struct') return `struct ${type.name ?? '<anonymous>'}`;
+  if (type.kind === 'struct') return type.alias ?? `struct ${type.name ?? '<anonymous>'}`;
   if (type.kind === 'void') return 'void';
   return '<unknown>';
 }
@@ -88,17 +122,16 @@ export function declarationToC(type, name) {
   if (type.kind === 'primitive') return `${type.name} ${name}`;
   if (type.kind === 'void') return `void ${name}`;
   if (type.kind === 'pointer') {
-    if (type.to.kind === 'array') return `${typeBase(type.to.of)} (*${name})[${type.to.length}]`;
-    return declarationToC(type.to, `*${name}`);
+    return declarationToC(type.to, type.to.kind === 'array' ? `(*${name})` : `*${name}`);
   }
   if (type.kind === 'array') return declarationToC(type.of, `${name}[${type.length}]`);
-  if (type.kind === 'struct') return `struct ${type.name} ${name}`;
+  if (type.kind === 'struct') return `${type.alias ?? `struct ${type.name}`} ${name}`;
   throw new Error(`cannot print declaration for ${JSON.stringify(type)}`);
 }
 
 function typeBase(type) {
   if (type.kind === 'primitive') return type.name;
-  if (type.kind === 'struct') return `struct ${type.name}`;
+  if (type.kind === 'struct') return type.alias ?? `struct ${type.name}`;
   return typeToString(type);
 }
 
@@ -114,7 +147,7 @@ export function basePrimitive(type) {
 }
 
 export function isSupportedPrimitiveName(name) {
-  return ['int', 'char', 'short', 'long', 'float', 'double'].includes(name);
+  return ['int', 'char', 'short', 'long', 'unsigned int', 'unsigned long', 'float', 'double'].includes(name);
 }
 
 export const C_KEYWORDS = new Set([

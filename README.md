@@ -9,6 +9,7 @@ It supports:
 - pointers, arrays, heap allocations and pointer arithmetic;
 - functions and separate call-stack frames;
 - named and self-referential structures;
+- struct typedefs such as `typedef struct { int value; } Node;` and `Node *p;`;
 - `if`/`else`, `while` and `for` control flow;
 - `break`, `continue` and common condition operators;
 - code-to-diagram and diagram-to-code challenges;
@@ -36,11 +37,11 @@ The integration suite uses `web-tree-sitter` and therefore requires the npm depe
 
 ## Memory canvas
 
-Drag a function header to move its frame and locals together. Locals stay inside their owning frame. Stepping or editing memory resets drag positions; **Reset layout** restores and fits the default view.
+Drag a function header to move its frame and locals together. Select a frame to resize it from any edge or corner. Variables move freely in both directions; their frame grows to accommodate them. Layout survives memory edits and playback steps. **Fit view** adjusts the viewport; **Reset layout** restores default placement. Layout changes support Undo/Redo.
 
 Returned frames and expired stack locals are hidden by default. **Show expired** reveals their history; dangling pointers keep their status even when their target is hidden. Freed heap objects remain visible.
 
-Pointer indicators are larger, and arrows use rounded orthogonal routes around boxes. See [visualization behavior and limits](docs/VISUALIZATION.md).
+Arrows choose attachment sides automatically and use smooth curves with obstacle-aware detours. Select an arrow and drag its diamond to bend it, or drag its arrowhead to reconnect it. **Edit this snapshot** makes an editable copy of a playback step; right-click inside an active frame to add a variable at that position. **Run** starts playback at step zero; yellow highlights the next source line and memory changed by the current step. The editor includes C syntax colouring. See [visualization behavior and limits](docs/VISUALIZATION.md).
 
 ## Start a GitHub repository
 
@@ -62,6 +63,7 @@ Create your GitHub repository and follow its instructions to add a remote and pu
 - [`docs/MAINTAINER_GUIDE.md`](docs/MAINTAINER_GUIDE.md) — main files, extension points and testing.
 - [`docs/VISUALIZATION.md`](docs/VISUALIZATION.md) — frame interaction, visibility, layout and edge routing.
 - [`docs/TESTING.md`](docs/TESTING.md) — automated checks and browser regression steps.
+- [`docs/C_SEMANTICS_AUDIT.md`](docs/C_SEMANTICS_AUDIT.md) — C11 audit, native compiler comparisons and explicit implementation limits.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
 
 ## Core design rule

@@ -12,7 +12,9 @@
     "test:integration": "node test/roundtrip.test.js",
     "test:layout": "node --test test/layout.test.js",
     "test:flow-integration": "node --test test/flow-integration.test.js",
-    "test": "node test/core.test.js && node test/roundtrip.test.js && node --test test/layout.test.js test/flow-integration.test.js"
+    "test:semantics": "node --test test/c-semantics.test.js",
+    "test:native": "node --test test/native-c.test.js",
+    "test": "node test/core.test.js && node test/roundtrip.test.js && node --test test/layout.test.js test/flow-integration.test.js test/playback.test.js test/c-semantics.test.js test/native-c.test.js"
   },
   "dependencies": {
     "@xyflow/react": "^12.3.0",

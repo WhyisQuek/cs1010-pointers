@@ -1,32 +1,40 @@
 /** Interactive MemoryState editor. React Flow layout never becomes semantic state. */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Background, Controls, ReactFlow, useNodesInitialized, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { edgeTypes, nodeTypes } from '../flow/memoryFlow.jsx';
-import { clampLocal, pathFromHandle, stateToFlow } from '../flow/layout.js';
+import { GEOMETRY, pathFromHandle, stateToFlow } from '../flow/layout.js';
+import { captureLayout, contentSize, emptyLayout, initialHistory, layoutHistory, moveNode, resizeFrame } from '../flow/workspace.js';
 import {
   array, basePrimitive, isArray, isPointer, isStruct, pointer, pointerDepth, primitive,
   typeToString,
 } from '../language/types.js';
 import { MAX_ARRAY_LENGTH, clampArrayLength } from '../language/limits.js';
 import {
-  addAllocation, getAllocation, makeDefaultValue, makeState, pointerCanTarget, ref,
+  addAllocation, addFrame, getAllocation, makeDefaultValue, makeState, pointerCanTarget, ref,
   resolveRef, scalarSubobjects, setRefValue,
 } from '../machine/memory.js';
 
-export default function MemoryCanvas({ state, onChange, editable = false, badIds, onMessage }) {
-  const [layout, setLayout] = useState({ state, positions: {} });
+export default function MemoryCanvas({ state, previousState = null, onChange, editable = false, badIds, onMessage }) {
+  const [history, setHistory] = useState(initialHistory);
+  const historyRef = useRef(history);
+  const dispatch = useCallback(action => {
+    const next = layoutHistory(historyRef.current, action);
+    if (next !== historyRef.current) { historyRef.current = next; setHistory(next); }
+  }, []);
+  const setLayout = useCallback(layout => dispatch({ type: 'set', layout }), [dispatch]);
+  const begin = useCallback(() => dispatch({ type: 'begin' }), [dispatch]);
+  const end = useCallback(() => dispatch({ type: 'end' }), [dispatch]);
   const [showExpired, setShowExpired] = useState(false);
+  const [snap, setSnap] = useState(false);
+  const [menu, setMenu] = useState(null);
+  const [viewportSession, setViewportSession] = useState(0);
   const [flow, setFlow] = useState(null);
   const [measurements, setMeasurements] = useState({});
-  // Discard drags on every semantic state/snapshot transition, including revisits.
-  // Keeping only the current state prevents a previous run's reused IDs leaking in.
-  if (layout.state !== state) setLayout({ state, positions: {} });
-  const positions = layout.state === state ? layout.positions : {};
   const [selectedId, setSelectedId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const { nodes, edges } = useMemo(() => {
-    const result = stateToFlow(state, { positions, editable, badIds: badIds ?? new Set(), showExpired });
+    const result = stateToFlow(state, { ...history.present, editable, badIds: badIds ?? new Set(), showExpired, previousState });
     result.nodes = result.nodes.map(n => ({
       ...n,
       // Preserve React Flow's reported measurements across controlled-node updates.
@@ -36,24 +44,31 @@ export default function MemoryCanvas({ state, onChange, editable = false, badIds
     }));
     result.edges = result.edges.map(e => ({ ...e, selected: e.selectable && e.id === selectedEdgeId }));
     return result;
-  }, [state, positions, measurements, editable, badIds, showExpired, selectedId, selectedEdgeId]);
+  }, [state, previousState, history.present, measurements, editable, badIds, showExpired, selectedId, selectedEdgeId]);
+  const nodesRef = useRef(nodes); nodesRef.current = nodes;
+  useEffect(() => {
+    dispatch({ type: 'sync', layout: captureLayout(historyRef.current.present, nodes) });
+  }, [nodes, dispatch]);
 
-  const mutate = useCallback(fn => { const next = structuredClone(state); fn(next); onChange?.(next); }, [state, onChange]);
+  const mutate = useCallback(fn => { if (!editable) return; const next = structuredClone(state); fn(next); onChange?.(next); }, [state, onChange, editable]);
   const onNodesChange = useCallback(changes => {
+    let currentNodes = nodesRef.current;
     for (const ch of changes) {
-      const node = nodes.find(n => n.id === ch.id);
+      const node = currentNodes.find(n => n.id === ch.id);
       if (ch.type === 'dimensions' && ch.dimensions) setMeasurements(p =>
         p[ch.id]?.width === ch.dimensions.width && p[ch.id]?.height === ch.dimensions.height
           ? p : { ...p, [ch.id]: ch.dimensions });
       if (ch.type === 'position' && ch.position && node?.draggable) {
-        const parent = nodes.find(n => n.id === node.parentId);
-        const position = parent ? clampLocal(ch.position, node.style, parent.style) : ch.position;
-        setLayout(p => ({ state, positions: { ...(p.state === state ? p.positions : {}), [ch.id]: position } }));
+        const next = moveNode(historyRef.current.present, currentNodes, ch.id, ch.position);
+        setLayout(next);
+        currentNodes = currentNodes.map(n => ({ ...n, position: next.positions[n.id] ?? n.position, ...(next.sizes[n.id] ?? {}) }));
+        nodesRef.current = currentNodes;
       }
-      if (ch.type === 'select' && !ch.id.startsWith('frame:')) setSelectedId(ch.selected ? ch.id : null);
-      if (ch.type === 'remove' && node?.deletable) mutate(s => removeAllocation(s, ch.id));
+      if (ch.type === 'select') { setSelectedId(p => ch.selected ? ch.id : p === ch.id ? null : p); if (ch.selected) setSelectedEdgeId(null); }
     }
-  }, [state, nodes, mutate]);
+    const removed = changes.filter(ch => ch.type === 'remove' && currentNodes.find(n => n.id === ch.id)?.deletable);
+    if (removed.length) mutate(s => { for (const ch of removed) removeAllocation(s, ch.id); });
+  }, [mutate, setLayout]);
 
   const onConnect = useCallback(({ source, target, sourceHandle, targetHandle }) => {
     if (!editable || !source || !target || !nodes.find(n => n.id === source)?.data.editable || !nodes.find(n => n.id === target)?.data.editable) return;
@@ -67,44 +82,101 @@ export default function MemoryCanvas({ state, onChange, editable = false, badIds
   }, [editable, state, nodes, mutate, onMessage]);
 
   const onEdgesChange = useCallback(changes => {
+    for (const ch of changes) if (ch.type === 'select') { setSelectedEdgeId(p => ch.selected ? ch.id : p === ch.id ? null : p); if (ch.selected) setSelectedId(null); }
     if (!editable) return;
-    for (const ch of changes) if (ch.type === 'select') setSelectedEdgeId(ch.selected ? ch.id : null);
     const removed = new Set(changes.filter(c => c.type === 'remove' && edges.find(e => e.id === c.id)?.deletable).map(c => c.id));
     if (!removed.size) return;
     mutate(s => { for (const e of edges) if (removed.has(e.id)) setRefValue(s, ref(e.source, pathFromHandle(e.sourceHandle)), { kind: 'uninit' }); });
   }, [editable, edges, mutate]);
 
-  const addBox = storageKind => mutate(s => {
+  const addBox = (storageKind, frameId = 'main', position) => mutate(s => {
+    if (storageKind === 'stack') {
+      const frame = s.frames.find(f => f.id === frameId);
+      if (frame && !frame.active) return;
+      if (!frame) addFrame(s, { id: frameId, name: 'main' });
+    }
     const a = addAllocation(s, {
       name: storageKind === 'stack' ? nextName(s) : null,
-      type: primitive('int'), storage: storageKind === 'stack' ? { kind: 'stack', frameId: 'main' } : { kind: 'heap' },
+      type: primitive('int'), storage: storageKind === 'stack' ? { kind: 'stack', frameId } : { kind: 'heap' },
     });
-    setSelectedId(a.id);
+    if (position) {
+      const layout = captureLayout(historyRef.current.present, nodes);
+      layout.positions[a.id] = { x: Math.max(GEOMETRY.padding, position.x), y: Math.max(GEOMETRY.top, position.y) };
+      dispatch({ type: 'sync', layout });
+    }
+    setSelectedId(a.id); setMenu(null);
   });
   const selected = nodes.find(n => n.id === selectedId && n.data.editable)?.data.allocation ?? null;
+  const selectedNode = nodes.find(n => n.id === selectedId);
+  const selectedFrame = selectedNode?.type === 'frameGroup' ? selectedNode : nodes.find(n => n.id === selectedNode?.parentId);
+  const addFrameId = selectedFrame?.data.editable ? selectedFrame.data.frame.id : 'main';
+  const resetRoute = id => {
+    const layout = { ...historyRef.current.present, routes: { ...historyRef.current.present.routes } };
+    delete layout.routes[id]; setLayout(layout);
+  };
+  const interactiveNodes = nodes.map(n => ({ ...n, className: `${n.className ?? ''}${n.id === selectedFrame?.id ? ' frame-owner-active' : ''}`, data: { ...n.data, onGestureStart: begin, onGestureEnd: end,
+    onResize: (rect, direction) => setLayout(resizeFrame(historyRef.current.present, nodesRef.current, n.id, rect, direction)),
+    onFit: () => setLayout({ ...historyRef.current.present, sizes: { ...historyRef.current.present.sizes, [n.id]: contentSize(nodes, n.id) } }),
+    onAdd: () => addBox('stack', n.data.frame?.id),
+  } }));
+  const interactiveEdges = edges.map(e => ({ ...e, data: { ...e.data, onGestureStart: begin, onGestureEnd: end,
+    onBend: offset => setLayout({ ...historyRef.current.present, routes: { ...historyRef.current.present.routes, [e.id]: offset } }),
+    onReset: () => resetRoute(e.id),
+  } }));
+  const contextMenu = (event, node) => {
+    if (!node.data.frame || !node.data.editable) return;
+    event.preventDefault();
+    const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const bounds = event.currentTarget.closest('.canvas-wrap').getBoundingClientRect();
+    setSelectedId(node.id); setSelectedEdgeId(null);
+    setMenu({ frameId: node.data.frame.id, x: Math.min(event.clientX - bounds.left, bounds.width - 180), y: Math.min(event.clientY - bounds.top, bounds.height - 45),
+      position: { x: point.x - node.position.x, y: point.y - node.position.y } });
+  };
 
   return (
-    <div className="canvas-wrap">
+    <div className="canvas-wrap" onKeyDown={event => {
+      if (event.target.closest('input, textarea, select, [contenteditable=true]')) return;
+      if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) {
+        event.preventDefault(); event.stopPropagation();
+        dispatch({ type: event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo' });
+      }
+      if (event.key === 'Escape') setMenu(null);
+    }}>
       <div className="canvas-toolbar">
-        <button className="plain-btn" onClick={() => { setLayout({ state, positions: {} }); requestAnimationFrame(() => flow?.fitView({ padding: .15, maxZoom: 1 })); }}>Reset layout</button>
-        <label className="history-toggle"><input type="checkbox" checked={showExpired} onChange={e => { setShowExpired(e.target.checked); setLayout({ state, positions: {} }); }} />Show expired</label>
+        <button className="plain-btn" onClick={() => flow?.fitView({ padding: .15, maxZoom: 1 })}>Fit view</button>
+        <button className="plain-btn" onClick={() => setLayout(emptyLayout())}>Reset layout</button>
+        <button className="plain-btn" disabled={!history.past.length} onClick={() => dispatch({ type: 'undo' })} title="Undo layout (Ctrl+Z)">Undo</button>
+        <button className="plain-btn" disabled={!history.future.length} onClick={() => dispatch({ type: 'redo' })} title="Redo layout (Ctrl+Shift+Z)">Redo</button>
+        <label className="history-toggle"><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} />Snap</label>
+        <label className="history-toggle"><input type="checkbox" checked={showExpired} onChange={e => setShowExpired(e.target.checked)} />Show expired</label>
       </div>
       {editable && <div className="canvas-edit-toolbar">
-        <button className="plain-btn" onClick={() => addBox('stack')}>Add stack object</button>
+        <button className="plain-btn" onClick={() => addBox('stack', addFrameId)}>Add stack object</button>
         <button className="plain-btn" onClick={() => addBox('heap')}>Add heap allocation</button>
-        {state.allocations.length > 0 && <button className="plain-btn danger" onClick={() => onChange?.(makeState(state.structTypes))}>Clear</button>}
+        {state.allocations.length > 0 && <button className="plain-btn danger" onClick={() => { dispatch({ type: 'clear' }); setViewportSession(s => s + 1); setSelectedId(null); setSelectedEdgeId(null); setMenu(null); onChange?.(makeState(state.structTypes)); }}>Clear</button>}
       </div>}
       <ReactFlow
-        nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} colorMode="dark"
+        nodes={interactiveNodes} edges={interactiveEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} colorMode="dark"
         onInit={setFlow} elevateNodesOnSelect={false} elevateEdgesOnSelect={false}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+        onReconnect={(_, connection) => onConnect(connection)} edgesReconnectable={editable}
+        onNodeDragStart={begin} onNodeDragStop={end} onSelectionDragStart={begin} onSelectionDragStop={end}
+        onNodeContextMenu={contextMenu} onPaneClick={() => { setMenu(null); setSelectedId(null); setSelectedEdgeId(null); }}
+        onMoveStart={() => setMenu(null)} snapToGrid={snap} snapGrid={[24, 24]}
         nodesConnectable={editable} deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
         fitView fitViewOptions={{ padding: .15, maxZoom: 1 }} minZoom={.1} proOptions={{ hideAttribution: true }}
       >
-        <CanvasViewport state={state} showExpired={showExpired} />
+        <CanvasViewport key={viewportSession} />
         <Background color="#30363d" gap={24} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
+      {menu && <div className="canvas-context-menu" style={{ left: menu.x, top: menu.y }}>
+        <button className="plain-btn" onClick={() => addBox('stack', menu.frameId, menu.position)}>Add variable here</button>
+      </div>}
+      {selectedEdgeId && edges.some(e => e.id === selectedEdgeId) && <div className="edge-tools">
+        <span>Drag the diamond to bend{editable ? ' · Drag the arrowhead to reconnect' : ''}</span>
+        <button className="plain-btn" onClick={() => resetRoute(selectedEdgeId)}>Reset route</button>
+      </div>}
       {editable && selected && <Inspector
         allocation={selected} state={state}
         onEdit={fn => mutate(s => fn(getAllocation(s, selected.id), s))}
@@ -114,14 +186,15 @@ export default function MemoryCanvas({ state, onChange, editable = false, badIds
   );
 }
 
-function CanvasViewport({ state, showExpired }) {
+function CanvasViewport() {
   const initialized = useNodesInitialized();
+  const fitted = useRef(false);
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (!initialized) return;
-    const frame = requestAnimationFrame(() => fitView({ padding: .15, maxZoom: 1 }));
+    if (!initialized || fitted.current) return;
+    const frame = requestAnimationFrame(() => { fitView({ padding: .15, maxZoom: 1 }); fitted.current = true; });
     return () => cancelAnimationFrame(frame);
-  }, [state, showExpired, initialized, fitView]);
+  }, [initialized, fitView]);
   return null;
 }
 

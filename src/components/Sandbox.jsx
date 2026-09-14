@@ -1,29 +1,37 @@
 /** Bidirectional code/memory sandbox. */
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { highlightC } from '../language/highlight.js';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../pipeline/ir.js';
 
-const STARTER = `struct Node {
+const STARTER = `typedef struct Node {
     int value;
     struct Node *next;
-};
+} Node;
 
-void set_value(struct Node *node, int value) {
+void set_value(Node *node, int value) {
     node->value = value;
 }
 
 int main(void) {
-    struct Node a = {10, NULL};
-    set_value(&a, 20);
+    Node a = {10, NULL};
+    Node *b = &a;
+    set_value(b, 20);
     return 0;
 }
 `;
 
 /** Reusable textarea. Tab inserts four spaces instead of moving browser focus. */
-export function CodePanel({ code, onCode, readOnly }) {
-  const lines = code.split('\n').length;
+export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
+  const lines = useMemo(() => highlightC(code), [code]);
+  const wrap = useRef(null);
+  useEffect(() => {
+    if (!activeLine || !wrap.current) return;
+    const el = wrap.current, top = 12 + (activeLine - 1) * 20.8;
+    if (top < el.scrollTop || top + 21 > el.scrollTop + el.clientHeight) el.scrollTop = Math.max(0, top - el.clientHeight / 2);
+  }, [activeLine]);
   const onKeyDown = e => {
     if (readOnly || e.key !== 'Tab' || !onCode) return;
     e.preventDefault();
@@ -41,10 +49,13 @@ export function CodePanel({ code, onCode, readOnly }) {
     onCode(code.slice(0, start) + indent + code.slice(end));
     requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + indent.length; });
   };
-  return <div className="code-wrap">
-    <div className="gutter">{Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</div>
-    <textarea className="code-input" spellCheck={false} value={code} readOnly={readOnly}
+  return <div className="code-wrap" ref={wrap}>
+    <div className="gutter" aria-hidden="true">{lines.map((_, i) => <div key={i} className={i + 1 === activeLine ? 'next-line-number' : ''}>{i + 1}</div>)}</div>
+    <div className="code-body">
+    <pre className="code-highlight" aria-hidden="true">{lines.map((tokens, i) => <div key={i} className={`code-line${i + 1 === activeLine ? ' next-line' : ''}`}>{tokens.length ? tokens.map((t, j) => <span key={j} className={`syntax-${t.kind}`}>{t.text}</span>) : '\u200b'}</div>)}</pre>
+    <textarea className="code-input" aria-label="C source code" wrap="off" spellCheck={false} value={code} readOnly={readOnly}
       placeholder="int main(void) { ... }" onChange={e => onCode?.(e.target.value)} onKeyDown={onKeyDown} />
+    </div>
   </div>;
 }
 
@@ -54,17 +65,20 @@ export default function Sandbox() {
   const [snapshots, setSnapshots] = useState(null);
   const [step, setStep] = useState(0);
   const [messages, setMessages] = useState([]);
+  const [canvasSession, setCanvasSession] = useState(0);
+  const [savedPlayback, setSavedPlayback] = useState(null);
   const say = m => setMessages(prev => [...prev.slice(-4), m]);
 
   const codeToDiagram = () => {
     try {
       const result = interpret(code);
-      setState(result.state); setSnapshots(result.snapshots); setStep(result.snapshots.length);
-      say({ kind: 'ok', text: `Run complete: ${result.snapshots.length} execution step${result.snapshots.length === 1 ? '' : 's'}.` });
+      setCanvasSession(s => s + 1); setSavedPlayback(null);
+      setState(result.state); setSnapshots(result.snapshots); setStep(0);
+      say({ kind: 'ok', text: `Ready: ${result.snapshots.length} execution steps. Select Next to begin. Yellow marks the next line and new or changed memory.` });
     } catch (e) { say({ kind: 'err', text: e.message }); }
   };
   const diagramToCode = () => {
-    try { setCode(generate(state)); say({ kind: 'ok', text: 'Generated C from the current memory state.' }); }
+    try { setCode(generate(state)); setSnapshots(null); setSavedPlayback(null); say({ kind: 'ok', text: 'Generated C from the current memory state.' }); }
     catch (e) { if (e instanceof ValidationError) e.errors.forEach(text => say({ kind: 'err', text })); else say({ kind: 'err', text: e.message }); }
   };
   const onDiagramEdit = next => {
@@ -73,17 +87,32 @@ export default function Sandbox() {
   };
   const shownState = snapshots && step > 0 && step <= snapshots.length ? snapshots[step - 1].state : snapshots && step === 0 ? makeState(state.structTypes) : state;
   const shownSnapshot = snapshots && step > 0 ? snapshots[step - 1] : null;
+  const nextLine = snapshots ? (step === 0 ? snapshots[0]?.line : shownSnapshot?.nextLine) : null;
+  const previousState = snapshots && step > 0 ? (step > 1 ? snapshots[step - 2].state : makeState(state.structTypes)) : null;
+  const editSnapshot = () => {
+    setSavedPlayback({ state, snapshots, step });
+    setState(structuredClone(shownState)); setSnapshots(null);
+    say({ kind: 'ok', text: 'Editing a copy of this snapshot. Return to playback restores the recorded execution. C generation currently supports only a single main() frame.' });
+  };
+  const returnToPlayback = () => {
+    setState(savedPlayback.state); setSnapshots(savedPlayback.snapshots); setStep(savedPlayback.step); setSavedPlayback(null);
+  };
 
   return <>
     <div className="workbench">
-      <section className="panel" aria-label="C code"><div className="panel-head">C code</div><CodePanel code={code} onCode={setCode} /></section>
+      <section className="panel" aria-label="C code"><div className="panel-head">C code{snapshots && <span className="panel-context">{nextLine ? `Next: line ${nextLine}` : 'Execution complete'}</span>}</div><CodePanel code={code} onCode={value => { setCode(value); setSnapshots(null); setSavedPlayback(null); }} activeLine={nextLine} /></section>
       <div className="spine" role="group" aria-label="convert">
         <button className="convert-btn" title="Run C and show memory" onClick={codeToDiagram}>Run →</button>
         <button className="convert-btn" title="Generate C from memory" onClick={diagramToCode}>← Generate</button>
       </div>
       <section className="panel" aria-label="memory diagram">
-        <div className="panel-head">Memory{shownSnapshot && <span className="panel-context">{shownSnapshot.function}(), line {shownSnapshot.line}</span>}</div>
-        <MemoryCanvas state={shownState} onChange={onDiagramEdit} editable={!snapshots || step === snapshots.length} onMessage={say} />
+        <div className="panel-head">Memory{shownSnapshot && <span className="panel-context">{shownSnapshot.function}(), line {shownSnapshot.line}</span>}
+          <div className="snapshot-actions">
+            {snapshots && step > 0 && <button className="plain-btn" onClick={editSnapshot}>Edit this snapshot</button>}
+            {savedPlayback && <button className="plain-btn" onClick={returnToPlayback}>Return to playback</button>}
+          </div>
+        </div>
+        <MemoryCanvas key={canvasSession} state={shownState} previousState={previousState} onChange={onDiagramEdit} editable={!snapshots} onMessage={say} />
         {snapshots?.length > 0 && <div className="stepper">
           <button className="step-btn" disabled={step <= 0} onClick={() => setStep(s => s - 1)}>Previous</button>
           <input type="range" min={0} max={snapshots.length} value={step} onChange={e => setStep(Number(e.target.value))} aria-label="execution step" />

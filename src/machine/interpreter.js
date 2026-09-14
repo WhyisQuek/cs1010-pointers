@@ -7,10 +7,13 @@
  * Executed statements emit trace events and snapshots for step-through playback.
  */
 import {
-  CHAR, INT, isArray, isPointer, isPrimitive, isStruct, pointer, resolveStructType,
+  INT, alignmentOf, isArray, isPointer, isPrimitive, isStruct, pointer, resolveStructType,
   sizeOf, typeEquals, typeToString,
 } from '../language/types.js';
 import { MAX_CALL_DEPTH, MAX_HEAP_ELEMENTS, MAX_LOOP_ITERATIONS, MAX_TRACE_STEPS } from '../language/limits.js';
+import { SIZE_T, arithmeticType, convertNumber, isFloatingType, isIntegerType, numericOperation, promote } from '../language/numeric.js';
+import { checkProgram } from '../language/checker.js';
+import { decodeCharLiteral } from '../language/literals.js';
 import {
   addAllocation, addFrame, cloneState, decayRef, endFrame, freshFrameId, getAllocation,
   heapAllocationType, makeState, pointerValue, ref, refType, resetAllocationIds,
@@ -20,6 +23,7 @@ import {
 export function executeProgram(program) {
   resetAllocationIds();
   const normalized = normalizeProgram(program);
+  checkProgram(normalized);
   const structTypes = Object.fromEntries((normalized.structs ?? []).map(s => [s.name, structuredClone(s)]));
   const state = makeState(structTypes);
   const ctx = {
@@ -29,6 +33,8 @@ export function executeProgram(program) {
     trace: [],
     callDepth: 0,
     steps: 0,
+    snapshotTraceIndex: 0,
+    accesses: [],
   };
   if (!ctx.functions.has('main')) throw new Error('no main() function found');
   callFunction(ctx, ctx.functions.get('main'), [], null, true);
@@ -64,12 +70,11 @@ function callFunction(ctx, fn, args, callerFrame, entry = false) {
     assignToRef(ref(allocation.id), param.type, args[i], ctx, param);
     pushTrace(ctx, { kind: 'Parameter', frameId, name: param.name, allocationId: allocation.id, line: param.loc?.startLine ?? null });
   }
+  snapshot(ctx, { kind: 'EnterFrame', loc: { startLine: fn.loc?.startLine } }, frame);
 
   let returnValue = null;
   for (const stmt of fn.statements) {
-    const eventStart = ctx.trace.length;
-    const result = execStatement(stmt, ctx, env, frame, fn, 0);
-    snapshot(ctx, stmt, frame, eventStart);
+    const result = execEmbeddedStatement(stmt, ctx, env, frame, fn, 0);
     if (result?.control === 'return') { returnValue = result.value; break; }
     if (result?.control === 'break' || result?.control === 'continue') {
       throw semanticError(stmt, `${result.control} used outside a loop`);
@@ -77,8 +82,10 @@ function callFunction(ctx, fn, args, callerFrame, entry = false) {
   }
 
   if (!entry) {
+    markNext(ctx, { loc: { startLine: fn.loc?.endLine } }, frame);
     endFrame(ctx.state, frameId);
     pushTrace(ctx, { kind: 'LeaveFrame', frameId, function: fn.name });
+    snapshot(ctx, { kind: 'LeaveFrame', loc: { startLine: fn.loc?.endLine } }, frame);
   }
   ctx.callDepth--;
 
@@ -141,16 +148,19 @@ function execBlock(stmt, ctx, parentEnv, frame, fn, loopDepth) {
     }
     return null;
   } finally {
+    if (local.ownedAllocations.some(id => getAllocation(ctx.state, id).alive)) markNext(ctx, { loc: { startLine: stmt.loc?.endLine } }, frame);
     closeScope(ctx, local, frame);
   }
 }
 
 function execIf(stmt, ctx, env, frame, fn, loopDepth) {
+  markNext(ctx, stmt.condition, frame);
   const condition = evalCondition(stmt.condition, ctx, env, frame);
   pushTrace(ctx, {
     kind: 'Condition', statement: 'if', result: condition,
     frameId: frame.id, line: stmt.condition.loc?.startLine ?? stmt.loc?.startLine ?? null,
   });
+  snapshot(ctx, { kind: 'IfCondition', loc: stmt.condition.loc ?? stmt.loc }, frame);
   const branch = condition ? stmt.consequence : stmt.alternative;
   if (!branch) return null;
   return execEmbeddedStatement(branch, ctx, env, frame, fn, loopDepth);
@@ -159,11 +169,13 @@ function execIf(stmt, ctx, env, frame, fn, loopDepth) {
 function execWhile(stmt, ctx, env, frame, fn, loopDepth) {
   let iterations = 0;
   while (true) {
+    markNext(ctx, stmt.condition, frame);
     const condition = evalCondition(stmt.condition, ctx, env, frame);
     pushTrace(ctx, {
       kind: 'Condition', statement: 'while', result: condition, iteration: iterations,
       frameId: frame.id, line: stmt.condition.loc?.startLine ?? stmt.loc?.startLine ?? null,
     });
+    snapshot(ctx, { kind: 'WhileCondition', loc: stmt.condition.loc ?? stmt.loc }, frame);
     if (!condition) return null;
     guardLoopIteration(++iterations, stmt);
     pushTrace(ctx, { kind: 'LoopIteration', statement: 'while', iteration: iterations, frameId: frame.id, line: stmt.loc?.startLine ?? null });
@@ -186,11 +198,13 @@ function execFor(stmt, ctx, parentEnv, frame, fn, loopDepth) {
 
     let iterations = 0;
     while (true) {
+      markNext(ctx, stmt.condition ?? stmt, frame);
       const condition = stmt.condition ? evalCondition(stmt.condition, ctx, loopEnv, frame) : true;
       pushTrace(ctx, {
         kind: 'Condition', statement: 'for', result: condition, iteration: iterations,
         frameId: frame.id, line: stmt.condition?.loc?.startLine ?? stmt.loc?.startLine ?? null,
       });
+      snapshot(ctx, { kind: 'ForCondition', loc: stmt.condition?.loc ?? stmt.loc }, frame);
       if (!condition) return null;
       guardLoopIteration(++iterations, stmt);
       pushTrace(ctx, { kind: 'LoopIteration', statement: 'for', iteration: iterations, frameId: frame.id, line: stmt.loc?.startLine ?? null });
@@ -201,22 +215,29 @@ function execFor(stmt, ctx, parentEnv, frame, fn, loopDepth) {
 
       // In C, continue in a for loop still executes the update expression.
       if (stmt.update) {
-        const start = ctx.trace.length;
+        markNext(ctx, stmt.update, frame);
         evalExpression(stmt.update, ctx, loopEnv, frame, null);
-        snapshot(ctx, { kind: 'ForUpdate', loc: stmt.update.loc ?? stmt.loc }, frame, start);
+        snapshot(ctx, { kind: 'ForUpdate', loc: stmt.update.loc ?? stmt.loc }, frame);
       }
     }
   } finally {
+    if (loopEnv.ownedAllocations.some(id => getAllocation(ctx.state, id).alive)) markNext(ctx, { loc: { startLine: stmt.loc?.endLine } }, frame);
     closeScope(ctx, loopEnv, frame);
   }
 }
 
 function execEmbeddedStatement(stmt, ctx, env, frame, fn, loopDepth) {
-  const start = ctx.trace.length;
+  if (stmt.kind === 'Empty') return null;
+  const compound = ['Block', 'If', 'While', 'For'].includes(stmt.kind);
+  if (!compound) markNext(ctx, stmt, frame);
+  const count = ctx.snapshots.length;
   const result = execStatement(stmt, ctx, env, frame, fn, loopDepth);
-  // Blocks snapshot their executed children. Other embedded statements need an
-  // explicit snapshot because they are not visited by callFunction()/execBlock().
-  if (stmt.kind !== 'Block') snapshot(ctx, stmt, frame, start);
+  // Conditions and children emit their own snapshots. Only unrecorded actions
+  // (including scope cleanup) need another one; never repeat a call's events.
+  const pending = ctx.trace.slice(ctx.snapshotTraceIndex);
+  if ((!compound && (count === ctx.snapshots.length || pending.length)) || (compound && pending.some(e => e.kind === 'EndLifetime'))) {
+    snapshot(ctx, compound ? { kind: 'EndScope', loc: { startLine: stmt.loc?.endLine } } : stmt, frame);
+  }
   return result;
 }
 
@@ -245,24 +266,30 @@ function initializeAggregate(targetRef, type, initializer, ctx, env, frame, node
     }
     throw semanticError(node, `${typeToString(type)} initialization currently requires { ... }`);
   }
-  if (isArray(type)) {
-    if (initializer.elements.length > type.length) throw semanticError(node, `too many initializers for ${typeToString(type)}`);
-    for (let i = 0; i < type.length; i++) {
-      const elemRef = ref(targetRef.allocationId, [...targetRef.path, i]);
-      if (i >= initializer.elements.length) { zeroInitialize(elemRef, type.of, ctx); continue; }
-      if (isArray(type.of) || isStruct(type.of)) initializeAggregate(elemRef, type.of, initializer.elements[i], ctx, env, frame, node);
-      else assignToRef(elemRef, type.of, evalExpression(initializer.elements[i], ctx, env, frame, type.of), ctx, node);
-    }
-    return;
-  }
-  if (isStruct(type)) {
-    const def = resolveStructType(type, ctx.state.structTypes);
-    if (initializer.elements.length > def.fields.length) throw semanticError(node, `too many initializers for struct ${type.name}`);
-    for (let i = 0; i < def.fields.length; i++) {
-      const field = def.fields[i], fieldRef = ref(targetRef.allocationId, [...targetRef.path, field.name]);
-      if (i >= initializer.elements.length) { zeroInitialize(fieldRef, field.type, ctx); continue; }
-      if (isArray(field.type) || isStruct(field.type)) initializeAggregate(fieldRef, field.type, initializer.elements[i], ctx, env, frame, node);
-      else assignToRef(fieldRef, field.type, evalExpression(initializer.elements[i], ctx, env, frame, field.type), ctx, node);
+  const cursor = { index: 0 };
+  initializeMembers(targetRef, type, initializer.elements, cursor, ctx, env, frame, node);
+  if (cursor.index < initializer.elements.length) throw semanticError(node, `too many initializers for ${typeToString(type)}`);
+}
+
+function initializeMembers(targetRef, type, elements, cursor, ctx, env, frame, node) {
+  const members = isArray(type)
+    ? Array.from({ length: type.length }, (_, i) => ({ name: i, type: type.of }))
+    : resolveStructType(type, ctx.state.structTypes).fields;
+  for (const member of members) {
+    const childRef = ref(targetRef.allocationId, [...targetRef.path, member.name]);
+    if (cursor.index >= elements.length) { zeroInitialize(childRef, member.type, ctx); continue; }
+    const child = elements[cursor.index];
+    if (isArray(member.type) || isStruct(member.type)) {
+      if (child.kind === 'InitializerList') {
+        cursor.index++;
+        initializeAggregate(childRef, member.type, child, ctx, env, frame, node);
+      } else if (isStruct(member.type) && typeEquals(member.type, inferExpressionType(child, ctx, env, frame))) {
+        cursor.index++;
+        assignToRef(childRef, member.type, evalExpression(child, ctx, env, frame, member.type), ctx, node);
+      } else initializeMembers(childRef, member.type, elements, cursor, ctx, env, frame, node);
+    } else {
+      cursor.index++;
+      assignToRef(childRef, member.type, evalExpression(child, ctx, env, frame, member.type), ctx, node);
     }
   }
 }
@@ -281,12 +308,27 @@ function zeroInitialize(targetRef, type, ctx) {
 }
 
 function evalExpression(expr, ctx, env, frame, expectedType = null) {
+  const result = evaluateExpression(expr, ctx, env, frame, expectedType);
+  result.integerConstant = isIntegerType(result.type) && isConstantExpression(expr);
+  return result;
+}
+
+function isConstantExpression(expr) {
+  if (['IntLiteral', 'CharLiteral', 'SizeofType', 'SizeofExpression', 'NullLiteral'].includes(expr.kind)) return true;
+  if (expr.kind === 'Identifier') return expr.name === 'NULL';
+  if (expr.kind === 'Unary') return isConstantExpression(expr.expression);
+  if (expr.kind === 'Binary') return isConstantExpression(expr.left) && isConstantExpression(expr.right);
+  return false;
+}
+
+function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
   switch (expr.kind) {
-    case 'IntLiteral': return { type: INT, value: { kind: 'scalar', value: expr.value } };
-    case 'CharLiteral': return { type: CHAR, value: { kind: 'scalar', value: decodeCharLiteral(expr.raw) } };
-    case 'NullLiteral': return { type: { kind: 'null-pointer-constant' }, value: { kind: 'null' } };
+    case 'IntLiteral':
+    case 'FloatLiteral': return { type: expr.type ?? INT, value: { kind: 'scalar', value: expr.value } };
+    case 'CharLiteral': return { type: INT, value: { kind: 'scalar', value: decodeCharLiteral(expr.raw) } };
+    case 'NullLiteral': return intResult(0);
     case 'Identifier': {
-      if (expr.name === 'NULL') return { type: { kind: 'null-pointer-constant' }, value: { kind: 'null' } };
+      if (expr.name === 'NULL') return intResult(0);
       const lv = evalLValue(expr, ctx, env, frame);
       if (isArray(lv.type)) {
         const allocation = getAllocation(ctx.state, lv.ref.allocationId);
@@ -297,23 +339,51 @@ function evalExpression(expr, ctx, env, frame, expectedType = null) {
       return loadLValue(lv, ctx, expr);
     }
     case 'AddressOf': {
+      // C 6.5.3.2: &*E cancels the dereference; &a[n] permits a one-past address.
+      if (expr.expression.kind === 'Dereference') {
+        const rv = evalExpression(expr.expression.expression, ctx, env, frame);
+        if (!isPointer(rv.type)) throw semanticError(expr, 'address/dereference requires a pointer');
+        return rv;
+      }
+      if (expr.expression.kind === 'Subscript') return evalSubscriptPointer(expr.expression, ctx, env, frame);
       const lv = evalLValue(expr.expression, ctx, env, frame);
       return { type: pointer(lv.type), value: pointerValue(lv.ref) };
     }
     case 'Dereference':
     case 'Subscript':
-    case 'Member': return loadLValue(evalLValue(expr, ctx, env, frame), ctx, expr);
+      return loadLValue(evalLValue(expr, ctx, env, frame), ctx, expr);
+    case 'Member': {
+      if (!expr.viaPointer && !isLValueExpression(expr.object)) {
+        const object = evalExpression(expr.object, ctx, env, frame);
+        const type = inferExpressionType(expr, ctx, env, frame);
+        if (isArray(type)) throw semanticError(expr, 'array members of temporary structs are not supported');
+        const value = object.value.fields?.[expr.field];
+        if (!value || value.kind === 'uninit') throw semanticError(expr, 'read of uninitialized struct member');
+        return { type, value: structuredClone(value) };
+      }
+      return loadLValue(evalLValue(expr, ctx, env, frame), ctx, expr);
+    }
     case 'Assignment': {
+      const lhsStart = ctx.accesses.length;
       const lhs = evalLValue(expr.left, ctx, env, frame);
+      const lhsAccesses = ctx.accesses.slice(lhsStart);
       if (isArray(lhs.type)) throw semanticError(expr, 'arrays are not assignable');
       if (expr.operator === '=') {
+        const rhsStart = ctx.accesses.length;
         const rhs = evalExpression(expr.right, ctx, env, frame, lhs.type);
+        const rhsAccesses = ctx.accesses.slice(rhsStart);
+        checkUnsequenced(lhsAccesses, rhsAccesses, ctx, expr);
+        if (rhsAccesses.some(a => a.depth === ctx.callDepth && a.update && sameRefValue(a.ref, lhs.ref))) throw semanticError(expr, 'unsequenced modifications of the assignment target');
         const value = assignToRef(lhs.ref, lhs.type, rhs, ctx, expr);
         return { type: lhs.type, value };
       }
       if (['+=', '-=', '*=', '/=', '%='].includes(expr.operator)) {
+        const currentStart = ctx.accesses.length;
         const current = loadLValue(lhs, ctx, expr);
+        const currentAccesses = [...lhsAccesses, ...ctx.accesses.slice(currentStart)];
+        const rhsStart = ctx.accesses.length;
         const rhs = evalExpression(expr.right, ctx, env, frame, null);
+        checkUnsequenced(currentAccesses, ctx.accesses.slice(rhsStart), ctx, expr);
         const result = evalCompoundAssignment(expr.operator, current, rhs, ctx, expr);
         const value = assignToRef(lhs.ref, lhs.type, result, ctx, expr);
         return { type: lhs.type, value };
@@ -326,8 +396,10 @@ function evalExpression(expr, ctx, env, frame, expectedType = null) {
         const rv = evalExpression(expr.expression, ctx, env, frame, null);
         return { type: INT, value: { kind: 'scalar', value: truthy(rv, expr) ? 0 : 1 } };
       }
-      const rv = evalExpression(expr.expression, ctx, env, frame, INT); requireInteger(rv, expr);
-      return { type: INT, value: { kind: 'scalar', value: expr.operator === '-' ? -rv.value.value : rv.value.value } };
+      const rv = evalExpression(expr.expression, ctx, env, frame, null); requireNumber(rv, expr);
+      const type = promote(rv.type);
+      const value = expr.operator === '-' ? -rv.value.value : rv.value.value;
+      return { type, value: { kind: 'scalar', value: convertNumber(value, type, { arithmetic: true }) } };
     }
     case 'Update': {
       const lv = evalLValue(expr.expression, ctx, env, frame);
@@ -337,18 +409,26 @@ function evalExpression(expr, ctx, env, frame, expectedType = null) {
         if (current.value.kind !== 'pointer') throw semanticError(expr, 'pointer update requires a concrete pointer');
         next = { type: current.type, value: addToPointer(ctx.state, current.value, expr.operator === '++' ? 1 : -1, expr) };
       } else {
-        requireInteger(current, expr);
-        next = { type: current.type, value: { kind: 'scalar', value: current.value.value + (expr.operator === '++' ? 1 : -1) } };
+        requireNumber(current, expr);
+        next = numericOperation(expr.operator === '++' ? '+' : '-', current, intResult(1));
       }
-      assignToRef(lv.ref, lv.type, next, ctx, expr);
-      return expr.prefix ? next : current;
+      const value = assignToRef(lv.ref, lv.type, next, ctx, expr);
+      ctx.accesses.at(-1).update = true;
+      return expr.prefix ? { type: lv.type, value } : current;
     }
     case 'Binary': return evalBinary(expr, ctx, env, frame);
-    case 'SizeofType': return { type: INT, value: { kind: 'scalar', value: sizeOf(expr.type, ctx.state.structTypes) } };
-    case 'SizeofExpression': return { type: INT, value: { kind: 'scalar', value: sizeOf(inferExpressionType(expr.expression, ctx, env, frame), ctx.state.structTypes) } };
-    case 'InitializerList': throw semanticError(expr, 'initializer list is only valid in an aggregate declaration');
+    case 'SizeofType': return { type: SIZE_T, value: { kind: 'scalar', value: sizeOf(expr.type, ctx.state.structTypes) } };
+    case 'SizeofExpression': return { type: SIZE_T, value: { kind: 'scalar', value: sizeOf(inferExpressionType(expr.expression, ctx, env, frame), ctx.state.structTypes) } };
+    case 'InitializerList': {
+      if (!expectedType || expr.elements.length !== 1) throw semanticError(expr, 'scalar initializer requires exactly one element');
+      return evalExpression(expr.elements[0], ctx, env, frame, expectedType);
+    }
     default: throw semanticError(expr, `unsupported expression ${expr.kind}`);
   }
+}
+
+function isLValueExpression(expr) {
+  return ['Identifier', 'Dereference', 'Subscript'].includes(expr.kind) || expr.kind === 'Member' && (expr.viaPointer || isLValueExpression(expr.object));
 }
 
 function evalLValue(expr, ctx, env, frame) {
@@ -367,13 +447,10 @@ function evalLValue(expr, ctx, env, frame) {
     return { ref: rv.value.target, type: resolved.type };
   }
   if (expr.kind === 'Subscript') {
-    const base = evalExpression(expr.array, ctx, env, frame, null);
-    const index = evalExpression(expr.index, ctx, env, frame, INT); requireInteger(index, expr.index);
-    if (!isPointer(base.type) || base.value.kind !== 'pointer') throw semanticError(expr, 'subscript requires an array or concrete pointer');
-    const advanced = addToPointer(ctx.state, base.value, index.value.value, expr);
-    const resolved = resolveRef(ctx.state, advanced.target);
+    const advanced = evalSubscriptPointer(expr, ctx, env, frame);
+    const resolved = resolveRef(ctx.state, advanced.value.target);
     if (!resolved.allocation.alive || resolved.onePast || resolved.invalid) throw semanticError(expr, 'subscript outside live object bounds');
-    return { ref: advanced.target, type: base.type.to };
+    return { ref: advanced.value.target, type: advanced.type.to };
   }
   if (expr.kind === 'Member') {
     let baseRef, baseType;
@@ -383,6 +460,7 @@ function evalLValue(expr, ctx, env, frame) {
       if (rv.value.kind !== 'pointer') throw semanticError(expr, "'->' requires a concrete pointer");
       const resolved = resolveRef(ctx.state, rv.value.target);
       if (!resolved.allocation.alive) throw semanticError(expr, "'->' through dangling pointer");
+      if (resolved.onePast || resolved.invalid) throw semanticError(expr, "'->' outside object bounds");
       baseRef = rv.value.target; baseType = rv.type.to;
     } else {
       const lv = evalLValue(expr.object, ctx, env, frame);
@@ -397,17 +475,35 @@ function evalLValue(expr, ctx, env, frame) {
   throw semanticError(expr, 'expression is not assignable');
 }
 
+function evalSubscriptPointer(expr, ctx, env, frame) {
+  const start = ctx.accesses.length;
+  let base = evalExpression(expr.array, ctx, env, frame);
+  const baseAccesses = ctx.accesses.slice(start), indexStart = ctx.accesses.length;
+  let index = evalExpression(expr.index, ctx, env, frame);
+  checkUnsequenced(baseAccesses, ctx.accesses.slice(indexStart), ctx, expr);
+  if (isIntegerRuntime(base) && isPointer(index.type)) [base, index] = [index, base];
+  requireInteger(index, expr);
+  if (!isPointer(base.type) || base.value.kind !== 'pointer') throw semanticError(expr, 'subscript requires an array or concrete pointer');
+  return { type: base.type, value: addToPointer(ctx.state, base.value, index.value.value, expr) };
+}
+
 function loadLValue(lvalue, ctx, node) {
   const resolved = resolveRef(ctx.state, lvalue.ref, { allowDead: true });
   if (!resolved.allocation.alive) throw semanticError(node, `read from object whose lifetime has ended`);
   if (resolved.onePast || resolved.invalid) throw semanticError(node, 'read outside object bounds');
+  if (isArray(lvalue.type)) return { type: pointer(lvalue.type.of), value: pointerValue(ref(lvalue.ref.allocationId, [...lvalue.ref.path, 0])) };
   if (resolved.value.kind === 'uninit') throw semanticError(node, `read of uninitialized ${resolved.label}`);
+  if (resolved.value.kind === 'pointer' && !ctx.allowDanglingRead && !getAllocation(ctx.state, resolved.value.target.allocationId).alive) {
+    throw semanticError(node, 'use of dangling pointer whose target lifetime has ended');
+  }
+  ctx.accesses.push({ ref: lvalue.ref, write: false, depth: ctx.callDepth });
   return { type: lvalue.type, value: structuredClone(resolved.value) };
 }
 
 function assignToRef(targetRef, targetType, rv, ctx, node) {
   const value = coerceRValue(targetType, rv, node).value;
   setRefValue(ctx.state, targetRef, value);
+  ctx.accesses.push({ ref: targetRef, write: true, depth: ctx.callDepth });
   pushTrace(ctx, { kind: 'Write', target: structuredClone(targetRef), type: targetType, value: structuredClone(value), line: node.loc?.startLine ?? null });
   return structuredClone(value);
 }
@@ -415,10 +511,11 @@ function assignToRef(targetRef, targetType, rv, ctx, node) {
 function coerceRValue(targetType, rv, node) {
   if (isPrimitive(targetType)) {
     if (!isPrimitive(rv.type) || rv.value.kind !== 'scalar') throw semanticError(node, `cannot assign ${typeToString(rv.type)} to ${typeToString(targetType)}`);
-    return { type: targetType, value: { kind: 'scalar', value: rv.value.value } };
+    return { type: targetType, value: { kind: 'scalar', value: convertNumber(rv.value.value, targetType, { fromFloat: isFloatingType(rv.type) }) } };
   }
   if (isPointer(targetType)) {
-    if (rv.value.kind === 'null' || (isIntegerRuntime(rv) && rv.value.value === 0)) return { type: targetType, value: { kind: 'null' } };
+    if (isPointer(rv.type) && !typeEquals(targetType, rv.type)) throw semanticError(node, `incompatible pointer types: ${typeToString(targetType)} and ${typeToString(rv.type)}`);
+    if (isNullLike(rv)) return { type: targetType, value: { kind: 'null' } };
     if (!isPointer(rv.type) || rv.value.kind !== 'pointer') throw semanticError(node, `cannot assign ${typeToString(rv.type)} to ${typeToString(targetType)}`);
     if (!typeEquals(targetType, rv.type)) throw semanticError(node, `incompatible pointer types: ${typeToString(targetType)} and ${typeToString(rv.type)}`);
     return { type: targetType, value: structuredClone(rv.value) };
@@ -433,6 +530,7 @@ function coerceRValue(targetType, rv, node) {
 function evalCall(expr, ctx, env, frame, expectedType) {
   if (expr.name === 'malloc') {
     if (!expectedType || !isPointer(expectedType)) throw semanticError(expr, 'malloc result must be assigned where a pointer type is known');
+    if (isArray(expectedType.to)) throw semanticError(expr, 'malloc of array types is not supported; use a pointer to the element type');
     if (expr.arguments.length !== 1) throw semanticError(expr, 'malloc expects exactly one argument');
     const sizeRv = evalExpression(expr.arguments[0], ctx, env, frame, INT); requireInteger(sizeRv, expr.arguments[0]);
     const bytes = sizeRv.value.value;
@@ -448,8 +546,11 @@ function evalCall(expr, ctx, env, frame, expectedType) {
 
   if (expr.name === 'free') {
     if (expr.arguments.length !== 1) throw semanticError(expr, 'free expects exactly one argument');
-    const rv = evalExpression(expr.arguments[0], ctx, env, frame, null);
-    if (rv.value.kind === 'null' || (isIntegerRuntime(rv) && rv.value.value === 0)) return { type: INT, value: { kind: 'scalar', value: 0 } };
+    let rv;
+    ctx.allowDanglingRead = true;
+    try { rv = evalExpression(expr.arguments[0], ctx, env, frame, null); }
+    finally { ctx.allowDanglingRead = false; }
+    if (isNullLike(rv)) return { type: { kind: 'void' }, value: { kind: 'void' } };
     if (!isPointer(rv.type) || rv.value.kind !== 'pointer') throw semanticError(expr, 'free expects a pointer or NULL');
     const target = rv.value.target, allocation = getAllocation(ctx.state, target.allocationId);
     if (allocation.storage.kind !== 'heap') throw semanticError(expr, 'free() requires heap memory');
@@ -458,32 +559,49 @@ function evalCall(expr, ctx, env, frame, expectedType) {
     if (!samePath(target.path, basePath)) throw semanticError(expr, 'free() requires the original allocation pointer, not an interior pointer');
     allocation.alive = false;
     pushTrace(ctx, { kind: 'Free', allocationId: allocation.id, line: expr.loc?.startLine ?? null });
-    return { type: INT, value: { kind: 'scalar', value: 0 } };
+    return { type: { kind: 'void' }, value: { kind: 'void' } };
   }
 
   const fn = ctx.functions.get(expr.name);
   if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`);
   if (expr.arguments.length !== fn.params.length) throw semanticError(expr, `${expr.name} expects ${fn.params.length} argument(s), got ${expr.arguments.length}`);
-  const args = expr.arguments.map((arg, i) => evalExpression(arg, ctx, env, frame, fn.params[i].type));
-  return callFunction(ctx, fn, args, frame, false);
+  const argumentAccesses = [];
+  const args = expr.arguments.map((arg, i) => {
+    const start = ctx.accesses.length;
+    const rv = evalExpression(arg, ctx, env, frame, fn.params[i].type);
+    const accesses = ctx.accesses.slice(start);
+    for (const previous of argumentAccesses) checkUnsequenced(previous, accesses, ctx, expr);
+    argumentAccesses.push(accesses);
+    return rv;
+  });
+  for (const accesses of argumentAccesses) for (const access of accesses) access.update = false;
+  const result = callFunction(ctx, fn, args, frame, false);
+  markNext(ctx, expr, frame);
+  return result;
 }
 
 function evalBinary(expr, ctx, env, frame) {
   // Logical operators must short-circuit because the skipped operand may have
   // side effects or be unsafe to evaluate (for example p && *p).
+  const leftStart = ctx.accesses.length;
   const left = evalExpression(expr.left, ctx, env, frame, null);
+  const leftAccesses = ctx.accesses.slice(leftStart);
   if (expr.operator === '&&') {
+    for (const access of leftAccesses) access.update = false;
     if (!truthy(left, expr.left)) return intResult(0);
     const right = evalExpression(expr.right, ctx, env, frame, null);
     return intResult(truthy(right, expr.right) ? 1 : 0);
   }
   if (expr.operator === '||') {
+    for (const access of leftAccesses) access.update = false;
     if (truthy(left, expr.left)) return intResult(1);
     const right = evalExpression(expr.right, ctx, env, frame, null);
     return intResult(truthy(right, expr.right) ? 1 : 0);
   }
 
+  const rightStart = ctx.accesses.length;
   const right = evalExpression(expr.right, ctx, env, frame, null);
+  checkUnsequenced(leftAccesses, ctx.accesses.slice(rightStart), ctx, expr);
 
   if (['==', '!='].includes(expr.operator)) {
     const equal = scalarEquals(left, right, ctx, expr);
@@ -508,24 +626,20 @@ function evalBinary(expr, ctx, env, frame) {
       if (right.value.kind !== 'pointer') throw semanticError(expr, 'pointer arithmetic requires a concrete pointer');
       return { type: right.type, value: addToPointer(ctx.state, right.value, left.value.value, expr) };
     }
-    if (isIntegerRuntime(left) && isIntegerRuntime(right)) {
-      return intResult(expr.operator === '+' ? left.value.value + right.value.value : left.value.value - right.value.value);
+    if (isNumberRuntime(left) && isNumberRuntime(right)) {
+      return numericOperation(expr.operator, left, right);
     }
     if (expr.operator === '-' && isPointer(left.type) && isPointer(right.type) && typeEquals(left.type, right.type)) {
       if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer') throw semanticError(expr, 'pointer subtraction requires concrete pointers');
       const a = arrayPosition(ctx.state, left.value.target), b = arrayPosition(ctx.state, right.value.target);
       if (!a || !b || a.allocationId !== b.allocationId || !samePath(a.prefix, b.prefix)) throw semanticError(expr, 'pointer subtraction requires pointers into the same array');
-      return intResult(a.index - b.index);
+      return { type: { kind: 'primitive', name: 'long' }, value: { kind: 'scalar', value: a.index - b.index } };
     }
   }
 
   if (['*', '/', '%'].includes(expr.operator)) {
-    requireInteger(left, expr.left); requireInteger(right, expr.right);
-    if ((expr.operator === '/' || expr.operator === '%') && right.value.value === 0) throw semanticError(expr, 'division by zero');
-    const n = expr.operator === '*' ? left.value.value * right.value.value
-      : expr.operator === '/' ? Math.trunc(left.value.value / right.value.value)
-      : left.value.value % right.value.value;
-    return intResult(n);
+    requireNumber(left, expr.left); requireNumber(right, expr.right);
+    return numericOperation(expr.operator, left, right);
   }
   throw semanticError(expr, `binary operator '${expr.operator}' is not supported yet`);
 }
@@ -537,14 +651,8 @@ function evalCompoundAssignment(operator, left, right, ctx, node) {
     if (left.value.kind !== 'pointer') throw semanticError(node, 'pointer compound assignment requires a concrete pointer');
     return { type: left.type, value: addToPointer(ctx.state, left.value, op === '+' ? right.value.value : -right.value.value, node) };
   }
-  requireInteger(left, node); requireInteger(right, node);
-  if ((op === '/' || op === '%') && right.value.value === 0) throw semanticError(node, 'division by zero');
-  const value = op === '+' ? left.value.value + right.value.value
-    : op === '-' ? left.value.value - right.value.value
-    : op === '*' ? left.value.value * right.value.value
-    : op === '/' ? Math.trunc(left.value.value / right.value.value)
-    : left.value.value % right.value.value;
-  return { type: left.type, value: { kind: 'scalar', value } };
+  requireNumber(left, node); requireNumber(right, node);
+  return numericOperation(op, left, right);
 }
 
 function evalCondition(expr, ctx, env, frame) {
@@ -559,7 +667,11 @@ function truthy(rv, node) {
 }
 
 function scalarEquals(left, right, ctx, node) {
-  if (isIntegerRuntime(left) && isIntegerRuntime(right)) return left.value.value === right.value.value;
+  if (isNumberRuntime(left) && isNumberRuntime(right)) {
+    const type = arithmeticType(left.type, right.type);
+    return convertNumber(left.value.value, type) === convertNumber(right.value.value, type);
+  }
+  if (isPointer(left.type) && isPointer(right.type) && !typeEquals(left.type, right.type)) throw semanticError(node, 'comparison of incompatible pointer types');
 
   const leftNull = isNullLike(left), rightNull = isNullLike(right);
   if (leftNull && rightNull) return true;
@@ -570,17 +682,28 @@ function scalarEquals(left, right, ctx, node) {
     if (!typeEquals(left.type, right.type)) throw semanticError(node, `comparison of incompatible pointer types ${typeToString(left.type)} and ${typeToString(right.type)}`);
     if (left.value.kind === 'null' || right.value.kind === 'null') return left.value.kind === right.value.kind;
     if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer') throw semanticError(node, 'pointer comparison requires initialized pointer values');
-    return sameRefValue(left.value.target, right.value.target);
+    return left.value.target.allocationId === right.value.target.allocationId &&
+      addressOffset(ctx.state, left.value.target) === addressOffset(ctx.state, right.value.target);
   }
   throw semanticError(node, `cannot compare ${typeToString(left.type)} and ${typeToString(right.type)}`);
 }
 
 function compareScalars(left, right, ctx, node) {
-  if (isIntegerRuntime(left) && isIntegerRuntime(right)) return Math.sign(left.value.value - right.value.value);
+  if (isNumberRuntime(left) && isNumberRuntime(right)) {
+    const type = arithmeticType(left.type, right.type);
+    return Math.sign(convertNumber(left.value.value, type) - convertNumber(right.value.value, type));
+  }
   if (isPointer(left.type) && isPointer(right.type) && typeEquals(left.type, right.type)) {
     if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer') throw semanticError(node, 'relational pointer comparison requires concrete pointers');
     const a = arrayPosition(ctx.state, left.value.target), b = arrayPosition(ctx.state, right.value.target);
     if (!a || !b || a.allocationId !== b.allocationId || !samePath(a.prefix, b.prefix)) {
+      const l = left.value.target, r = right.value.target;
+      if (l.allocationId === r.allocationId && samePath(l.path.slice(0, -1), r.path.slice(0, -1))) {
+        const parent = resolveRef(ctx.state, ref(l.allocationId, l.path.slice(0, -1)));
+        if (isStruct(parent.type) && l.path.at(-1) !== '$onePast' && r.path.at(-1) !== '$onePast') {
+          return Math.sign(addressOffset(ctx.state, l) - addressOffset(ctx.state, r));
+        }
+      }
       throw semanticError(node, 'relational pointer comparison requires pointers into the same array');
     }
     return Math.sign(a.index - b.index);
@@ -588,22 +711,52 @@ function compareScalars(left, right, ctx, node) {
   throw semanticError(node, `relational comparison requires numbers or pointers into the same array`);
 }
 
+function addressOffset(state, target) {
+  let type = getAllocation(state, target.allocationId).type, offset = 0;
+  for (const part of target.path) {
+    if (part === '$onePast') return offset + sizeOf(type, state.structTypes);
+    if (isArray(type)) { offset += part * sizeOf(type.of, state.structTypes); type = type.of; }
+    else if (isStruct(type)) {
+      for (const field of resolveStructType(type, state.structTypes).fields) {
+        const alignment = alignmentOf(field.type, state.structTypes);
+        offset = Math.ceil(offset / alignment) * alignment;
+        if (field.name === part) { type = field.type; break; }
+        offset += sizeOf(field.type, state.structTypes);
+      }
+    }
+  }
+  return offset;
+}
+
 function isNullLike(rv) {
-  return rv.value.kind === 'null' || (isIntegerRuntime(rv) && rv.value.value === 0);
+  return rv.value.kind === 'null' || (isIntegerRuntime(rv) && rv.integerConstant && rv.value.value === 0);
 }
 
 function sameRefValue(a, b) {
   return a.allocationId === b.allocationId && samePath(a.path ?? [], b.path ?? []);
 }
 
+function checkUnsequenced(left, right, ctx, node) {
+  // Function bodies are indeterminately sequenced relative to caller evaluations
+  // (C11 6.5.2.2p10); argument expressions themselves are unsequenced.
+  for (const a of left) for (const b of right) {
+    const overlap = a.ref.allocationId === b.ref.allocationId && (a.ref.path.every((part, i) => b.ref.path[i] === part) || b.ref.path.every((part, i) => a.ref.path[i] === part));
+    if (a.depth === ctx.callDepth && b.depth === ctx.callDepth && (a.write || b.write) && overlap) {
+      throw semanticError(node, 'unsequenced read/modification of the same object');
+    }
+  }
+}
+
 function intResult(value) { return { type: INT, value: { kind: 'scalar', value } }; }
 
 function addToPointer(state, value, delta, node) {
+  if (!Number.isSafeInteger(delta)) throw semanticError(node, 'pointer offset must be an integer');
+  if (!getAllocation(state, value.target.allocationId).alive) throw semanticError(node, 'pointer arithmetic on an object whose lifetime has ended');
   const pos = arrayPosition(state, value.target);
   if (!pos) { if (delta === 0) return structuredClone(value); throw semanticError(node, 'pointer arithmetic is only supported within arrays/malloc blocks'); }
   const next = pos.index + delta;
   if (next < 0 || next > pos.length) throw semanticError(node, `pointer arithmetic moves outside allocation bounds (index ${next})`);
-  return pointerValue(ref(pos.allocationId, [...pos.prefix, next]));
+  return pointerValue(ref(pos.allocationId, pos.singleton ? (next === 0 ? pos.prefix : [...pos.prefix, '$onePast']) : [...pos.prefix, next]));
 }
 
 /** Find the nearest array component in a reference path, including arrays inside structs. */
@@ -613,14 +766,19 @@ function arrayPosition(state, targetRef) {
   const path = targetRef.path ?? [], prefix = [];
   for (let i = 0; i < path.length; i++) {
     const part = path[i];
-    if (isArray(type) && Number.isInteger(part)) return { allocationId: allocation.id, prefix: [...prefix], index: part, length: type.length };
+    if (isArray(type) && Number.isInteger(part)) {
+      if (i === path.length - 1) return { allocationId: allocation.id, prefix: [...prefix], index: part, length: type.length };
+      if (part < 0 || part >= type.length) return null;
+      type = type.of; prefix.push(part); continue;
+    }
+    if (part === '$onePast' && i === path.length - 1) return { allocationId: allocation.id, prefix, index: 1, length: 1, singleton: true };
     if (isStruct(type)) {
       const def = resolveStructType(type, state.structTypes), field = def.fields.find(f => f.name === part);
       if (!field) return null; type = field.type; prefix.push(part); continue;
     }
     return null;
   }
-  return null;
+  return { allocationId: allocation.id, prefix, index: 0, length: 1, singleton: true };
 }
 
 function makeScope(parent = null) {
@@ -657,43 +815,94 @@ function guardLoopIteration(iterations, stmt) {
 }
 
 function inferExpressionType(expr, ctx, env, frame) {
+  const infer = e => inferExpressionType(e, ctx, env, frame);
+  const decay = t => isArray(t) ? pointer(t.of) : t;
   if (expr.kind === 'Identifier') {
+    if (expr.name === 'NULL') return INT;
     const r = lookupBinding(env, expr.name);
     if (!r) throw semanticError(expr, `use of undeclared variable '${expr.name}'`);
     return refType(ctx.state, r);
   }
-  if (expr.kind === 'Dereference') { const t = inferExpressionType(expr.expression, ctx, env, frame); if (!isPointer(t)) throw semanticError(expr, 'cannot dereference non-pointer'); return t.to; }
-  if (expr.kind === 'AddressOf') return pointer(inferExpressionType(expr.expression, ctx, env, frame));
-  if (expr.kind === 'Subscript') { const t = inferExpressionType(expr.array, ctx, env, frame); return isArray(t) ? t.of : isPointer(t) ? t.to : (() => { throw semanticError(expr, 'subscripted expression has no element type'); })(); }
-  if (expr.kind === 'Member') return evalLValue(expr, ctx, env, frame).type;
-  if (expr.kind === 'IntLiteral') return INT;
-  if (expr.kind === 'CharLiteral') return CHAR;
-  if (expr.kind === 'Call') { const fn = ctx.functions.get(expr.name); return fn?.returnType ?? INT; }
-  return evalExpression(expr, ctx, env, frame, null).type;
+  if (expr.kind === 'Dereference') { const t = decay(infer(expr.expression)); if (!isPointer(t)) throw semanticError(expr, 'cannot dereference non-pointer'); return t.to; }
+  if (expr.kind === 'AddressOf') return pointer(infer(expr.expression));
+  if (expr.kind === 'Subscript') {
+    const a = decay(infer(expr.array)), b = decay(infer(expr.index));
+    if (isPointer(a) && isIntegerType(b)) return a.to;
+    if (isPointer(b) && isIntegerType(a)) return b.to;
+    throw semanticError(expr, 'subscripted expression has no element type');
+  }
+  if (expr.kind === 'Member') {
+    let type = infer(expr.object);
+    if (expr.viaPointer) {
+      type = decay(type);
+      if (!isPointer(type)) throw semanticError(expr, "'->' requires a pointer to struct");
+      type = type.to;
+    }
+    if (!isStruct(type)) throw semanticError(expr, 'member access requires a struct');
+    const field = resolveStructType(type, ctx.state.structTypes).fields?.find(f => f.name === expr.field);
+    if (!field) throw semanticError(expr, `struct ${type.name} has no field '${expr.field}'`);
+    return field.type;
+  }
+  if (expr.kind === 'IntLiteral' || expr.kind === 'FloatLiteral') return expr.type ?? INT;
+  if (expr.kind === 'CharLiteral' || expr.kind === 'NullLiteral') return INT;
+  if (expr.kind === 'SizeofType' || expr.kind === 'SizeofExpression') return SIZE_T;
+  if (expr.kind === 'Call') {
+    if (expr.name === 'free') return { kind: 'void' };
+    if (expr.name === 'malloc') return pointer({ kind: 'void' });
+    const fn = ctx.functions.get(expr.name);
+    if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`);
+    return fn.returnType;
+  }
+  if (expr.kind === 'Assignment') return infer(expr.left);
+  if (expr.kind === 'Update') return decay(infer(expr.expression));
+  if (expr.kind === 'Unary') {
+    const type = decay(infer(expr.expression));
+    if (expr.operator === '!') {
+      if (!isPrimitive(type) && !isPointer(type)) throw semanticError(expr, 'logical operator requires scalar');
+      return INT;
+    }
+    if (!isPrimitive(type)) throw semanticError(expr, 'unary arithmetic requires number');
+    return promote(type);
+  }
+  if (expr.kind === 'Binary') {
+    const a = decay(infer(expr.left)), b = decay(infer(expr.right));
+    if (['==', '!=', '<', '<=', '>', '>=', '&&', '||'].includes(expr.operator)) return INT;
+    if (['+', '-'].includes(expr.operator)) {
+      if (isPointer(a) && isIntegerType(b)) return a;
+      if (expr.operator === '+' && isIntegerType(a) && isPointer(b)) return b;
+      if (expr.operator === '-' && isPointer(a) && typeEquals(a, b)) return { kind: 'primitive', name: 'long' };
+    }
+    if (isPrimitive(a) && isPrimitive(b)) {
+      if (expr.operator === '%' && (!isIntegerType(a) || !isIntegerType(b))) throw semanticError(expr, 'remainder requires integers');
+      return arithmeticType(a, b);
+    }
+    throw semanticError(expr, 'invalid binary operand types');
+  }
+  throw semanticError(expr, `cannot determine type of ${expr.kind} without evaluation`);
 }
 
-function snapshot(ctx, stmt, frame, eventStart) {
+function markNext(ctx, node, frame) {
+  const previous = ctx.snapshots.at(-1);
+  if (previous) { previous.nextLine = node.loc?.startLine ?? null; previous.nextFunction = frame.name; }
+}
+
+function snapshot(ctx, stmt, frame) {
   ctx.steps++;
   if (ctx.steps > MAX_TRACE_STEPS) throw new Error(`execution exceeded ${MAX_TRACE_STEPS} visualized statements`);
   ctx.snapshots.push({
-    line: stmt.loc?.endLine ?? stmt.loc?.startLine ?? null,
+    line: stmt.loc?.startLine ?? null,
+    nextLine: null,
     function: frame.name, frameId: frame.id, statement: stmt.kind,
-    events: ctx.trace.slice(eventStart), state: cloneState(ctx.state),
+    events: ctx.trace.slice(ctx.snapshotTraceIndex), state: cloneState(ctx.state),
   });
+  ctx.snapshotTraceIndex = ctx.trace.length;
 }
 
 function pushTrace(ctx, event) { ctx.trace.push(event); if (ctx.trace.length > MAX_TRACE_STEPS * 8) throw new Error('execution trace is too large'); }
 function requireInteger(rv, node) { if (!isIntegerRuntime(rv)) throw semanticError(node, `expected integer, got ${typeToString(rv.type)}`); }
-function isIntegerRuntime(rv) { return isPrimitive(rv.type) && rv.value.kind === 'scalar'; }
+function isIntegerRuntime(rv) { return isIntegerType(rv.type) && rv.value.kind === 'scalar'; }
+function isNumberRuntime(rv) { return (isIntegerType(rv.type) || isFloatingType(rv.type)) && rv.value.kind === 'scalar'; }
+function requireNumber(rv, node) { if (!isNumberRuntime(rv)) throw semanticError(node, `expected number, got ${typeToString(rv.type)}`); }
 function samePath(a = [], b = []) { return a.length === b.length && a.every((x, i) => x === b[i]); }
 
-function decodeCharLiteral(raw) {
-  const body = raw.slice(1, -1);
-  if (!body.startsWith('\\')) return body.codePointAt(0) ?? 0;
-  const escapes = { '\\0': 0, '\\n': 10, '\\r': 13, '\\t': 9, '\\b': 8, '\\f': 12, '\\v': 11, "\\'": 39, '\\"': 34, '\\\\': 92, '\\a': 7 };
-  if (Object.hasOwn(escapes, body)) return escapes[body];
-  if (/^\\x[0-9a-fA-F]+$/.test(body)) return Number.parseInt(body.slice(2), 16);
-  if (/^\\[0-7]{1,3}$/.test(body)) return Number.parseInt(body.slice(1), 8);
-  throw new Error(`unsupported character escape '${raw}'`);
-}
 function semanticError(node, message) { const line = node?.loc?.startLine; return new Error(line ? `${message} (line ${line})` : message); }
