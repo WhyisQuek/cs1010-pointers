@@ -289,7 +289,7 @@ function parseDeclaration(node, structTypes) {
       declarator = child.childForFieldName('declarator');
       initializer = child.childForFieldName('value');
     }
-    const info = parseDeclarator(declarator, base, structTypes);
+    const info = parseDeclarator(declarator, base, structTypes, { inferArrayLength: initializer?.type === 'initializer_list' });
     requireCompleteAt(info.type, declarator, structTypes);
     declarations.push({
       name: info.name, type: info.type,
@@ -322,23 +322,33 @@ function parseBaseType(node, structTypes, { allowVoid = false } = {}) {
   throw unsupported(node, `type '${text}' is not in the current Mini-C subset`);
 }
 
-function parseDeclarator(node, baseType, structTypes, { field = false } = {}) {
+function parseDeclarator(node, baseType, structTypes, { field = false, inferArrayLength = false } = {}) {
   if (!node) throw new Error('missing declarator');
   if (node.type === 'identifier' || node.type === 'field_identifier') return { name: node.text, type: structuredClone(baseType) };
   if (node.type === 'pointer_declarator' || node.type === 'abstract_pointer_declarator') {
     const inner = node.childForFieldName('declarator') ?? node.namedChildren.at(-1);
-    return parseDeclarator(inner, pointer(referenceSafeType(baseType)), structTypes, { field });
+    return parseDeclarator(inner, pointer(referenceSafeType(baseType)), structTypes, { field, inferArrayLength });
   }
   if (node.type === 'array_declarator') {
     const inner = node.childForFieldName('declarator') ?? semanticChildren(node)[0];
     const sizeNode = node.childForFieldName('size');
-    if (!sizeNode || sizeNode.type !== 'number_literal') throw unsupported(node, 'array size must be a positive integer literal');
+    if (!sizeNode) {
+      let name = inner;
+      while (name.type === 'parenthesized_declarator') name = semanticChildren(name)[0];
+      if (!inferArrayLength || name.type !== 'identifier') {
+        throw unsupported(node, 'only the outermost array size may be omitted, and it requires an initializer list');
+      }
+      // The checker completes this type while consuming the initializer, so
+      // nested braces, brace elision and struct-valued expressions count correctly.
+      return parseDeclarator(inner, { kind: 'array', of: structuredClone(baseType), length: null }, structTypes, { field, inferArrayLength });
+    }
+    if (sizeNode.type !== 'number_literal') throw unsupported(node, 'array size must be a positive integer literal');
     const length = parseIntegerLiteral(sizeNode.text);
     assertArrayLength(length, sizeNode);
-    return parseDeclarator(inner, array(baseType, length), structTypes, { field });
+    return parseDeclarator(inner, array(baseType, length), structTypes, { field, inferArrayLength });
   }
   if (node.type === 'parenthesized_declarator' || node.type === 'parenthesized_declarator') {
-    return parseDeclarator(semanticChildren(node)[0], baseType, structTypes, { field });
+    return parseDeclarator(semanticChildren(node)[0], baseType, structTypes, { field, inferArrayLength });
   }
   throw unsupported(node, `unsupported declarator '${node.type}'`);
 }

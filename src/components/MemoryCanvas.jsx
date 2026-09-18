@@ -163,7 +163,7 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
         onNodeDragStart={begin} onNodeDragStop={end} onSelectionDragStart={begin} onSelectionDragStop={end}
         onNodeContextMenu={contextMenu} onPaneClick={() => { setMenu(null); setSelectedId(null); setSelectedEdgeId(null); }}
         onMoveStart={() => setMenu(null)} snapToGrid={snap} snapGrid={[24, 24]}
-        nodesConnectable={editable} deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
+        nodesConnectable={editable} connectOnClick={false} deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
         fitView fitViewOptions={{ padding: .15, maxZoom: 1 }} minZoom={.1} proOptions={{ hideAttribution: true }}
       >
         <CanvasViewport key={viewportSession} />
@@ -178,6 +178,7 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
         <button className="plain-btn" onClick={() => resetRoute(selectedEdgeId)}>Reset route</button>
       </div>}
       {editable && selected && <Inspector
+        key={selected.id}
         allocation={selected} state={state}
         onEdit={fn => mutate(s => fn(getAllocation(s, selected.id), s))}
         onDelete={() => { mutate(s => removeAllocation(s, selected.id)); setSelectedId(null); }}
@@ -199,6 +200,8 @@ function CanvasViewport() {
 }
 
 function Inspector({ allocation: a, state, onEdit, onDelete }) {
+  const [name, setName] = useState(a.name ?? '');
+  useEffect(() => { setName(a.name ?? ''); }, [a.name]);
   const editor = typeEditor(a.type), scalars = scalarEntries(a, state);
   const setType = patch => onEdit((obj, currentState) => {
     const next = { ...editor, ...patch };
@@ -211,7 +214,10 @@ function Inspector({ allocation: a, state, onEdit, onDelete }) {
   return (
     <div className="inspector">
       <h4>{a.storage.kind === 'stack' ? 'Stack object' : 'Heap allocation'}</h4>
-      {a.storage.kind === 'stack' && <><label>Name</label><input value={a.name ?? ''} onChange={e => onEdit(obj => { obj.name = e.target.value; })} /></>}
+      {a.storage.kind === 'stack' && <><label htmlFor="object-name">Name</label><input id="object-name" value={name}
+        onChange={e => setName(e.target.value)}
+        onBlur={() => { if (name !== (a.name ?? '')) onEdit(obj => { obj.name = name; }); }}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} /></>}
       {isStruct(a.type) ? <>
         <label>Type</label><div className="readonly-field">{typeToString(a.type)}</div>
       </> : <>

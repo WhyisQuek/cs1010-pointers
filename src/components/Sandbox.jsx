@@ -6,19 +6,8 @@ import { interpret } from '../pipeline/interpreter.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../pipeline/ir.js';
 
-const STARTER = `typedef struct Node {
-    int value;
-    struct Node *next;
-} Node;
-
-void set_value(Node *node, int value) {
-    node->value = value;
-}
-
-int main(void) {
-    Node a = {10, NULL};
-    Node *b = &a;
-    set_value(b, 20);
+const STARTER = `int main(void) {
+    int a = 10;
     return 0;
 }
 `;

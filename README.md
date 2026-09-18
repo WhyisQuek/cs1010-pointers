@@ -7,6 +7,7 @@ It supports:
 - step-by-step C-to-memory visualization;
 - editable memory diagrams and canonical C generation;
 - pointers, arrays, heap allocations and pointer arithmetic;
+- array sizes inferred from initializer lists, such as `int arr[] = {1, 2, 3};` and `int rows[][2] = {{1, 2}, {3, 4}};` (up to 64 elements per dimension);
 - functions and separate call-stack frames;
 - named and self-referential structures;
 - struct typedefs such as `typedef struct { int value; } Node;` and `Node *p;`;

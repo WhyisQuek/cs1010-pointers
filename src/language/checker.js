@@ -2,6 +2,7 @@
 import { INT, isArray, isPointer, isPrimitive, isStruct, pointer, resolveStructType, sizeOf, typeEquals, typeToString } from './types.js';
 import { SIZE_T, arithmeticType, convertNumber, isIntegerType, numericOperation, promote } from './numeric.js';
 import { decodeCharLiteral } from './literals.js';
+import { MAX_ARRAY_LENGTH } from './limits.js';
 
 export function checkProgram(program) {
   const structs = Object.fromEntries((program.structs ?? []).map(t => [t.name, t]));
@@ -134,7 +135,11 @@ export function checkProgram(program) {
       }
       case 'Binary': return binary(e.operator,expression(e.left,env),expression(e.right,env),e,env);
       case 'SizeofType': sizeOf(e.type,structs); return SIZE_T;
-      case 'SizeofExpression': sizeOf(expression(e.expression,env),structs); return SIZE_T;
+      case 'SizeofExpression': {
+        const type = expression(e.expression,env);
+        if (isArray(type) && type.length === null) fail(e, 'sizeof requires a complete array type');
+        sizeOf(type,structs); return SIZE_T;
+      }
       case 'Call': {
         for(let s=env;s;s=s.parent) if(s.names.has(e.name)) fail(e,`called object '${e.name}' is not a function`);
         const args=e.arguments.map(a=>expression(a,env));
@@ -158,13 +163,20 @@ export function checkProgram(program) {
     if(e.kind!=='InitializerList') {compatible(type,expression(e,env),e,env);return;}
     if(!e.elements.length) fail(e,'empty initializer lists are not supported in the C11 subset');
     function consume(t, elements, cursor) {
-      const members=isArray(t)?Array(t.length).fill(t.of):isStruct(t)?resolveStructType(t,structs).fields.map(f=>f.type):[t];
+      const inferLength = isArray(t) && t.length === null;
+      const members=isArray(t)?Array(inferLength ? MAX_ARRAY_LENGTH : t.length).fill(t.of):isStruct(t)?resolveStructType(t,structs).fields.map(f=>f.type):[t];
+      let count = 0;
       for(const member of members) {
         if(cursor.i>=elements.length) break;
+        count++;
         const child=elements[cursor.i];
         if(child.kind==='InitializerList') {cursor.i++;initializer(member,child,env);}
         else if(isArray(member)||isStruct(member)&&!typeEquals(member,expression(child,env))) consume(member,elements,cursor);
         else {cursor.i++;compatible(member,expression(child,env),child,env);}
+      }
+      if (inferLength) {
+        if (cursor.i < elements.length) fail(e, `array size must be between 1 and ${MAX_ARRAY_LENGTH}`);
+        t.length = count;
       }
     }
     const cursor={i:0};consume(type,e.elements,cursor);

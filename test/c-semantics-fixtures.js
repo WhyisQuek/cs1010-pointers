@@ -1,5 +1,16 @@
 // Defined C programs shared by semantic and native compiler tests.
 export const values = [
+  ['inferred array length and element values', 'int arr[]={10,20,30};int result=sizeof(arr)/sizeof(arr[0])+arr[2];', 33],
+  ['inferred array ignores comments and trailing comma', 'int arr[]={/*first*/7,/*last*/9,};int result=sizeof(arr)+arr[1];', 17],
+  ['inferred single element with scalar braces', 'int arr[]={{7}};int result=sizeof(arr)+arr[0];', 11],
+  ['inferred arrays in multiple declarators', 'int a[]={1,2},b[]={3,4,5};int result=sizeof(a)+sizeof(b);', 20],
+  ['inferred pointer array', 'int x=7,y=9;int *a[]={&x,&y};int result=sizeof(a)+*a[1];', 25],
+  ['inferred array initializer executes once', 'int i=0;int a[]={i++,i++};int result=i*100+a[0]*10+a[1];', 201],
+  ['inferred nested array with partial rows', 'int a[][3]={{1},{2,3}};int result=sizeof(a)+a[0][2]+a[1][1]+a[1][2];', 27],
+  ['inferred nested array with brace elision', 'int a[][3]={1,2,3,4};int result=sizeof(a)+a[1][0]+a[1][2];', 28],
+  ['inferred array of pointers to arrays', 'int a[2][3]={{1},{7}};int (*p[])[3]={&a[0],&a[1]};int result=sizeof(p)+(*p[1])[0];', 23],
+  ['inferred array at maximum length', `int a[]={${Array(64).fill(1).join(',')}};int result=sizeof(a)+a[63];`, 257],
+  ['inferred array in loop declaration', 'int result=0;for(int a[]={1,2};a[0]<3;a[0]++){result+=a[1];}', 4],
   ['hex character escape follows signed char model', "int result='\\xff';", -1],
   ['octal character escape', "int result='\\101';", 65],
   ['sizeof a no-argument call', 'int result=sizeof(malloc(4));', 8],
@@ -63,6 +74,8 @@ export const values = [
 ];
 
 export const programs = [
+  ['inferred array of structs with brace elision', 'struct S{int x;int y;};int main(void){struct S a[]={1,2,3};int result=sizeof(a)+a[1].x+a[1].y;}', 19],
+  ['inferred array of struct values and braced elements', 'struct S{int x;int y;};int main(void){struct S s={1,2};struct S a[]={s,{3,4}};int result=sizeof(a)+a[1].y;}', 20],
   ['sizeof empty call is not parsed as a type name', 'long f(void){return 2;}int main(void){int result=sizeof(f());}', 8],
   ['call sequence point before assignment', 'int f(int x){return x+1;}int main(void){int i=0;i=f(i++);int result=i;}', 1],
   ['sizeof member through null does not dereference', 'struct S { char x; int y; }; int main(void){ struct S *p=NULL; int result=sizeof(p->y); }', 4],

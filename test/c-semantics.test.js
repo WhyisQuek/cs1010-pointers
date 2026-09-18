@@ -18,6 +18,17 @@ for (const [name, body, expected] of values) test(name, () => assert.equal(scala
 for (const [name, source, expected] of programs) test(name, () => assert.equal(scalar(interpret(source).state, 'result'), expected));
 
 const errors = [
+  ['omitted array size requires initializer', 'int a[];', /requires an initializer list/],
+  ['omitted array size requires list', 'int a[]=1;', /requires an initializer list/],
+  ['inferred empty array is rejected', 'int a[]={};', /empty initializer/],
+  ['only outer array dimension may be inferred', 'int a[2][]={{1},{2}};', /outermost array size/],
+  ['multiple omitted dimensions are rejected', 'int a[][]={{1}};', /outermost array size/],
+  ['pointer to incomplete array stays unsupported', 'int (*a)[]={0};', /outermost array size/],
+  ['inferred array length bound', `int a[]={${Array(65).fill(1).join(',')}};`, /between 1 and 64/],
+  ['inferred array still checks element types', 'int a[]={1,NULL};int *p[]={a,3};', /cannot assign/],
+  ['inferred array still checks row capacity', 'int a[][2]={{1,2,3}};', /too many/],
+  ['sizeof own incomplete array is rejected', 'int a[]={sizeof(a)};', /complete array type/],
+  ['inferred array bounds are enforced', 'int a[]={1,2};int x=a[2];', /bounds/],
   ['signed addition overflow', 'int x=2147483647; x++;', /overflow/],
   ['signed multiplication overflow', 'int x=50000*50000;', /overflow/],
   ['signed division overflow', 'int x=-2147483647-1; int y=x/-1;', /overflow/],
@@ -92,6 +103,8 @@ for (const source of [
 ]) test(`reject unsupported or invalid translation unit: ${source.slice(0, 45)}`, () => assert.throws(() => interpret(source)));
 
 for (const body of [
+  'int a[]={1,2,3};int *p=a+2;',
+  'int a[][3]={{1},{2,3}};int (*p)[3]=a;',
   'int a[3]={1,2,3};int *p=&a[3];',
   'int x=7;int *p=&x+1;',
   'int a[2][3]={{1,2,3},{4,5,6}};int (*p)[3]=a;int *q=a[1]+2;',

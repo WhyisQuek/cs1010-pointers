@@ -1,9 +1,9 @@
 /** React components for the pure layout adapter in layout.js. */
 import React, { useLayoutEffect, useRef } from 'react';
-import { BaseEdge, Handle, Position, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
+import { BaseEdge, Handle, Position, useConnection, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
 import { isArray, isPointer, isStruct, typeToString } from '../language/types.js';
-import { allocationDisplayName, pointerStatus, resolveRef, scalarSubobjects } from '../machine/memory.js';
-import { handleId } from './layout.js';
+import { allocationDisplayName, pointerCanTarget, pointerStatus, ref, resolveRef, scalarSubobjects } from '../machine/memory.js';
+import { handleId, pathFromHandle } from './layout.js';
 
 export function FrameGroupNode({ id, data, selected }) {
   return <>
@@ -55,11 +55,14 @@ function FrameResize({ id, direction, data }) {
     }} />;
 }
 
-function TargetHandles({ path = [], editable, visible = true }) {
+function TargetHandles({ path = [], state, allocation, sourceType, editable }) {
+  const target = ref(allocation.id, path);
+  const available = editable && sourceType && pointerCanTarget(state, sourceType, target);
+  const label = `${allocationDisplayName(state, allocation)}${formatPath(path)}`;
   return ['left', 'right'].map(side => <Handle key={side} type="target" id={handleId('tgt', path, side)}
-    position={side === 'left' ? Position.Left : Position.Right} className={`mem-handle tgt ${side}${visible ? '' : ' unused-target'}`}
-    title={path.length ? `Address of ${formatPath(path)}` : 'Address of whole object'}
-    isConnectable={editable} />);
+    position={side === 'left' ? Position.Left : Position.Right} className={`mem-handle tgt ${side}${available ? ' available-target' : ' hidden-handle'}`}
+    title={`Point to &${label} (${typeToString(resolveRef(state, target).type)})`}
+    isConnectable={!!available} isConnectableStart={false} />);
 }
 
 function Value({ state, value }) {
@@ -78,7 +81,11 @@ function Value({ state, value }) {
 }
 
 export function MemoryAllocationNode({ id, data, selected }) {
-  const { allocation: a, state, bad, editable, changed, changedPaths, targetPaths } = data;
+  const { allocation: a, state, bad, editable, changed, changedPaths, sourceSides } = data;
+  const fromHandle = useConnection(connection => connection.fromHandle);
+  const sourceType = fromHandle?.type === 'source'
+    ? resolveRef(state, ref(fromHandle.nodeId, pathFromHandle(fromHandle.id))).type : null;
+  const targetProps = { state, allocation: a, sourceType, editable };
   const updateNodeInternals = useUpdateNodeInternals();
   const scalars = scalarSubobjects(a, state);
   const aggregateHandles = new Set();
@@ -95,16 +102,23 @@ export function MemoryAllocationNode({ id, data, selected }) {
   useLayoutEffect(() => { updateNodeInternals(id); }, [id, signature, updateNodeInternals]);
   return <div className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}>
     <div className="head">
-      {(isArray(a.type) || isStruct(a.type)) && <TargetHandles editable={editable} />}
+      {(isArray(a.type) || isStruct(a.type)) && <TargetHandles {...targetProps} />}
       <span className="name" title={allocationDisplayName(state, a)}>{allocationDisplayName(state, a)}</span>
       <span className="type" title={typeToString(a.type)}>{typeToString(a.type)}</span>
     </div>
     {!a.alive && <div className="lifetime-banner">{a.storage.kind === 'heap' ? 'freed' : 'out of scope'}</div>}
     <div className="subobject-list">{scalars.map((s, i) => <div className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}`} key={s.ref.path.join('.') || 'root'}>
-      {rowTargets[i].map((path, index) => <TargetHandles key={path.join('.')} path={path} editable={editable && index === 0} visible={!path.length || targetPaths?.has(JSON.stringify(path))} />)}
+      {rowTargets[i].map(path => <TargetHandles key={path.join('.')} path={path} {...targetProps} />)}
       {s.ref.path.length > 0 && <span className="sub-label" title={formatPath(s.ref.path)}>{formatPath(s.ref.path)}</span>}
       <Value state={state} value={s.value} />
-      {isPointer(s.type) && ['left', 'right'].map(side => <Handle key={side} type="source" id={handleId('src', s.ref.path, side)} position={side === 'left' ? Position.Left : Position.Right} className="mem-handle src" isConnectable={editable} />)}
+      {isPointer(s.type) && ['left', 'right'].map(side => {
+        const available = editable && side === (sourceSides?.[JSON.stringify(s.ref.path)] ?? 'right');
+        return <Handle key={side} type="source" id={handleId('src', s.ref.path, side)}
+          position={side === 'left' ? Position.Left : Position.Right}
+          className={`mem-handle src${available ? '' : ' hidden-handle'}`}
+          title={`Drag to set ${allocationDisplayName(state, a)}${formatPath(s.ref.path)} — compatible targets appear as squares`}
+          isConnectable={available} isConnectableEnd={false} />;
+      })}
     </div>)}</div>
   </div>;
 }

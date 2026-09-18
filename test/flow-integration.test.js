@@ -2,9 +2,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initParser, interpret } from '../src/pipeline/interpreter.js';
-import { stateToFlow } from '../src/flow/layout.js';
+import { pathFromHandle, stateToFlow } from '../src/flow/layout.js';
+import { pointerCanTarget, ref } from '../src/machine/memory.js';
 
 await initParser({ runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm', grammarWasm: './public/tree-sitter-c.wasm' });
+
+test('element, whole-array and pointer-variable targets keep distinct C types and anchors', () => {
+  const { state } = interpret('int main(void) { int a[3] = {1, 2, 3}; int *element = a; int (*whole)[3] = &a; int **indirect = &element; return 0; }');
+  const named = name => state.allocations.find(a => a.name === name);
+  const a = named('a'), element = named('element'), whole = named('whole'), indirect = named('indirect');
+  assert.equal(pointerCanTarget(state, element.type, ref(a.id)), false);
+  assert.equal(pointerCanTarget(state, element.type, ref(a.id, [0])), true);
+  assert.equal(pointerCanTarget(state, whole.type, ref(a.id)), true);
+  assert.equal(pointerCanTarget(state, whole.type, ref(a.id, [0])), false);
+  assert.equal(pointerCanTarget(state, indirect.type, ref(element.id)), true);
+  assert.equal(pointerCanTarget(state, element.type, ref(element.id)), false);
+  const { nodes, edges } = stateToFlow(state, { editable: true });
+  assert.deepEqual(pathFromHandle(edges.find(e => e.source === element.id).targetHandle), [0]);
+  assert.deepEqual(pathFromHandle(edges.find(e => e.source === whole.id).targetHandle), []);
+  for (const edge of edges) {
+    const source = nodes.find(n => n.id === edge.source);
+    assert.equal(source.data.sourceSides[JSON.stringify(pathFromHandle(edge.sourceHandle))], edge.sourceHandle.split(':')[2]);
+  }
+});
 
 test('successive function calls never share a visible frame slot', () => {
   const result = interpret('void change_number(int *p) { *p = 5; } void change_element(int *p) { *p = 9; } int main(void) { int n = 1; int a[2] = {2,3}; change_number(&n); change_element(&a[1]); change_number(&n); return 0; }');
@@ -36,4 +56,3 @@ test('loop locals disappear at lifetime end while an escaped pointer stays dangl
   const history = stateToFlow(result.state, { showExpired: true });
   assert.equal(history.edges[0].className, 'dangling-edge');
 });
-

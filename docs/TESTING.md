@@ -15,11 +15,11 @@ The suites are:
 | `npm run test:core` | 22 parser-independent interpreter, memory, grading and generation cases |
 | `npm run test:integration` | 21 real-C parsing, execution and round-trip cases |
 | `npm run test:layout` | Frame growth/resizing, lifetime, handle, routing, and layout history cases |
-| `npm run test:flow-integration` | 3 cases that feed real C execution snapshots through the layout adapter |
+| `npm run test:flow-integration` | 4 cases that feed real C execution snapshots through the layout adapter, including typed pointer targets |
 | `npm run test:semantics` | 153 C semantic, constraint, lifetime, bounds and round-trip tests |
 | `npm run test:native` | 76 defined programs compared with a native LP64 C11 compiler |
 
-The native suite compiles and runs its defined-behavior fixtures with undefined-behavior sanitization. It skips when no compiler is available; Linux CI requires it. Set `POINTERVIZ_CC` to a compiler command or `POINTERVIZ_WSL_DISTRO` to an installed Linux distribution on Windows. The compiler must use LP64 and signed char. See [the C semantics audit](C_SEMANTICS_AUDIT.md).
+The native suite first compiles and runs a small probe to check LP64 sizes, signed char, and the undefined-behavior sanitizer runtime. It skips with a reason when the compiler is missing or incompatible, including Windows compilers with 4-byte `long`. Linux CI sets `POINTERVIZ_REQUIRE_NATIVE=1`, which makes these conditions fail instead of skip. After the probe succeeds, fixture compilation, execution, and result mismatches always fail the test. Set `POINTERVIZ_CC` to a compatible compiler command or `POINTERVIZ_WSL_DISTRO` to an installed Linux distribution on Windows. See [the C semantics audit](C_SEMANTICS_AUDIT.md).
 
 Layout tests use the same adapter as the canvas and verify its output without a browser. They cannot replace interaction checks.
 
@@ -39,6 +39,8 @@ GitHub Actions runs the full test/build commands on Windows and Linux with Node 
 10. Fit frame to contents, Fit view, and Reset layout have separate effects. Undo restores layout after Reset layout. Toggle Snap and test node dragging. Keyboard resizing/bending and layout undo should work without capturing typing shortcuts in inputs.
 11. A new Run or Clear discards old layout/history. Adding the first object after Clear fits it into view. A fresh level-editor preview must not reuse layout from another program.
 12. Check toolbar wrapping and scrolling in a narrow view and the normal desktop workbench. Browser console should have no runtime errors.
+13. Rename a stack object: repeatedly clear and replace its name while the Name field is focused; no validation messages should appear until leaving the field or pressing Enter. A valid replacement updates the diagram and generated C. Committing an empty or invalid name still reports validation errors. Switching objects shows each object's own name, and refocusing an unchanged name does not repeat the warning.
+14. At rest, non-pointers and aggregate headers have no target dots, and each editable pointer has one blue source dot. Drag it: only compatible targets appear as outlined squares. An `int *` can target an `int` array element but not its header; an `int (*)[3]` can target the header of an `int[3]` array. An `int **` can target an `int *` object. Verify nested aggregate targets, cancellation, arrowhead reconnection, left/right routing, and playback with no editing dots.
 
 ## Release validation
 

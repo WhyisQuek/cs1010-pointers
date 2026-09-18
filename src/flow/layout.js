@@ -30,7 +30,7 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
         if (JSON.stringify(oldRows.get(key)) !== JSON.stringify(s.value)) changedPaths.add(key);
       }
     }
-    return { changed: !!previousState && (!old || old.alive !== a.alive || changedPaths.size > 0), changedPaths,
+    return { changed: !!previousState && (!old || old.alive !== a.alive || changedPaths.size > 0), changedPaths, sourceSides: {},
       targetPaths: new Set(semanticEdges.filter(e => e.target.allocationId === a.id).map(e => JSON.stringify(e.target.path))) };
   };
   const frames = state.frames?.length ? state.frames : state.allocations.some(a => a.storage.kind === 'stack')
@@ -122,6 +122,7 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
     if (!source) continue;
     const target = anchor(e.target, side);
     if (!target) continue;
+    byId.get(e.source.allocationId).data.sourceSides[JSON.stringify(e.source.path)] = sourceSide;
     const id = `${e.source.allocationId}:${e.source.path.join('.')}->${e.target.allocationId}:${e.target.path.join('.')}`;
     const route = curvePointer(source, target, sourceSide, side, obstacles, routes[id], self);
     const changed = byId.get(e.source.allocationId).data.changedPaths.has(JSON.stringify(e.source.path));

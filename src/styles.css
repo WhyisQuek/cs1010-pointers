@@ -63,8 +63,6 @@ button:disabled { opacity: .45; cursor: default; }
 .memory-changed { outline: 2px solid #e3b341; outline-offset: 1px; }
 .value-changed { background: #e3b34122; }
 .value-changed .val { color: #f2cc60; }
-.mem-handle.tgt.unused-target { opacity: 0; }
-.mem-cell:hover .mem-handle.tgt.unused-target.connectable { opacity: .65; }
 
 .canvas-wrap { flex: 1; min-height: 0; position: relative; }
 .canvas-toolbar { position: absolute; z-index: 10; top: 10px; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
@@ -101,7 +99,10 @@ button:disabled { opacity: .45; cursor: default; }
 .val.uninit { color: var(--muted); font-style: italic; font-size: 11px; }
 .mem-handle { width: 9px !important; height: 9px !important; border: 1px solid var(--bg) !important; }
 .mem-handle.src { background: var(--ptr) !important; }
-.mem-handle.tgt { background: #8b949e !important; }
+.mem-handle.tgt { background: var(--panel-2) !important; border: 2px solid var(--ptr) !important; border-radius: 2px; }
+.mem-handle.hidden-handle { opacity: 0; pointer-events: none !important; }
+.mem-handle.available-target { width: 12px !important; height: 12px !important; }
+.mem-handle.available-target:hover, .mem-handle.available-target.valid { background: var(--ptr) !important; }
 .subobject-row .mem-handle.tgt { top: 35%; }
 .subobject-row .mem-handle.src { top: 70%; }
 .dangling-edge path { stroke: var(--err) !important; stroke-dasharray: 5 4; }

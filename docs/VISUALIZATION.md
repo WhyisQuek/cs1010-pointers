@@ -26,11 +26,13 @@ Returned frames and expired locals remain read-only. Generating C still requires
 
 Pointer values use a fixed 30 × 20 SVG indicator independent of text font metrics. Names and types use bounded columns, with full text available on hover.
 
-Pointers choose left or right attachment sides based on relative box positions. Grey target dots and blue pointer source dots are vertically separated; both sides are available. Aggregate roots attach to the header. Field target dots stay hidden unless a pointer targets that field; hovering an editable object reveals them for connections. Whole structs and their fields retain distinct typed references. Type and array-size edits refresh handle geometry.
+Pointers choose left or right attachment sides based on relative box positions. Each editable pointer has one blue source dot on its outgoing side (the right side before it has an arrow). Drag this dot to set the pointer. Target anchors are hidden at rest, including during playback; while drawing or reconnecting an arrow, compatible editable targets appear as outlined squares on both sides. Hidden handles remain mounted so existing arrows retain their geometry. Type and array-size edits refresh handle geometry.
+
+Targets preserve C types: for `int a[3]`, an `int *` can target `a[0]` or another element, while `int (*p)[3] = &a` targets the whole array at its header. The array header is therefore offered only to a matching pointer-to-array. Whole structs, nested aggregates, pointer variables (for pointers-to-pointers), and scalar fields likewise appear only when their types match the pointer being drawn.
 
 Edges use cubic curves where there is a clear route, with rounded obstacle-aware detours in dense diagrams and stable loops for self-references. Select an arrow to show a draggable diamond. Drag it to set a manual bend; **Reset route**, double-clicking the diamond, or Home while it has focus restores automatic routing. Arrow keys move a focused diamond or resize control; Shift makes larger adjustments. Manual bends follow the endpoint midpoint as boxes move.
 
-In an editable diagram, drag an arrowhead to reconnect to a compatible target. An invalid target leaves the original pointer unchanged and shows the existing type error. Presentation-only arrow bending is also available during playback. Layers keep frames behind edges and boxes above edges.
+In an editable diagram, drag an arrowhead to reconnect to a compatible target. Dropping on an incompatible target or empty space leaves the original pointer unchanged. Presentation-only arrow bending is also available during playback. Layers keep frames behind edges and boxes above edges.
 
 ## Playback and code
 
