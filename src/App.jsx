@@ -10,7 +10,14 @@ export default function App() {
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('sandbox');
 
-  useEffect(() => { initParser().then(() => setReady(true)).catch(e => setError(e.message)); }, []);
+  useEffect(() => {
+    // Pages project sites live under /<repository>/; keep both WASM files
+    // relative to Vite's deployment base (also works at a custom-domain root).
+    initParser({
+      runtimeWasm: `${import.meta.env.BASE_URL}tree-sitter.wasm`,
+      grammarWasm: `${import.meta.env.BASE_URL}tree-sitter-c.wasm`,
+    }).then(() => setReady(true)).catch(e => setError(e.message));
+  }, []);
   if (error) return <div className="loading-screen">Could not load the C parser: {error}</div>;
   if (!ready) return <div className="loading-screen">Loading parser…</div>;
 

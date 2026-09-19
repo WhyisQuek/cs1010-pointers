@@ -36,6 +36,14 @@ npm run build
 
 The integration suite uses `web-tree-sitter` and therefore requires the npm dependencies to be installed.
 
+## Publish for testing
+
+PointerViz can run on GitHub Pages with no backend. The deployment workflow
+tests and builds the app before publishing on pushes to `main`. Enable
+**Settings → Pages → GitHub Actions** in an eligible repository first.
+See [the deployment guide](docs/DEPLOYMENT.md) for the free-tier requirements,
+production preview, tester checklist, and moving to another host later.
+
 ## Memory canvas
 
 Drag a function header to move its frame and locals together. Select a frame to resize it from any edge or corner. Variables move freely in both directions; their frame grows to accommodate them. Layout survives memory edits and playback steps. **Fit view** adjusts the viewport; **Reset layout** restores default placement. Layout changes support Undo/Redo.
@@ -65,6 +73,7 @@ Create your GitHub repository and follow its instructions to add a remote and pu
 - [`docs/VISUALIZATION.md`](docs/VISUALIZATION.md) — frame interaction, visibility, layout and edge routing.
 - [`docs/TESTING.md`](docs/TESTING.md) — automated checks and browser regression steps.
 - [`docs/C_SEMANTICS_AUDIT.md`](docs/C_SEMANTICS_AUDIT.md) — C11 audit, native compiler comparisons and explicit implementation limits.
+- [`docs/MEMORY_ADDRESSES_DESIGN.md`](docs/MEMORY_ADDRESSES_DESIGN.md) — proposed simulated-address model, display modes, interaction design, and implementation plan.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
 
 ## Core design rule
