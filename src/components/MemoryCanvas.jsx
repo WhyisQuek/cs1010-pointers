@@ -5,17 +5,22 @@ import '@xyflow/react/dist/style.css';
 import { edgeTypes, nodeTypes } from '../flow/memoryFlow.jsx';
 import { GEOMETRY, pathFromHandle, stateToFlow } from '../flow/layout.js';
 import { captureLayout, contentSize, emptyLayout, initialHistory, layoutHistory, moveNode, resizeFrame } from '../flow/workspace.js';
-import {
-  array, basePrimitive, isArray, isPointer, isStruct, pointer, pointerDepth, primitive,
-  typeToString,
-} from '../language/types.js';
-import { MAX_ARRAY_LENGTH, clampArrayLength } from '../language/limits.js';
-import {
-  addAllocation, addFrame, getAllocation, makeDefaultValue, makeState, pointerCanTarget, ref,
-  resolveRef, scalarSubobjects, setRefValue,
-} from '../machine/memory.js';
+import { isPointer, primitive, typeToString } from '../language/types.js';
+import { addAllocation, addFrame, getAllocation, makeState, pointerCanTarget, ref, resolveRef, setRefValue } from '../machine/memory.js';
+import { upgradeMemoryState } from '../machine/addresses.js';
+import { removeAllocation } from '../machine/editing.js';
+import { describePointer, formatAddress, readViewMode, saveViewMode, VIEW_MODES } from '../flow/addressPresentation.js';
+import MemoryInspector from './MemoryInspector.jsx';
 
-export default function MemoryCanvas({ state, previousState = null, onChange, editable = false, badIds, onMessage }) {
+export default function MemoryCanvas({ state: rawState, previousState = null, onChange, editable = false, badIds, onMessage }) {
+  const state = useMemo(() => rawState.addressSpace ? rawState : upgradeMemoryState(rawState), [rawState]);
+  const [viewMode, setViewMode] = useState(readViewMode);
+  const [inspection, setInspection] = useState(null);
+  const [revealedPointer, setRevealedPointer] = useState(null);
+  const [editedPreviousState, setEditedPreviousState] = useState(null);
+  const [status, setStatus] = useState(null);
+  const pendingFocus = useRef(null);
+  const notify = useCallback(message => { setStatus(message); onMessage?.(message); }, [onMessage]);
   const [history, setHistory] = useState(initialHistory);
   const historyRef = useRef(history);
   const dispatch = useCallback(action => {
@@ -34,7 +39,7 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
   const [selectedId, setSelectedId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const { nodes, edges } = useMemo(() => {
-    const result = stateToFlow(state, { ...history.present, editable, badIds: badIds ?? new Set(), showExpired, previousState });
+    const result = stateToFlow(state, { ...history.present, editable, badIds: badIds ?? new Set(), showExpired, previousState: previousState ?? (editable ? editedPreviousState : null), viewMode, revealedPointer });
     result.nodes = result.nodes.map(n => ({
       ...n,
       // Preserve React Flow's reported measurements across controlled-node updates.
@@ -44,13 +49,37 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
     }));
     result.edges = result.edges.map(e => ({ ...e, selected: e.selectable && e.id === selectedEdgeId }));
     return result;
-  }, [state, previousState, history.present, measurements, editable, badIds, showExpired, selectedId, selectedEdgeId]);
+  }, [state, previousState, history.present, measurements, editable, badIds, showExpired, selectedId, selectedEdgeId, editedPreviousState, viewMode, revealedPointer]);
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
   useEffect(() => {
     dispatch({ type: 'sync', layout: captureLayout(historyRef.current.present, nodes) });
   }, [nodes, dispatch]);
 
-  const mutate = useCallback(fn => { if (!editable) return; const next = structuredClone(state); fn(next); onChange?.(next); }, [state, onChange, editable]);
+  const mutate = useCallback(fn => {
+    if (!editable) return false;
+    try {
+      const next = structuredClone(state), message = fn(next);
+      setEditedPreviousState(state); onChange?.(next);
+      if (typeof message === 'string') notify({ kind: 'ok', text: message }); else setStatus(null);
+      return true;
+    } catch (error) { notify({ kind: 'err', text: error.message }); return false; }
+  }, [state, onChange, editable, notify]);
+  const closeInspector = () => { setSelectedId(null); setInspection(null); setRevealedPointer(null); };
+  const inspect = (allocationId, path = []) => { setSelectedId(allocationId); setSelectedEdgeId(null); setInspection(ref(allocationId, path)); setRevealedPointer(null); };
+  const showTarget = (target, source) => {
+    const description = describePointer(state, { kind: 'pointer', target });
+    if (!description.target) return;
+    if (!description.allocation.alive) setShowExpired(true);
+    inspect(target.allocationId, target.path);
+    setRevealedPointer(source); pendingFocus.current = target.allocationId;
+    setStatus({ kind: 'ok', text: description.status === 'one-past' ? `One-past boundary at ${formatAddress(description.address)}. Cannot dereference.` : `Showing ${description.qualifiedLabel}${description.status === 'dangling' ? ' (former target)' : ''}.` });
+  };
+  useEffect(() => {
+    const target = nodes.find(n => n.id === pendingFocus.current);
+    if (!flow || !target) return;
+    const request = requestAnimationFrame(() => { flow.fitView({ nodes: [target], padding: .6, maxZoom: 1, duration: 180 }); pendingFocus.current = null; });
+    return () => cancelAnimationFrame(request);
+  }, [nodes, flow]);
   const onNodesChange = useCallback(changes => {
     let currentNodes = nodesRef.current;
     for (const ch of changes) {
@@ -106,7 +135,7 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
     }
     setSelectedId(a.id); setMenu(null);
   });
-  const selected = nodes.find(n => n.id === selectedId && n.data.editable)?.data.allocation ?? null;
+  const selected = nodes.find(n => n.id === selectedId)?.data.allocation ?? null;
   const selectedNode = nodes.find(n => n.id === selectedId);
   const selectedFrame = selectedNode?.type === 'frameGroup' ? selectedNode : nodes.find(n => n.id === selectedNode?.parentId);
   const addFrameId = selectedFrame?.data.editable ? selectedFrame.data.frame.id : 'main';
@@ -114,7 +143,7 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
     const layout = { ...historyRef.current.present, routes: { ...historyRef.current.present.routes } };
     delete layout.routes[id]; setLayout(layout);
   };
-  const interactiveNodes = nodes.map(n => ({ ...n, className: `${n.className ?? ''}${n.id === selectedFrame?.id ? ' frame-owner-active' : ''}`, data: { ...n.data, onGestureStart: begin, onGestureEnd: end,
+  const interactiveNodes = nodes.map(n => ({ ...n, className: `${n.className ?? ''}${n.id === selectedFrame?.id ? ' frame-owner-active' : ''}`, data: { ...n.data, onInspect: path => inspect(n.id, path), inspectedPath: inspection?.allocationId === n.id && selectedId === n.id ? inspection.path : undefined, onGestureStart: begin, onGestureEnd: end,
     onResize: (rect, direction) => setLayout(resizeFrame(historyRef.current.present, nodesRef.current, n.id, rect, direction)),
     onFit: () => setLayout({ ...historyRef.current.present, sizes: { ...historyRef.current.present.sizes, [n.id]: contentSize(nodes, n.id) } }),
     onAdd: () => addBox('stack', n.data.frame?.id),
@@ -127,7 +156,7 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
     if (!node.data.frame || !node.data.editable) return;
     event.preventDefault();
     const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    const bounds = event.currentTarget.closest('.canvas-wrap').getBoundingClientRect();
+    const bounds = event.currentTarget.closest('.canvas-content').getBoundingClientRect();
     setSelectedId(node.id); setSelectedEdgeId(null);
     setMenu({ frameId: node.data.frame.id, x: Math.min(event.clientX - bounds.left, bounds.width - 180), y: Math.min(event.clientY - bounds.top, bounds.height - 45),
       position: { x: point.x - node.position.x, y: point.y - node.position.y } });
@@ -140,9 +169,12 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
         event.preventDefault(); event.stopPropagation();
         dispatch({ type: event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo' });
       }
-      if (event.key === 'Escape') setMenu(null);
+      if (event.key === 'Escape') { setMenu(null); closeInspector(); }
     }}>
       <div className="canvas-toolbar">
+        <div className="view-mode" role="group" aria-label="Memory view"><span>View</span>{VIEW_MODES.map(mode => <button key={mode} className="plain-btn" aria-pressed={viewMode === mode} onClick={() => { setViewMode(mode); saveViewMode(mode); setSelectedEdgeId(null); setStatus({ kind: 'ok', text: `${mode[0].toUpperCase() + mode.slice(1)} view` }); }}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}</div>
+        <label className="view-mode-select">View<select value={viewMode} onChange={e => { setViewMode(e.target.value); saveViewMode(e.target.value); setSelectedEdgeId(null); setStatus({ kind: 'ok', text: `${e.target.value} view` }); }}>{VIEW_MODES.map(mode => <option key={mode} value={mode}>{mode[0].toUpperCase() + mode.slice(1)}</option>)}</select></label>
+        <details className="address-model-info"><summary>Simulated addresses</summary><p>Addresses follow PointerViz’s 64-bit teaching model. Arrays and fields use byte offsets. Separate objects use spaced addresses that stay stable while you edit. Native addresses and placement can differ. Addresses are not reused during a run.</p></details>
         <button className="plain-btn" onClick={() => flow?.fitView({ padding: .15, maxZoom: 1 })}>Fit view</button>
         <button className="plain-btn" onClick={() => setLayout(emptyLayout())}>Reset layout</button>
         <button className="plain-btn" disabled={!history.past.length} onClick={() => dispatch({ type: 'undo' })} title="Undo layout (Ctrl+Z)">Undo</button>
@@ -153,15 +185,16 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
       {editable && <div className="canvas-edit-toolbar">
         <button className="plain-btn" onClick={() => addBox('stack', addFrameId)}>Add stack object</button>
         <button className="plain-btn" onClick={() => addBox('heap')}>Add heap allocation</button>
-        {state.allocations.length > 0 && <button className="plain-btn danger" onClick={() => { dispatch({ type: 'clear' }); setViewportSession(s => s + 1); setSelectedId(null); setSelectedEdgeId(null); setMenu(null); onChange?.(makeState(state.structTypes)); }}>Clear</button>}
+        {state.allocations.length > 0 && <button className="plain-btn danger" onClick={() => { dispatch({ type: 'clear' }); setViewportSession(s => s + 1); setSelectedId(null); setSelectedEdgeId(null); setMenu(null); setInspection(null); setRevealedPointer(null); setEditedPreviousState(null); onChange?.(makeState(state.structTypes)); }}>Clear</button>}
       </div>}
+      <div className="canvas-content">
       <ReactFlow
         nodes={interactiveNodes} edges={interactiveEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} colorMode="dark"
         onInit={setFlow} elevateNodesOnSelect={false} elevateEdgesOnSelect={false}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
         onReconnect={(_, connection) => onConnect(connection)} edgesReconnectable={editable}
         onNodeDragStart={begin} onNodeDragStop={end} onSelectionDragStart={begin} onSelectionDragStop={end}
-        onNodeContextMenu={contextMenu} onPaneClick={() => { setMenu(null); setSelectedId(null); setSelectedEdgeId(null); }}
+        onNodeContextMenu={contextMenu} onPaneClick={() => { setMenu(null); closeInspector(); setSelectedEdgeId(null); }}
         onMoveStart={() => setMenu(null)} snapToGrid={snap} snapGrid={[24, 24]}
         nodesConnectable={editable} connectOnClick={false} deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
         fitView fitViewOptions={{ padding: .15, maxZoom: 1 }} minZoom={.1} proOptions={{ hideAttribution: true }}
@@ -173,16 +206,20 @@ export default function MemoryCanvas({ state, previousState = null, onChange, ed
       {menu && <div className="canvas-context-menu" style={{ left: menu.x, top: menu.y }}>
         <button className="plain-btn" onClick={() => addBox('stack', menu.frameId, menu.position)}>Add variable here</button>
       </div>}
-      {selectedEdgeId && edges.some(e => e.id === selectedEdgeId) && <div className="edge-tools">
+      {selectedEdgeId && edges.some(e => e.id === selectedEdgeId && !e.hidden) && <div className="edge-tools">
         <span>Drag the diamond to bend{editable ? ' · Drag the arrowhead to reconnect' : ''}</span>
         <button className="plain-btn" onClick={() => resetRoute(selectedEdgeId)}>Reset route</button>
       </div>}
-      {editable && selected && <Inspector
-        key={selected.id}
-        allocation={selected} state={state}
+      {selected && <MemoryInspector
+        key={selected.id} allocation={selected} state={state}
+        path={inspection?.allocationId === selected.id ? inspection.path : []}
+        editable={!!selectedNode?.data.editable}
         onEdit={fn => mutate(s => fn(getAllocation(s, selected.id), s))}
-        onDelete={() => { mutate(s => removeAllocation(s, selected.id)); setSelectedId(null); }}
+        onDelete={() => { if (mutate(s => removeAllocation(s, selected.id))) closeInspector(); }}
+        onSelectPath={path => inspect(selected.id, path)} onShowTarget={showTarget} onClose={closeInspector}
       />}
+      </div>
+      <div className={`canvas-status ${status?.kind ?? ''}`} role="status" aria-live="polite">{status?.text}</div>
     </div>
   );
 }
@@ -199,64 +236,4 @@ function CanvasViewport() {
   return null;
 }
 
-function Inspector({ allocation: a, state, onEdit, onDelete }) {
-  const [name, setName] = useState(a.name ?? '');
-  useEffect(() => { setName(a.name ?? ''); }, [a.name]);
-  const editor = typeEditor(a.type), scalars = scalarEntries(a, state);
-  const setType = patch => onEdit((obj, currentState) => {
-    const next = { ...editor, ...patch };
-    let t = primitive(next.base);
-    for (let i = 0; i < next.stars; i++) t = pointer(t);
-    if (next.shape === 'array') t = array(t, clampArrayLength(next.length));
-    obj.type = t; obj.value = makeDefaultValue(t, currentState.structTypes);
-  });
-
-  return (
-    <div className="inspector">
-      <h4>{a.storage.kind === 'stack' ? 'Stack object' : 'Heap allocation'}</h4>
-      {a.storage.kind === 'stack' && <><label htmlFor="object-name">Name</label><input id="object-name" value={name}
-        onChange={e => setName(e.target.value)}
-        onBlur={() => { if (name !== (a.name ?? '')) onEdit(obj => { obj.name = name; }); }}
-        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} /></>}
-      {isStruct(a.type) ? <>
-        <label>Type</label><div className="readonly-field">{typeToString(a.type)}</div>
-      </> : <>
-        <label>Shape</label>
-        <select value={editor.shape} onChange={e => setType({ shape: e.target.value })}><option value="scalar">scalar</option><option value="array">array</option></select>
-        <label>Type</label>
-        <div className="type-row">
-          <select value={editor.base} onChange={e => setType({ base: e.target.value })}>{['int', 'char'].map(t => <option key={t}>{t}</option>)}</select>
-          <select className="pointer-depth" value={editor.stars} onChange={e => setType({ stars: Number(e.target.value) })}>{[0, 1, 2, 3].map(n => <option key={n} value={n}>{'*'.repeat(n) || '(value)'}</option>)}</select>
-        </div>
-        {editor.shape === 'array' && <>
-          <label>Array length (max {MAX_ARRAY_LENGTH})</label>
-          <input type="number" min="1" max={MAX_ARRAY_LENGTH} value={editor.length}
-            onChange={e => setType({ length: clampArrayLength(e.target.value) })} />
-        </>}
-      </>}
-      {a.storage.kind === 'heap' && <><label>Lifetime</label><select value={a.alive ? 'alive' : 'freed'} onChange={e => onEdit(obj => { obj.alive = e.target.value === 'alive'; })}><option value="alive">alive</option><option value="freed">freed</option></select></>}
-      <label>Values</label>
-      <div className="inspector-values">{scalars.map(s => <ScalarEditor key={s.path.join('.') || 'root'} entry={s} onEdit={v => onEdit((obj, currentState) => setRefValue(currentState, ref(obj.id, s.path), v))} />)}</div>
-      <div className="actions"><button className="plain-btn danger" onClick={onDelete}>Delete object</button></div>
-    </div>
-  );
-}
-
-function ScalarEditor({ entry, onEdit }) {
-  const label = entry.path.length ? entry.path.map(x => typeof x === 'number' ? `[${x}]` : `.${x}`).join('') : 'value';
-  if (isPointer(entry.type)) return <div className="scalar-editor"><span>{label}</span><select value={entry.value.kind === 'pointer' ? 'pointer' : entry.value.kind} onChange={e => {
-    if (e.target.value === 'null') onEdit({ kind: 'null' }); else if (e.target.value === 'uninit') onEdit({ kind: 'uninit' });
-  }}><option value="uninit">uninitialized</option><option value="null">NULL</option>{entry.value.kind === 'pointer' && <option value="pointer">drawn arrow</option>}</select></div>;
-  return <div className="scalar-editor"><span>{label}</span><input type="number" value={entry.value.kind === 'scalar' ? entry.value.value : ''} placeholder="uninitialized" onChange={e => onEdit(e.target.value === '' ? { kind: 'uninit' } : { kind: 'scalar', value: Number(e.target.value) })} /></div>;
-}
-
-function typeEditor(type) {
-  const shape = isArray(type) ? 'array' : 'scalar', scalar = isArray(type) ? type.of : type;
-  return { shape, base: basePrimitive(scalar) ?? 'int', stars: pointerDepth(scalar), length: isArray(type) ? type.length : 3 };
-}
-function scalarEntries(a, state) { return scalarSubobjects(a, state).map(s => ({ path: s.ref.path, type: s.type, value: s.value })); }
-function removeAllocation(state, id) {
-  state.allocations = state.allocations.filter(a => a.id !== id);
-  for (const a of state.allocations) for (const s of scalarEntries(a, state)) if (s.value.kind === 'pointer' && s.value.target.allocationId === id) setRefValue(state, ref(a.id, s.path), { kind: 'uninit' });
-}
 function nextName(state) { const used = new Set(state.allocations.map(a => a.name)); for (const ch of 'abcdefghijklmnopqrstuvwxyz') if (!used.has(ch)) return ch; return `v${state.allocations.length}`; }

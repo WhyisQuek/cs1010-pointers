@@ -1,9 +1,18 @@
 # Memory addresses: design specification and implementation plan
 
-**Status:** Proposed; application behavior is not changed by this document.  
+**Status:** Initial implementation complete in the working tree; broader release/learner validation remains pending.
+
 **Date:** 18 September 2026  
 **Baseline:** PointerViz 2.2.1  
 **Scope:** Sandbox, playback, editable snapshots, both challenge directions, and instructor previews.
+
+### Implementation status
+
+Implemented: shared LP64 layout, state-owned allocation/frame identities, deterministic sparse addresses, legacy internal-state normalization, all three display modes, typed target editing, full address inspection, boundary/expired-target navigation, atomic structural edits, examples, and regression coverage. Pointers retain their allocation/path representation and provenance. Hardcoded addresses remain shelved; no page table or byte-memory engine was added.
+
+Verification passed: the complete non-native automated suites, the native LP64/UBSan comparison suite through WSL, production build, and execution of all four teaching examples. Browser checks covered own/stored pointer addresses, pointer-to-pointer, array elements/one-past, expired stack targets, freed heap aliases, mode persistence, target navigation, typed picker and source-dot dragging in Addresses mode, rejected incompatible edits, playback restoration, both challenge directions, instructor preview, and wide/narrow canvas layouts. Production preview loaded without console errors. Existing upstream Tree-sitter and bundle-size build warnings remain.
+
+The full browser/accessibility matrix below has not been exhausted: 200% browser zoom, real touch and screen-reader use, maximum-size/dense-graph performance comparisons, and formative novice learning checks remain release follow-ups. Both is implemented as the default pending those learner checks. There is no public historical-trace importer; `upgradeMemoryState` upgrades individual internal states, not independently numbered legacy trace snapshots.
 
 ## 1. Recommendation
 

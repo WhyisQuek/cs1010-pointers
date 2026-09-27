@@ -140,7 +140,7 @@ export default function LevelEditor() {
 
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: 420 }}>
         <div className="panel-head" style={{ border: '1px solid var(--line)', borderRadius: '4px 4px 0 0' }}>target preview</div>
-        <div style={{ flex: 1, border: '1px solid var(--line)', borderTop: 'none', borderRadius: '0 0 4px 4px', overflow: 'hidden', position: 'relative' }}>
+        <div style={{ flex: 1, display: 'flex', minHeight: 0, border: '1px solid var(--line)', borderTop: 'none', borderRadius: '0 0 4px 4px', overflow: 'hidden', position: 'relative' }}>
           {preview
             ? <MemoryCanvas key={code} state={preview} editable={false} />
             : <div className="loading-screen">fix the code to see the preview</div>}

@@ -69,7 +69,14 @@ Examples:
 {
   allocations: [],
   frames: [],
-  structTypes: {}
+  structTypes: {},
+  identity: { allocation: 0, frame: 0 },
+  addressSpace: {
+    version: 1,
+    profile: 'pointerviz-lp64-sparse-v1',
+    nextStackSlot: 0,
+    nextHeapSlot: 0
+  }
 }
 ```
 
@@ -98,6 +105,7 @@ This is semantic history, independent of visibility. The canvas hides returned f
   type: { kind: 'struct', name: 'Node' },
   storage: { kind: 'stack', frameId: 'main' },
   alive: true,
+  baseAddress: 268435456, // simulated 0x10000000
   value: ...
 }
 ```
@@ -157,6 +165,10 @@ Examples:
 An array-element one-past pointer uses its array length as the last numeric path component. The reserved `$onePast` component denotes one past a scalar, struct, or whole array treated as an object of length one. It is terminal and never selects storage. Nested paths cannot continue through any one-past address. No C field identifier can collide with this marker.
 
 A pointer stores this semantic reference rather than a React Flow handle or real address.
+
+`referenceLocation(state, ref)` derives its numeric address from the root's `baseAddress` plus array strides and struct field offsets. `layoutOf` supplies the shared LP64 size/alignment/field layout used by `sizeof` and pointer operations. Pointer values themselves are unchanged: provenance and bounds come from the allocation ID and path, never from a numeric address lookup. Different subobjects or a one-past boundary can share a number without becoming interchangeable targets.
+
+Each root gets a separate 64 KiB reservation in the simulated stack or heap region. This is a numeric interval, not a byte buffer or an OS page. Actual size is derived from the type. Cursors and identity counters belong to the state and are cloned with snapshots; deletion, return, and free do not rewind them. Runs start fresh. `upgradeMemoryState` normalizes legacy internal states without mutating the original; versioned metadata is validated. There is no saved-trace import format to migrate.
 
 ## 5. Scopes and lifetime
 

@@ -1,3 +1,4 @@
+import { addressOffset } from './addresses.js';
 /**
  * PointerViz Mini-C semantic interpreter.
  *
@@ -7,7 +8,7 @@
  * Executed statements emit trace events and snapshots for step-through playback.
  */
 import {
-  INT, alignmentOf, isArray, isPointer, isPrimitive, isStruct, pointer, resolveStructType,
+  INT, isArray, isPointer, isPrimitive, isStruct, pointer, resolveStructType,
   sizeOf, typeEquals, typeToString,
 } from '../language/types.js';
 import { MAX_CALL_DEPTH, MAX_HEAP_ELEMENTS, MAX_LOOP_ITERATIONS, MAX_TRACE_STEPS } from '../language/limits.js';
@@ -16,12 +17,11 @@ import { checkProgram } from '../language/checker.js';
 import { decodeCharLiteral } from '../language/literals.js';
 import {
   addAllocation, addFrame, cloneState, decayRef, endFrame, freshFrameId, getAllocation,
-  heapAllocationType, makeState, pointerValue, ref, refType, resetAllocationIds,
+  heapAllocationType, makeState, pointerValue, ref, refType,
   resolveRef, setRefValue,
 } from './memory.js';
 
 export function executeProgram(program) {
-  resetAllocationIds();
   const normalized = normalizeProgram(program);
   checkProgram(normalized);
   const structTypes = Object.fromEntries((normalized.structs ?? []).map(s => [s.name, structuredClone(s)]));
@@ -54,7 +54,7 @@ function callFunction(ctx, fn, args, callerFrame, entry = false) {
   if (ctx.callDepth >= MAX_CALL_DEPTH) throw new Error(`maximum call depth (${MAX_CALL_DEPTH}) exceeded`);
   if (args.length !== fn.params.length) throw new Error(`${fn.name} expects ${fn.params.length} argument(s), got ${args.length}`);
   ctx.callDepth++;
-  const frameId = entry ? 'main' : freshFrameId(fn.name);
+  const frameId = entry ? 'main' : freshFrameId(ctx.state, fn.name);
   const frame = addFrame(ctx.state, {
     id: frameId, name: fn.name, callerId: callerFrame?.id ?? null,
     depth: callerFrame ? callerFrame.depth + 1 : 0, active: true,
@@ -711,22 +711,6 @@ function compareScalars(left, right, ctx, node) {
   throw semanticError(node, `relational comparison requires numbers or pointers into the same array`);
 }
 
-function addressOffset(state, target) {
-  let type = getAllocation(state, target.allocationId).type, offset = 0;
-  for (const part of target.path) {
-    if (part === '$onePast') return offset + sizeOf(type, state.structTypes);
-    if (isArray(type)) { offset += part * sizeOf(type.of, state.structTypes); type = type.of; }
-    else if (isStruct(type)) {
-      for (const field of resolveStructType(type, state.structTypes).fields) {
-        const alignment = alignmentOf(field.type, state.structTypes);
-        offset = Math.ceil(offset / alignment) * alignment;
-        if (field.name === part) { type = field.type; break; }
-        offset += sizeOf(field.type, state.structTypes);
-      }
-    }
-  }
-  return offset;
-}
 
 function isNullLike(rv) {
   return rv.value.kind === 'null' || (isIntegerRuntime(rv) && rv.integerConstant && rv.value.value === 0);

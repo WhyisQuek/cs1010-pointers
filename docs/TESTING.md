@@ -17,11 +17,20 @@ The suites are:
 | `npm run test:layout` | Frame growth/resizing, lifetime, handle, routing, and layout history cases |
 | `npm run test:flow-integration` | 4 cases that feed real C execution snapshots through the layout adapter, including typed pointer targets |
 | `npm run test:semantics` | 153 C semantic, constraint, lifetime, bounds and round-trip tests |
+| `npm run test:addresses` | Simulated placement, LP64 offsets, provenance/status, history, atomic edits, view geometry, and address-independent grading/generation |
 | `npm run test:native` | 76 defined programs compared with a native LP64 C11 compiler |
 
 The native suite first compiles and runs a small probe to check LP64 sizes, signed char, and the undefined-behavior sanitizer runtime. It skips with a reason when the compiler is missing or incompatible, including Windows compilers with 4-byte `long`. Linux CI sets `POINTERVIZ_REQUIRE_NATIVE=1`, which makes these conditions fail instead of skip. After the probe succeeds, fixture compilation, execution, and result mismatches always fail the test. Set `POINTERVIZ_CC` to a compatible compiler command or `POINTERVIZ_WSL_DISTRO` to an installed Linux distribution on Windows. See [the C semantics audit](C_SEMANTICS_AUDIT.md).
 
 Layout tests use the same adapter as the canvas and verify its output without a browser. They cannot replace interaction checks.
+
+## Memory-address regression checks
+
+The initial implementation passed the complete non-native suites, the required native LP64/UBSan comparison suite using WSL, the production build, and all four address examples. Browser checks verified playback and snapshot restoration, alias/pointer-to-pointer values, one-past and expired-target inspection, mode persistence, typed-picker and drag retargeting in Addresses mode, atomic rejection, both challenge directions, instructor previews, and wide/narrow panes. The production preview reported no console errors. The broader checks below remain a release checklist, not a claim of completed user testing.
+
+Use [the address examples](../examples/memory-addresses.md). Verify all three modes preserve object geometry and state. In the inspector compare &p, p, and *p, copy full addresses, navigate to exact members and one-past boundaries, and reveal expired targets. Edit a snapshot, retarget through the typed picker in Addresses mode, reject an incompatible type/shrink, then return to playback. Verify source-dot dragging still offers compatible targets while edges are hidden.
+
+Check wide and narrow panes, keyboard focus, toolbar wrapping, long names, mixed pointer/scalar rows, and 64-element arrays. Browser accessible labels must identify own and stored addresses separately. Check Sandbox, both challenge directions, and instructor previews. The full design also calls for 200% zoom, touch/screen-reader testing, performance comparisons, and novice learning checks; automated DOM checks alone do not establish those results.
 
 GitHub Actions runs the full test/build commands on Windows and Linux with Node 22 and 24.
 

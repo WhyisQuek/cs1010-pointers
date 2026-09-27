@@ -1,5 +1,7 @@
 # Architecture
 
+Simulated addresses are semantic allocation metadata: `machine/addresses.js` assigns deterministic reservations and derives subobject offsets from the shared LP64 `layoutOf` in `language/types.js`. Pointer values remain allocation/path references. `machine/editing.js` validates structural diagram changes atomically. `flow/addressPresentation.js` and `components/MemoryInspector.jsx` expose addresses without changing execution, generated C, or challenge equivalence. Display mode and target highlighting remain canvas presentation state. See [DATA_MODEL.md](DATA_MODEL.md) and [MEMORY_ADDRESSES_DESIGN.md](MEMORY_ADDRESSES_DESIGN.md).
+
 ## 1. Layers
 
 PointerViz keeps parsing, semantics, memory and presentation separate.

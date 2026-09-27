@@ -170,6 +170,8 @@ A loop that exceeds 256 iterations is stopped with an error. This prevents accid
 
 ## Teaching-machine sizes
 
+Memory views use simulated byte addresses following these sizes and natural struct alignment/padding. Separate root objects occupy spaced reservations, so their displayed gaps are not native stack layout. Addresses are derived from typed references; they do not enable pointer casts, hardcoded address entry, `%p`, or cross-object pointer arithmetic. A pointer going beyond its permitted object/array boundary is rejected even if a numeric location could coincide with another object. A one-past value is labeled and cannot be dereferenced; an expired target is dangling.
+
 | Type | Size |
 |---|---:|
 | `char` | 1 |

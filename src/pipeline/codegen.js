@@ -1,3 +1,4 @@
+import { upgradeMemoryState, validateAddressSpace } from '../machine/addresses.js';
 /** MemoryState -> one canonical PointerViz Mini-C program. */
 import {
   declarationToC, isArray, isPointer, isPrimitive, isStruct, pointer, resolveStructType,
@@ -34,6 +35,8 @@ export function validate(state) {
       validateValueShape(a.type, a.value, allocationDisplayName(state, a), errors, state.structTypes ?? {});
     } catch (e) { errors.push(e.message); }
   }
+  try { if (state.addressSpace != null) validateAddressSpace(state); else upgradeMemoryState(state); }
+  catch (e) { errors.push(e.message); }
   if (errors.length) throw new ValidationError(errors);
   // Resolve inside the diagnostic boundary; malformed targets must not crash grading.
   const edges = state.allocations.flatMap(a => scalarSubobjects(a, state).filter(s => s.value.kind === 'pointer').map(s => ({ source: s.ref, target: s.value.target })));

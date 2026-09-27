@@ -1,9 +1,25 @@
+import { referenceLocation } from '../machine/addresses.js';
+import { describePointer } from './addressPresentation.js';
 /** Pure MemoryState → canvas layout. Coordinates never enter MemoryState. */
-import { allocationDisplayName, frameAllocations, heapAllocations, pointerEdges, resolveRef, scalarSubobjects } from '../machine/memory.js';
-import { typeToString } from '../language/types.js';
+import { allocationDisplayName, frameAllocations, heapAllocations, pointerEdges, resolveRef, scalarSubobjects, sameRef } from '../machine/memory.js';
+import { isArray, isPointer, isStruct, typeToString } from '../language/types.js';
 import { curvePointer } from './routing.js';
 
-export const GEOMETRY = { header: 34, row: 28, lifetime: 24, padding: 24, top: 52, gap: 32 };
+export const GEOMETRY = { header: 34, metadata: 24, columns: 24, row: 32, pointerStatus: 20, lifetime: 24, padding: 24, top: 52, gap: 32 };
+export const memoryMetricsStyle = Object.fromEntries(Object.entries(GEOMETRY).map(([key, value]) => [`--memory-${key}`, `${value}px`]));
+export function allocationMetrics(a, state) {
+  const aggregate = isArray(a.type) || isStruct(a.type);
+  let top = GEOMETRY.header + GEOMETRY.metadata + (aggregate ? GEOMETRY.columns : 0) + (a.alive ? 0 : GEOMETRY.lifetime);
+  const rows = scalarSubobjects(a, state).map(s => {
+    const height = GEOMETRY.row + (isPointer(s.type) ? GEOMETRY.pointerStatus : 0);
+    const row = { ...s, top, height }; top += height; return row;
+  });
+  return { aggregate, rows, height: top + 2 };
+}
+const locationKey = (state, scalar) => {
+  try { return `${referenceLocation(state, scalar.ref).address}:${isPointer(scalar.type) ? describePointer(state, scalar.value).address : ''}`; }
+  catch { return 'invalid'; }
+};
 export const handleId = (kind, path = [], side = 'left') => `${kind}:${path.length ? path.join('.') : 'root'}:${side}`;
 export function pathFromHandle(id) {
   const raw = id?.split(':')[1];
@@ -11,12 +27,11 @@ export function pathFromHandle(id) {
 }
 
 export function allocationSize(a, state) {
-  const rows = scalarSubobjects(a, state);
   const textWidth = (allocationDisplayName(state, a).length + typeToString(a.type).length) * 8 + 40;
-  return { width: Math.min(440, Math.max(240, textWidth)), height: 2 + GEOMETRY.header + rows.length * GEOMETRY.row + (a.alive ? 0 : GEOMETRY.lifetime) };
+  return { width: Math.min(440, Math.max(320, textWidth)), height: allocationMetrics(a, state).height };
 }
 
-export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, routes = {}, editable = false, badIds = new Set(), showExpired = false, previousState = null } = {}) {
+export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, routes = {}, editable = false, badIds = new Set(), showExpired = false, previousState = null, viewMode = 'both', revealedPointer = null } = {}) {
   const nodes = [];
   const oldAllocations = new Map(previousState?.allocations.map(a => [a.id, a]) ?? []);
   const semanticEdges = pointerEdges(state);
@@ -24,14 +39,15 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
     const old = oldAllocations.get(a.id);
     const changedPaths = new Set();
     if (previousState) {
-      const oldRows = new Map(old ? scalarSubobjects(old, previousState).map(s => [JSON.stringify(s.ref.path), s.value]) : []);
+      const oldRows = new Map(old ? scalarSubobjects(old, previousState).map(s => [JSON.stringify(s.ref.path), s]) : []);
       for (const s of scalarSubobjects(a, state)) {
         const key = JSON.stringify(s.ref.path);
-        if (JSON.stringify(oldRows.get(key)) !== JSON.stringify(s.value)) changedPaths.add(key);
+        const prior = oldRows.get(key);
+        if (JSON.stringify(prior?.value) !== JSON.stringify(s.value) || (prior && locationKey(previousState, prior) !== locationKey(state, s))) changedPaths.add(key);
       }
     }
     return { changed: !!previousState && (!old || old.alive !== a.alive || changedPaths.size > 0), changedPaths, sourceSides: {},
-      targetPaths: new Set(semanticEdges.filter(e => e.target.allocationId === a.id).map(e => JSON.stringify(e.target.path))) };
+      targetPaths: new Set(semanticEdges.filter(e => e.target?.allocationId === a.id).map(e => JSON.stringify(e.target.path))) };
   };
   const frames = state.frames?.length ? state.frames : state.allocations.some(a => a.storage.kind === 'stack')
     ? [{ id: 'main', name: 'main', depth: 0, active: true }] : [];
@@ -65,9 +81,9 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
       const size = sizes[i];
       nodes.push({ id: a.id, type: 'memoryAllocation', parentId: id, expandParent: false,
         position: locals[i],
-        draggable: a.alive, selectable: a.alive, deletable: editable && frame.active && a.alive,
+        draggable: a.alive, selectable: true, deletable: editable && frame.active && a.alive,
         zIndex: 2, ...size, style: size,
-        data: { allocation: a, state, ...changes(a), editable: editable && frame.active && a.alive, bad: badIds.has(a.id) },
+        data: { allocation: a, state, viewMode, ...changes(a), editable: editable && frame.active && a.alive, bad: badIds.has(a.id) },
       });
     });
     // Every invocation gets a distinct slot, even with the same depth/name.
@@ -86,8 +102,8 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
     }
     occupiedHeap.push({ ...position, ...size });
     nodes.push({ id: a.id, type: 'memoryAllocation', position,
-      ...size, style: size, zIndex: 2, draggable: a.alive, selectable: a.alive, deletable: editable && a.alive,
-      data: { allocation: a, state, ...changes(a), editable: editable && a.alive, bad: badIds.has(a.id) },
+      ...size, style: size, zIndex: 2, draggable: a.alive, selectable: true, deletable: editable && a.alive,
+      data: { allocation: a, state, viewMode, ...changes(a), editable: editable && a.alive, bad: badIds.has(a.id) },
     });
     heapY += size.height + GEOMETRY.gap;
   }
@@ -100,7 +116,7 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
   function anchor(r, side, kind = 'target') {
     const box = boxes.get(r.allocationId), node = byId.get(r.allocationId);
     if (!box) return null;
-    const rows = scalarSubobjects(node.data.allocation, state);
+    const rows = allocationMetrics(node.data.allocation, state).rows;
     let row = rows.findIndex(s => JSON.stringify(s.ref.path) === JSON.stringify(r.path));
     if (row < 0 && r.path.length) {
       const resolved = resolveRef(state, r);
@@ -109,10 +125,11 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
     // Aggregate roots attach to the header; one-past references have no target row.
     if (row < 0 && r.path.length) return null;
     return { x: box.x + (side === 'right' ? box.width : 0),
-      y: box.y + 1 + (row < 0 ? GEOMETRY.header / 2 : GEOMETRY.header + (node.data.allocation.alive ? 0 : GEOMETRY.lifetime) + (row + (kind === 'source' ? .7 : .35)) * GEOMETRY.row) };
+      y: box.y + 1 + (row < 0 ? GEOMETRY.header / 2 : rows[row].top + GEOMETRY.row / 2) };
   }
   const edges = [];
   for (const e of semanticEdges) {
+    if (e.status === 'invalid' || e.status === 'one-past') continue;
     if (!boxes.has(e.source.allocationId) || !boxes.has(e.target.allocationId)) continue;
     const sourceBox = boxes.get(e.source.allocationId), targetBox = boxes.get(e.target.allocationId);
     const self = e.source.allocationId === e.target.allocationId;
@@ -131,6 +148,7 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
       source: e.source.allocationId, sourceHandle: handleId('src', e.source.path, sourceSide),
       target: e.target.allocationId, targetHandle: handleId('tgt', e.target.path, side),
       type: 'memoryPointer', data: { ...route, manual: !!routes[id] }, zIndex: 1,
+      hidden: viewMode === 'addresses' && !sameRef(e.source, revealedPointer),
       selectable: true,
       reconnectable: editable && byId.get(e.source.allocationId).data.editable ? 'target' : false,
       deletable: editable && byId.get(e.source.allocationId).data.editable,

@@ -1,9 +1,11 @@
+import { referenceLocation } from '../machine/addresses.js';
+import { describePointer, formatAddress, pointerAccessibleLabel, pointerCaption } from './addressPresentation.js';
 /** React components for the pure layout adapter in layout.js. */
 import React, { useLayoutEffect, useRef } from 'react';
 import { BaseEdge, Handle, Position, useConnection, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
-import { isArray, isPointer, isStruct, typeToString } from '../language/types.js';
-import { allocationDisplayName, pointerCanTarget, pointerStatus, ref, resolveRef, scalarSubobjects } from '../machine/memory.js';
-import { handleId, pathFromHandle } from './layout.js';
+import { isArray, isPointer, isStruct, sizeOf, typeToString } from '../language/types.js';
+import { allocationDisplayName, pointerCanTarget, ref, resolveRef } from '../machine/memory.js';
+import { allocationMetrics, handleId, memoryMetricsStyle, pathFromHandle } from './layout.js';
 
 export function FrameGroupNode({ id, data, selected }) {
   return <>
@@ -65,29 +67,27 @@ function TargetHandles({ path = [], state, allocation, sourceType, editable }) {
     isConnectable={!!available} isConnectableStart={false} />);
 }
 
-function Value({ state, value }) {
-  if (value.kind === 'pointer') {
-    const status = pointerStatus(state, value);
-    const target = resolveRef(state, value.target).label;
-    return <span className={`val pointer-value ${status === 'dangling' ? 'dangling' : 'ptr'}`}
-      title={`${status} pointer to ${target}`} aria-label={`${status} pointer to ${target}`}>
-      {status !== 'valid' && <span className="pointer-status">{status}</span>}
-      <svg className="pointer-indicator" width="30" height="20" viewBox="0 0 30 20" aria-hidden="true">
+function Value({ state, value, type, viewMode }) {
+  if (isPointer(type)) {
+    const d = describePointer(state, value);
+    const text = d.status === 'null' ? 'NULL' : d.status === 'uninitialized' ? 'uninitialized' : d.status === 'invalid' ? 'invalid reference' : formatAddress(d.address);
+    return <span className={`val pointer-value ${['dangling', 'invalid'].includes(d.status) ? 'dangling' : 'ptr'}`}>
+      {viewMode === 'arrows' && d.target ? <svg className="pointer-indicator" width="30" height="20" viewBox="0 0 30 20" aria-hidden="true">
         <path d="M2 10H26M18 3L26 10L18 17" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      </svg> : text}
     </span>;
   }
-  return <span className={`val ${value.kind}`}>{value.kind === 'scalar' ? String(value.value) : value.kind === 'null' ? 'NULL' : 'uninitialized'}</span>;
+  return <span className={`val ${value.kind}`}>{value.kind === 'scalar' ? String(value.value) : 'uninitialized'}</span>;
 }
 
 export function MemoryAllocationNode({ id, data, selected }) {
-  const { allocation: a, state, bad, editable, changed, changedPaths, sourceSides } = data;
+  const { allocation: a, state, bad, editable, changed, changedPaths, sourceSides, viewMode = 'both', inspectedPath } = data;
   const fromHandle = useConnection(connection => connection.fromHandle);
   const sourceType = fromHandle?.type === 'source'
     ? resolveRef(state, ref(fromHandle.nodeId, pathFromHandle(fromHandle.id))).type : null;
   const targetProps = { state, allocation: a, sourceType, editable };
   const updateNodeInternals = useUpdateNodeInternals();
-  const scalars = scalarSubobjects(a, state);
+  const { rows: scalars, aggregate } = allocationMetrics(a, state);
   const aggregateHandles = new Set();
   const rowTargets = scalars.map(s => {
     const paths = [s.ref.path];
@@ -100,17 +100,26 @@ export function MemoryAllocationNode({ id, data, selected }) {
   const signature = `${a.alive}:${JSON.stringify(a.type)}:${scalars.map(s => s.ref.path.join('.')).join('|')}`;
   // Type/array-size edits change handle geometry even when the node ID survives.
   useLayoutEffect(() => { updateNodeInternals(id); }, [id, signature, updateNodeInternals]);
-  return <div className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}>
+  return <div style={memoryMetricsStyle} className={`mem-cell view-${viewMode} ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}>
     <div className="head">
       {(isArray(a.type) || isStruct(a.type)) && <TargetHandles {...targetProps} />}
-      <span className="name" title={allocationDisplayName(state, a)}>{allocationDisplayName(state, a)}</span>
+      <button className="name inspect-label nodrag" title={allocationDisplayName(state, a)} onClick={e => { e.stopPropagation(); data.onInspect?.([]); }}>{allocationDisplayName(state, a)}</button>
       <span className="type" title={typeToString(a.type)}>{typeToString(a.type)}</span>
     </div>
+    <div className="memory-address-strip"><span>{viewMode === 'arrows' ? a.storage.kind : <>Address <code>{formatAddress(a.baseAddress)}</code></>}</span><span>{sizeOf(a.type, state.structTypes)} bytes</span></div>
     {!a.alive && <div className="lifetime-banner">{a.storage.kind === 'heap' ? 'freed' : 'out of scope'}</div>}
-    <div className="subobject-list">{scalars.map((s, i) => <div className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}`} key={s.ref.path.join('.') || 'root'}>
+    {aggregate && <div className="memory-columns"><span>Member</span>{viewMode !== 'arrows' && <span>Address</span>}<span>Value</span></div>}
+    <div className="subobject-list">{scalars.map((s, i) => <div style={{ height: s.height }} className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}${JSON.stringify(inspectedPath) === JSON.stringify(s.ref.path) ? ' inspected-row' : ''}`} key={s.ref.path.join('.') || 'root'}
+      aria-label={isPointer(s.type) ? pointerAccessibleLabel(state, s) : `${allocationDisplayName(state, a)}${formatPath(s.ref.path)}, address ${formatAddress(referenceLocation(state, s.ref).address)}`}>
       {rowTargets[i].map(path => <TargetHandles key={path.join('.')} path={path} {...targetProps} />)}
-      {s.ref.path.length > 0 && <span className="sub-label" title={formatPath(s.ref.path)}>{formatPath(s.ref.path)}</span>}
-      <Value state={state} value={s.value} />
+      <div className={`memory-value-line${aggregate ? ' aggregate-line' : ''}`}>
+        <button className="sub-label inspect-label nodrag" title={`Inspect ${allocationDisplayName(state, a)}${formatPath(s.ref.path)}`} onClick={e => { e.stopPropagation(); data.onInspect?.(s.ref.path); }}>{s.ref.path.length ? formatPath(s.ref.path) : 'Value'}</button>
+        {aggregate && viewMode !== 'arrows' && <code className="sub-address">{formatAddress(referenceLocation(state, s.ref).address)}</code>}
+        <Value state={state} type={s.type} value={s.value} viewMode={viewMode} />
+      </div>
+      {isPointer(s.type) && <div className={`pointer-caption ${['dangling', 'invalid', 'one-past'].includes(describePointer(state, s.value).status) ? 'warning' : ''}`} title={pointerCaption(describePointer(state, s.value))}>
+        {s.value.kind === 'null' && viewMode !== 'arrows' ? '0x00000000 · no target' : pointerCaption(describePointer(state, s.value))}
+      </div>}
       {isPointer(s.type) && ['left', 'right'].map(side => {
         const available = editable && side === (sourceSides?.[JSON.stringify(s.ref.path)] ?? 'right');
         return <Handle key={side} type="source" id={handleId('src', s.ref.path, side)}

@@ -9,19 +9,35 @@
 import {
   isArray, isPointer, isPrimitive, isStruct, resolveStructType, typeEquals, typeToString, validateObjectType,
 } from '../language/types.js';
+import { makeAddressSpace, nextAddress, referenceOffset, upgradeMemoryState } from './addresses.js';
 
-let nextAllocationId = 0;
-let nextFrameId = 0;
-export function resetAllocationIds() { nextAllocationId = 0; nextFrameId = 0; }
-export function freshAllocationId() { return `a${nextAllocationId++}`; }
-export function freshFrameId(name = 'frame') { return name === 'main' && nextFrameId === 0 ? (nextFrameId++, 'main') : `frame${nextFrameId++}`; }
-
-export function makeState(structTypes = {}) {
-  return { allocations: [], frames: [], structTypes: structuredClone(structTypes) };
+// Kept for older callers. New states own their counters; interpreting a second
+// program can never reset identities in an editable diagram or snapshot copy.
+export function resetAllocationIds() {}
+function candidateId(state, kind) {
+  const prefix = kind === 'allocation' ? 'a' : 'frame';
+  const records = kind === 'allocation' ? state.allocations : state.frames;
+  let index = state.identity?.[kind] ?? 0;
+  while (records.some(r => r.id === `${prefix}${index}`)) index++;
+  return `${prefix}${index}`;
+}
+export const freshAllocationId = state => candidateId(state, 'allocation');
+export const freshFrameId = (state, name = 'frame') => name === 'main' && !state.frames.some(f => f.id === 'main') ? 'main' : candidateId(state, 'frame');
+function commitIdentity(state, kind, id) {
+  const suffix = id.match(kind === 'allocation' ? /^a(\d+)$/ : /^frame(\d+)$/);
+  state.identity = { allocation: 0, frame: 0, ...state.identity,
+    [kind]: Math.max(state.identity?.[kind] ?? 0, suffix ? Number(suffix[1]) + 1 : id === 'main' ? 1 : 0) };
 }
 
-export function addFrame(state, { id = freshFrameId(), name, callerId = null, depth = 0, active = true } = {}) {
+export function makeState(structTypes = {}) {
+  return { allocations: [], frames: [], structTypes: structuredClone(structTypes),
+    identity: { allocation: 0, frame: 0 }, addressSpace: makeAddressSpace() };
+}
+
+export function addFrame(state, { id = freshFrameId(state), name, callerId = null, depth = 0, active = true } = {}) {
+  if (typeof id !== 'string' || !id || state.frames.some(f => f.id === id)) throw new Error(`duplicate or missing frame id '${id}'`);
   const frame = { id, name, callerId, depth, active };
+  commitIdentity(state, 'frame', id);
   state.frames.push(frame);
   return frame;
 }
@@ -48,15 +64,23 @@ export function makeDefaultValue(type, structTypes = {}) {
 }
 
 export function addAllocation(state, {
-  id = freshAllocationId(), name = null, type,
+  id = freshAllocationId(state), name = null, type,
   storage = { kind: 'stack', frameId: 'main' }, alive = true, value = null,
 } = {}) {
   if (!type) throw new Error('allocation requires a type');
+  if (typeof id !== 'string' || !id || state.allocations.some(a => a.id === id)) throw new Error(`duplicate or missing allocation id '${id}'`);
   validateObjectType(type, state.structTypes);
   const allocation = {
     id, name, type: structuredClone(type), storage: structuredClone(storage), alive,
     value: value ? structuredClone(value) : makeDefaultValue(type, state.structTypes),
   };
+  const prepared = state.addressSpace == null ? upgradeMemoryState(state) : state;
+  const reserved = nextAddress(prepared.addressSpace, storage, type, state.structTypes);
+  if (prepared.allocations.some(a => a.baseAddress === reserved.baseAddress)) throw new Error('simulated address cursor collides with an allocation');
+  allocation.baseAddress = reserved.baseAddress;
+  if (prepared !== state) state.allocations = prepared.allocations;
+  state.addressSpace = reserved.addressSpace;
+  commitIdentity(state, 'allocation', id);
   state.allocations.push(allocation);
   return allocation;
 }
@@ -77,6 +101,7 @@ export function sameRef(a, b) {
 }
 
 export function resolveRef(state, targetRef, { allowDead = true } = {}) {
+  if (!targetRef || !Array.isArray(targetRef.path ?? [])) throw new Error('invalid reference path');
   const allocation = getAllocation(state, targetRef.allocationId);
   if (!allowDead && !allocation.alive) throw new Error('reference points to an object whose lifetime has ended');
   let type = allocation.type;
@@ -136,11 +161,11 @@ export function pointerStatus(state, value) {
   if (value.kind === 'null') return 'null';
   if (value.kind === 'uninit') return 'uninitialized';
   if (value.kind !== 'pointer') return 'not-pointer';
-  const target = resolveRef(state, value.target);
-  if (!target.allocation.alive) return 'dangling';
-  if (target.invalid) return 'invalid';
-  if (target.onePast) return 'one-past';
-  return 'valid';
+  try {
+    const target = referenceOffset(state, value.target);
+    if (!target.allocation.alive) return 'dangling';
+    return target.onePast ? 'one-past' : 'valid';
+  } catch { return 'invalid'; }
 }
 
 export function scalarSubobjects(allocation, stateOrStructTypes = {}) {
@@ -192,6 +217,20 @@ export const refType = (state, r) => resolveRef(state, r).type;
 
 export function pointerCanTarget(state, pointerType, targetRef) {
   if (!isPointer(pointerType)) return false;
-  const resolved = resolveRef(state, targetRef);
-  return !resolved.invalid && !resolved.onePast && typeEquals(pointerType.to, resolved.type);
+  try {
+    const resolved = resolveRef(state, targetRef);
+    return resolved.allocation.alive && !resolved.invalid && !resolved.onePast && typeEquals(pointerType.to, resolved.type);
+  } catch { return false; }
+}
+
+/** Includes aggregate roots/subarrays, unlike scalarSubobjects(). */
+export function addressableSubobjects(allocation, state) {
+  const out = [];
+  const visit = (type, path) => {
+    out.push({ type, ref: ref(allocation.id, path) });
+    if (isArray(type)) for (let i = 0; i < type.length; i++) visit(type.of, [...path, i]);
+    if (isStruct(type)) for (const field of resolveStructType(type, state.structTypes).fields) visit(field.type, [...path, field.name]);
+  };
+  visit(allocation.type, []);
+  return out;
 }

@@ -1,5 +1,15 @@
 # Memory visualization
 
+## Simulated addresses
+
+**Both** is the default: each object shows its own address and size, pointer values show the target's address, and arrows show the relationship. **Arrows** hides numeric canvas labels; **Addresses** hides persistent edges. The view preference is saved locally. Switching modes does not change state, positions, dimensions, routes, or grading.
+
+Select an object name or member label to inspect it, including during playback. The inspector separates **Address of p (&p)**, **Stored address (p)**, and **Target value (*p)**, with full-width hexadecimal addresses and Copy actions. **Show target** selects the exact member and reveals its relationship in Addresses mode. **Show expired target** reveals historical storage. **Show boundary** identifies a one-past location without reading it. Narrow memory panes put the scrollable inspector below the canvas.
+
+Editable pointers have a typed **Target** picker in every mode, including NULL and uninitialized choices. Source-dot dragging also works with hidden edges. Addresses are read-only. Type/array edits preserve a root's base address and reset its value, and are rejected atomically if an incoming pointer would become invalid or historical pointer facts would change. Valid changes to subobject addresses/status are highlighted. Deletion clears live incoming pointers but is rejected when an expired source still records the target.
+
+The teaching model uses LP64 sizes and padding, deterministic spaced root addresses, and no address reuse within a run. NULL displays a zero address, uninitialized pointers have no known address, and dangling pointers retain a labeled former address. These are simulated addresses, not native process addresses. See [the runnable teaching examples](../examples/memory-addresses.md).
+
 ## Frames and lifetimes
 
 Each function invocation has its own frame ID and default horizontal slot. Slots use the visible frame order, rather than call depth, so repeated calls and recursion do not overlap. Frames start with horizontal room for multiple boxes and grow to fit their visible allocations, including long declarations and 64-element arrays.
@@ -24,7 +34,7 @@ Returned frames and expired locals remain read-only. Generating C still requires
 
 ## Boxes and arrows
 
-Pointer values use a fixed 30 × 20 SVG indicator independent of text font metrics. Names and types use bounded columns, with full text available on hover.
+Pointer values use hexadecimal text in Both/Addresses and a fixed 30 × 20 SVG indicator in Arrows. Names and types use bounded columns, with full text available on hover. Pointer rows reserve a second line for target/status information in every mode; row metrics and CSS variables come from the same geometry definition.
 
 Pointers choose left or right attachment sides based on relative box positions. Each editable pointer has one blue source dot on its outgoing side (the right side before it has an arrow). Drag this dot to set the pointer. Target anchors are hidden at rest, including during playback; while drawing or reconnecting an arrow, compatible editable targets appear as outlined squares on both sides. Hidden handles remain mounted so existing arrows retain their geometry. Type and array-size edits refresh handle geometry.
 
@@ -49,6 +59,9 @@ Automatic routing is a lightweight heuristic, not a general obstacle solver. Man
 - `src/flow/routing.js`: cubic curves, manual bends, obstacle-aware fallback, self-loops.
 - `src/flow/memoryFlow.jsx`: node/edge React components and pointer indicator.
 - `src/components/MemoryCanvas.jsx`: session layout, drag gestures, selection, creation, semantic editor, history toggle, viewport.
+- `src/components/MemoryInspector.jsx`: read-only address facts, typed target editing, and exact subobject navigation.
+- `src/machine/addresses.js`, `src/machine/editing.js`: simulated address placement and atomic structural edits.
+- `src/flow/addressPresentation.js`: safe pointer descriptions, formatting, and display preference.
 - `src/styles.css`: fixed header/row dimensions and visual layers. Keep these dimensions in sync with `GEOMETRY`.
 
 The parent/child layout follows React Flow's [sub-flow model](https://reactflow.dev/learn/layouting/sub-flows). Parent nodes precede children and children use relative positions. Children have no fixed parent extent; workspace operations grow the parent to preserve ownership, header space, and padding. Custom edges render through [BaseEdge](https://reactflow.dev/api-reference/components/base-edge).

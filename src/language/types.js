@@ -67,44 +67,44 @@ export function resolveStructType(type, structTypes = {}) {
   return structTypes[type.name] ?? type;
 }
 
-export function sizeOf(type, structTypes = {}) {
+/** One layout calculation for sizeof, member offsets, and simulated addresses. */
+export function layoutOf(type, structTypes = {}, visiting = new Set()) {
   if (type.kind === 'primitive') {
     switch (type.name) {
-      case 'char': return 1;
-      case 'short': return 2;
-      case 'int': return 4;
-      case 'unsigned int': return 4;
-      case 'long': return 8;
-      case 'unsigned long': return 8;
-      case 'float': return 4;
-      case 'double': return 8;
+      case 'char': return { size: 1, alignment: 1 };
+      case 'short': return { size: 2, alignment: 2 };
+      case 'int': case 'unsigned int': case 'float': return { size: 4, alignment: 4 };
+      case 'long': case 'unsigned long': case 'double': return { size: 8, alignment: 8 };
       default: throw new Error(`sizeof(${type.name}) is not defined in PointerViz Mini-C`);
     }
   }
-  if (type.kind === 'pointer') return 8;
-  if (type.kind === 'array') return type.length * sizeOf(type.of, structTypes);
+  if (type.kind === 'pointer') return { size: 8, alignment: 8 };
+  if (type.kind === 'array') {
+    const element = layoutOf(type.of, structTypes, visiting);
+    return { size: type.length * element.size, alignment: element.alignment };
+  }
   if (type.kind === 'struct') {
     const def = resolveStructType(type, structTypes);
-    if (!def.fields) throw new Error(`unknown struct '${type.name}'`);
-    let offset = 0;
+    if (!def.fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
+    if (visiting.has(type.name)) throw new Error(`recursive by-value struct '${type.name}'`);
+    let offset = 0, alignment = 1;
+    const fields = [];
     for (const f of def.fields) {
-      offset = alignUp(offset, alignmentOf(f.type, structTypes));
-      offset += sizeOf(f.type, structTypes);
+      const layout = layoutOf(f.type, structTypes, new Set([...visiting, type.name]));
+      offset = alignUp(offset, layout.alignment);
+      fields.push({ name: f.name, type: f.type, offset, ...layout });
+      offset += layout.size;
+      alignment = Math.max(alignment, layout.alignment);
     }
-    return alignUp(offset, alignmentOf(type, structTypes));
+    return { size: alignUp(offset, alignment), alignment, fields };
   }
   throw new Error(`sizeof unsupported type ${JSON.stringify(type)}`);
 }
 
 const alignUp = (n, alignment) => Math.ceil(n / alignment) * alignment;
+export function sizeOf(type, structTypes = {}) { return layoutOf(type, structTypes).size; }
 export function alignmentOf(type, structTypes = {}) {
-  if (isArray(type)) return alignmentOf(type.of, structTypes);
-  if (isStruct(type)) {
-    const def = resolveStructType(type, structTypes);
-    if (!def.fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
-    return Math.max(...def.fields.map(f => alignmentOf(f.type, structTypes)));
-  }
-  return sizeOf(type, structTypes);
+  return layoutOf(type, structTypes).alignment;
 }
 
 export function typeToString(type) {

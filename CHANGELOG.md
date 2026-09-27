@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — simulated memory addresses
+
+- Added deterministic stack/heap addresses with LP64 array strides and struct padding, state-owned identities, and no address reuse within a run.
+- Added Both (default), Arrows, and Addresses modes with stable geometry and a persisted preference.
+- Added object/member inspection in playback and editing, own/stored address labels, full-address copying, typed target selection, and target/boundary/history navigation.
+- Preserved allocation/path provenance, lifetime and bounds checks, canonical C generation, and address-independent challenge grading. Hardcoded pointer addresses remain unsupported.
+- Made structural edits/deletion atomic around incoming and historical pointers, with focused address regression tests and teaching examples.
+
 ## 2.2.1 — frame visualization and repository maintenance
 
 - Replaced the small pointer text glyph with a fixed SVG indicator.

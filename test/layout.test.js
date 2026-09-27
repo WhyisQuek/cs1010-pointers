@@ -73,7 +73,7 @@ test('64-row arrays and long declarations fit their frame without overlapping it
   const parent = nodes.find(n => n.id === large.parentId);
   assert.ok(large.position.y + large.height <= parent.height - GEOMETRY.padding);
   assert.ok(large.position.x + large.width <= parent.width - GEOMETRY.padding);
-  assert.equal(large.height, 2 + GEOMETRY.header + 64 * GEOMETRY.row);
+  assert.equal(large.height, 2 + GEOMETRY.header + GEOMETRY.metadata + GEOMETRY.columns + 64 * GEOMETRY.row);
   assert.ok(!overlaps(parent, nodes.find(n => n.id === 'frame:first')));
 });
 
