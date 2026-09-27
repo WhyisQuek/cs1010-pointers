@@ -10,7 +10,7 @@ The audit found **11 groups of behavioral discrepancies**, plus **6 groups of su
 
 ### A1 — High: allocations are modeled as destination-typed objects
 
-The reported example reproduces at `src/machine/interpreter.js:538`:
+The reported example reproduces in `evalCall` (`src/machine/execution/calls.js`), in the `malloc` size check:
 
 ```c
 #include <stdlib.h>
@@ -47,7 +47,7 @@ Recommended design: store requested byte length and allocation identity independ
 
 Conversion to `size_t` makes this argument 1. [6.5.2.2, 6.3.1.4, 7.24.3.6](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3088.pdf#page=380).
 
-`src/language/checker.js:148` insists on an integer expression, and `src/machine/interpreter.js:535` uses its value without conversion to `SIZE_T`. Route built-in calls through parameter checking/conversion, then apply simulator resource limits. Do not confuse out-of-range floating conversions with this in-range example.
+The `Call` case of `checkProgram` in `src/language/checker.js` insists on an integer expression, and `evalCall` in `src/machine/execution/calls.js` uses its value without conversion to `SIZE_T`. Route built-in calls through parameter checking/conversion, then apply simulator resource limits. Do not confuse out-of-range floating conversions with this in-range example.
 
 ### A3 — Medium: `free` rejects a first-member pointer at the allocation base
 
@@ -58,7 +58,7 @@ struct S *p=malloc(sizeof(struct S));
 if(p){free(&p->x);}
 ```
 
-The interpreter reports an interior-pointer error at `src/machine/interpreter.js:559`. The native probes accept and execute this example. A structure and its first member share the starting address after conversion. [6.7.2.1p17, 7.24.3.3](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3088.pdf#page=121).
+The interpreter reports an interior-pointer error in the `free` branch of `evalCall` (`src/machine/execution/calls.js`). The native probes accept and execute this example. A structure and its first member share the starting address after conversion. [6.7.2.1p17, 7.24.3.3](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3088.pdf#page=121).
 
 The current check demands an exact reference path (`[]` or `[0]`). Model the `void *` argument conversion and allocation-base match while preserving allocation identity. Continue rejecting nonzero interior offsets, one-past values, stack pointers, and already freed allocations.
 
@@ -81,14 +81,14 @@ Clause references in this table are to [N3088](https://www.open-std.org/jtc1/sc2
 
 Root causes and repair directions:
 
-- **B1:** `evalExpression` at `src/machine/interpreter.js:312` overwrites `integerConstant` on the outer `InitializerList`, losing the inner zero's classification. Preserve the scalar initializer's constant-expression information.
-- **B2:** `constant` at `src/language/checker.js:26` evaluates both binary operands before handling `&&`/`||`. Keep checking both operands' constraints, but evaluate only the required operand values. Runtime short-circuiting already works.
-- **B3:** `sizeof` parsing at `src/language/parser.js:443` consults a global alias registry instead of lexical visibility. The same registry also conflates an anonymous struct's synthetic name with a real tag: `typedef struct {int x;} S; struct S{long y;};` is rejected. Conversely, a typedef and a function named `S` in the same scope are accepted. Use separate tag identities and a shared, scope-aware ordinary-identifier namespace.
-- **B4:** `collectStructs` preloads later definitions; `requireCompleteAt` is applied to object declarations but not every expression/type use. Enforce visibility and completeness at the source position, including unevaluated expressions.
-- **B5:** `parseNumberLiteral` at `src/language/parser.js:485` calls storage conversion; `convertNumber` uses `BigInt.asUintN` for unsigned values. Validate literal representability before conversion. Preserve ordinary unsigned arithmetic wraparound, which passes the control probe.
-- **B6:** `binary` at `src/language/checker.js:67` allows pointer arithmetic without checking pointee completeness. `sizeof` suppresses evaluation, so the later runtime rejection never happens.
-- **B7:** Tree-sitter's `null` token becomes `NullLiteral` at `src/language/parser.js:375`; both checker and interpreter treat it as `int`. Either reject `nullptr` explicitly in the C11 subset or implement its C23 type throughout. Current partial acceptance is misleading in either mode.
-- **B8:** Temporary-member extraction at `src/machine/interpreter.js:355` bypasses `loadLValue`'s dangling-pointer check at line 490. Centralize pointer-value validity checks across ordinary and temporary member reads.
+- **B1:** `evalExpression` in `src/machine/execution/expressions.js` overwrites `integerConstant` on the outer `InitializerList`, losing the inner zero's classification. Preserve the scalar initializer's constant-expression information.
+- **B2:** `constant` inside `checkProgram` (`src/language/checker.js`) evaluates both binary operands before handling `&&`/`||`. Keep checking both operands' constraints, but evaluate only the required operand values. Runtime short-circuiting already works.
+- **B3:** The `sizeof_expression` case of `parseExpression` (`src/language/parse/expressions.js`) consults a global alias registry instead of lexical visibility. The same registry also conflates an anonymous struct's synthetic name with a real tag: `typedef struct {int x;} S; struct S{long y;};` is rejected. Conversely, a typedef and a function named `S` in the same scope are accepted. Use separate tag identities and a shared, scope-aware ordinary-identifier namespace.
+- **B4:** `collectStructs` (`src/language/parse/structs.js`) preloads later definitions; `requireCompleteAt` is applied to object declarations but not every expression/type use. Enforce visibility and completeness at the source position, including unevaluated expressions.
+- **B5:** `parseNumberLiteral` in `src/language/parse/numberLiterals.js` calls storage conversion; `convertNumber` uses `BigInt.asUintN` for unsigned values. Validate literal representability before conversion. Preserve ordinary unsigned arithmetic wraparound, which passes the control probe.
+- **B6:** `binary` inside `checkProgram` (`src/language/checker.js`) allows pointer arithmetic without checking pointee completeness. `sizeof` suppresses evaluation, so the later runtime rejection never happens.
+- **B7:** Tree-sitter's `null` token becomes `NullLiteral` in `parseExpression` (`src/language/parse/expressions.js`); both checker and interpreter treat it as `int`. Either reject `nullptr` explicitly in the C11 subset or implement its C23 type throughout. Current partial acceptance is misleading in either mode.
+- **B8:** Temporary-member extraction in the `Member` case of `evaluateExpression` (`src/machine/execution/expressions.js`) bypasses the dangling-pointer check in `loadLValue` (`src/machine/execution/lvalues.js`). Centralize pointer-value validity checks across ordinary and temporary member reads.
 
 B8 reproducer:
 

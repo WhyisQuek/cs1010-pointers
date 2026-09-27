@@ -27,13 +27,13 @@ defects are in [`test/maintenance.test.js`](../test/maintenance.test.js).
 | Structure and code debt | 14 | 14 | 0 |
 | Dependencies and build | 3 | 3 | 0 |
 | Documentation drift | 8 | 8 | 0 |
-| Recommended follow-ups | 7 | 3 | 4 |
+| Recommended follow-ups | 7 | 4 | 3 |
 
 After the changes: ESLint reports 0 problems, Prettier reports every file
 formatted, 280 tests pass (1 native-compiler suite skipped locally; it runs in
 Linux CI), 7 Playwright browser tests pass, `npm audit` reports 0
 vulnerabilities, and the production build has no warnings from project code.
-Follow-ups 1, 2 and 4 were completed after the initial audit (section 7).
+Follow-ups 1–4 were completed after the initial audit (section 7).
 
 ## 1. User-facing defects
 
@@ -112,15 +112,11 @@ is unusable or the page is lost; **Medium** means wrong or lost data;
 
 ## 6. Recommended follow-ups
 
-Items 1, 2 and 4 are done; see section 7.
+Items 1–4 are done; see section 7.
 
 1. ~~**Upgrade Vite** to clear the dev-server `esbuild` advisory (B3).~~ Done.
 2. ~~**Duplicate WASM in the build.**~~ Done.
-3. **Split the two largest modules.** `machine/interpreter.js` (about 900
-   lines) and `language/parser.js` mix statement, expression and declaration
-   handling; splitting by concern would make review easier. This was not done
-   in the audit because it is a behaviour-neutral refactor best done with
-   focused review.
+3. ~~**Split the two largest modules.**~~ Done.
 4. ~~**Component-level tests.**~~ Done as Playwright browser tests.
 5. **Inspector labels show internal frame IDs** (for example
    `set_value() [frame3]`). Frame qualification is required by the address
@@ -167,6 +163,32 @@ Items 1, 2 and 4 are done; see section 7.
   grammar `tree-sitter-c.wasm` has no npm source in this project, so it stays
   in `public/`.
 - Saves 205 kB per deployment and removes a version-drift hazard.
+
+### Follow-up 3 — module split
+
+- `machine/interpreter.js` (1,311 lines after formatting) and
+  `language/parser.js` (807) each mixed several concerns. They are now thin
+  entry points (62 and 109 lines) that keep their public API
+  (`executeProgram`; `initCParser`, `parseMiniC`), so no caller changed.
+- The implementation moved to `machine/execution/` (calls, statements,
+  expressions, lvalues, operators, pointerArithmetic, typeInference, runtime)
+  and `language/parse/` (structs, statements, declarations, expressions,
+  numberLiterals, syntaxTree). The largest module is now 312 lines.
+- Functions were moved verbatim by script, with imports and exports generated
+  from name usage. A second script compared all 77 top-level function bodies
+  (48 interpreter, 29 parser) with the originals and found no differences
+  other than the added `export` keywords, and nothing missing or duplicated.
+  ESLint's `no-undef` and `no-unused-vars` checks confirmed the generated
+  wiring.
+- The modules import each other cyclically (statements ↔ expressions ↔
+  calls; declarations ↔ expressions). That is safe for ES modules that only
+  export function declarations and do no work at import time; the maintainer
+  guide now states this constraint.
+- `C_SPEC_AUDIT_N3088.md` pointed at open defects by `file:line`, which the
+  reformat had already made stale. Those references now name the function and
+  its new module.
+- Unit tests, native-comparison fixtures (in CI), the production build and the
+  browser tests all pass unchanged.
 
 ### Follow-up 4 — browser tests
 

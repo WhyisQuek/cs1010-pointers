@@ -10,10 +10,10 @@ PointerViz keeps parsing, semantics, memory and presentation separate.
 C source
   │
   ▼
-language/parser.js        Tree-sitter → Mini-C AST
+language/parser.js        Tree-sitter → Mini-C AST   (implementation: language/parse/)
   │
   ▼
-machine/interpreter.js    semantic execution
+machine/interpreter.js    semantic execution         (implementation: machine/execution/)
   │
   ▼
 machine/memory.js         MemoryState
@@ -26,7 +26,7 @@ The browser never executes a native C binary.
 
 ## 2. Parser boundary
 
-`language/parser.js` is the only module that knows Tree-sitter node shapes.
+`language/parser.js` and its `language/parse/` modules are the only code that knows Tree-sitter node shapes.
 
 It:
 

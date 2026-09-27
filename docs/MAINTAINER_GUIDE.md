@@ -5,7 +5,7 @@ This guide explains what each main file owns and where changes should be made.
 ## 1. Maintainability rules
 
 1. **`MemoryState` is semantic truth.** React Flow is a view/editor, not the execution model.
-2. **Tree-sitter is syntax-only.** Convert its nodes to PointerViz AST in `language/parser.js`.
+2. **Tree-sitter is syntax-only.** Convert its nodes to PointerViz AST in `language/parser.js` and `language/parse/`.
 3. **Keep type rules shared.** Do not create separate pointer/type semantics in the UI.
 4. **Preserve lifetime provenance.** Freed/expired allocations stay in semantic state.
 5. **Bound browser execution below the UI.** Parser/interpreter limits must protect direct source input.
@@ -42,12 +42,28 @@ src/
 │   ├── literals.js             character constants
 │   ├── highlight.js            display tokenizer for the editor
 │   ├── checker.js              pre-execution constraint checks
-│   └── parser.js               Tree-sitter → Mini-C AST
+│   ├── parser.js               Tree-sitter → Mini-C AST (entry point)
+│   └── parse/
+│       ├── structs.js          two-pass struct/typedef collection
+│       ├── statements.js       functions and statements
+│       ├── declarations.js     base types, declarators, declarations
+│       ├── expressions.js      expressions
+│       ├── numberLiterals.js   typed integer/floating literals
+│       └── syntaxTree.js       node helpers, locations, parse errors
 ├── machine/
 │   ├── memory.js               MemoryState model and references
 │   ├── addresses.js            simulated address placement
 │   ├── editing.js              atomic diagram-editing operations
-│   └── interpreter.js          Mini-C execution
+│   ├── interpreter.js          Mini-C execution (entry point)
+│   └── execution/
+│       ├── calls.js            calls, call frames, malloc/free
+│       ├── statements.js       statements, declarations, initializers
+│       ├── expressions.js      expression evaluation
+│       ├── lvalues.js          lvalues, loads, stores, conversions
+│       ├── operators.js        binary/logical/comparison, sequencing
+│       ├── pointerArithmetic.js pointer offsets within arrays
+│       ├── typeInference.js    static expression types
+│       └── runtime.js          scopes, trace/snapshots, guards
 └── pipeline/
     ├── interpreter.js          parse + execute facade
     ├── codegen.js              MemoryState → canonical C, validation
@@ -87,9 +103,9 @@ Canonical type representation and type helpers. Owns primitive/pointer/array/str
 
 Add a new type category here before teaching the parser/interpreter/UI about it.
 
-### `src/language/parser.js`
+### `src/language/parser.js` and `src/language/parse/`
 
-Tree-sitter C → PointerViz Mini-C AST adapter.
+Tree-sitter C → PointerViz Mini-C AST adapter. `parser.js` owns WASM initialization and the translation-unit loop; each concern lives in `parse/` (see the source tree above).
 
 It:
 
@@ -101,7 +117,7 @@ It:
 
 Control-flow nodes currently normalized here include `If`, `While`, `For`, `Break` and `Continue`. `for` initializers are normalized to either a declaration or expression statement.
 
-**Rule:** no other module should depend on Tree-sitter node names.
+**Rule:** no module outside `parser.js` and `parse/` may depend on Tree-sitter node names.
 
 ### `src/machine/memory.js`
 
@@ -123,9 +139,9 @@ A reference is always semantic:
 
 Never replace this with raw addresses or React Flow IDs.
 
-### `src/machine/interpreter.js`
+### `src/machine/interpreter.js` and `src/machine/execution/`
 
-Executes Mini-C AST.
+Executes Mini-C AST. `interpreter.js` exports `executeProgram()`, which checks the program, creates the state and calls `main`; the implementation is split by concern in `execution/` (see the source tree above). The modules import each other cyclically (statements ↔ expressions ↔ calls); that is safe because they only export functions and do no work at import time. Keep it that way.
 
 Main responsibilities:
 
@@ -141,11 +157,11 @@ Main responsibilities:
 
 #### Control-flow execution
 
-`execStatement()` returns normal completion or an internal control signal. Loops consume `break`/`continue`; functions consume `return`.
+`execStatement()` (`execution/statements.js`) returns normal completion or an internal control signal. Loops consume `break`/`continue`; functions consume `return`.
 
 Use `execEmbeddedStatement()` for a branch/loop body that is not already handled by block traversal. It ensures executed non-block statements receive snapshots.
 
-Every loop must call `guardLoopIteration()`. Do not add an unbounded execution path.
+Every loop must call `guardLoopIteration()` (`execution/runtime.js`). Do not add an unbounded execution path.
 
 For `for`, preserve this order:
 
@@ -228,8 +244,8 @@ Built-in levels plus browser persistence. Target states are kept as readable C a
 
 ### Add an expression
 
-1. normalize it in `language/parser.js`;
-2. evaluate/type-check it in `machine/interpreter.js`;
+1. normalize it in `language/parse/expressions.js`;
+2. check it in `language/checker.js`, evaluate it in `machine/execution/expressions.js` (or `operators.js`), and infer its type in `typeInference.js`;
 3. add parser-independent semantic tests;
 4. add at least one Tree-sitter integration source case;
 5. update `SUPPORTED_C.md`.
@@ -237,7 +253,7 @@ Built-in levels plus browser persistence. Target states are kept as readable C a
 ### Add a statement/control construct
 
 1. define its PointerViz AST shape in the parser;
-2. execute it in `execStatement()` or a focused helper;
+2. execute it in `execStatement()` (`machine/execution/statements.js`) or a focused helper;
 3. define how `return`/`break`/`continue` propagate;
 4. define snapshot behavior;
 5. bound repeated execution;
