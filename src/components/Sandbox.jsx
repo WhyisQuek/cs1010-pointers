@@ -1,10 +1,10 @@
-/** Bidirectional code/memory sandbox. */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { highlightC } from '../language/highlight.js';
+/** Bidirectional code/memory sandbox with step-through playback. */
+import { useMemo, useState } from 'react';
+import { CodePanel } from './CodePanel.jsx';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
-import { makeState } from '../pipeline/ir.js';
+import { makeState } from '../machine/memory.js';
 
 const STARTER = `int main(void) {
     int a = 10;
@@ -12,88 +12,19 @@ const STARTER = `int main(void) {
 }
 `;
 
-/** Reusable textarea. Tab inserts four spaces instead of moving browser focus. */
-export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
-  const lines = useMemo(() => highlightC(code), [code]);
-  const wrap = useRef(null);
-  useEffect(() => {
-    if (!activeLine || !wrap.current) return;
-    const el = wrap.current,
-      top = 12 + (activeLine - 1) * 20.8;
-    if (top < el.scrollTop || top + 21 > el.scrollTop + el.clientHeight)
-      el.scrollTop = Math.max(0, top - el.clientHeight / 2);
-  }, [activeLine]);
-  const onKeyDown = e => {
-    if (readOnly || e.key !== 'Tab' || !onCode) return;
-    e.preventDefault();
-    const el = e.currentTarget;
-    const start = el.selectionStart,
-      end = el.selectionEnd;
-    if (e.shiftKey) {
-      const lineStart = code.lastIndexOf('\n', start - 1) + 1;
-      const remove = code.slice(lineStart, lineStart + 4).match(/^ {1,4}/)?.[0].length ?? 0;
-      if (!remove) return;
-      onCode(code.slice(0, lineStart) + code.slice(lineStart + remove));
-      requestAnimationFrame(() => {
-        el.selectionStart = Math.max(lineStart, start - remove);
-        el.selectionEnd = Math.max(lineStart, end - remove);
-      });
-      return;
-    }
-    const indent = '    ';
-    onCode(code.slice(0, start) + indent + code.slice(end));
-    requestAnimationFrame(() => {
-      el.selectionStart = el.selectionEnd = start + indent.length;
-    });
-  };
-  return (
-    <div className="code-wrap" ref={wrap}>
-      <div className="gutter" aria-hidden="true">
-        {lines.map((_, i) => (
-          <div key={i} className={i + 1 === activeLine ? 'next-line-number' : ''}>
-            {i + 1}
-          </div>
-        ))}
-      </div>
-      <div className="code-body">
-        <pre className="code-highlight" aria-hidden="true">
-          {lines.map((tokens, i) => (
-            <div key={i} className={`code-line${i + 1 === activeLine ? ' next-line' : ''}`}>
-              {tokens.length
-                ? tokens.map((t, j) => (
-                    <span key={j} className={`syntax-${t.kind}`}>
-                      {t.text}
-                    </span>
-                  ))
-                : '\u200b'}
-            </div>
-          ))}
-        </pre>
-        <textarea
-          className="code-input"
-          aria-label="C source code"
-          wrap="off"
-          spellCheck={false}
-          value={code}
-          readOnly={readOnly}
-          placeholder="int main(void) { ... }"
-          onChange={e => onCode?.(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-      </div>
-    </div>
-  );
-}
-
 export default function Sandbox() {
   const [code, setCode] = useState(STARTER);
-  const [state, setState] = useState(makeState());
+  const [state, setState] = useState(makeState);
   const [snapshots, setSnapshots] = useState(null);
   const [step, setStep] = useState(0);
   const [messages, setMessages] = useState([]);
   const [canvasSession, setCanvasSession] = useState(0);
   const [savedPlayback, setSavedPlayback] = useState(null);
   const say = m => setMessages(prev => [...prev.slice(-4), m]);
+  const reportError = e => {
+    if (e instanceof ValidationError) e.errors.forEach(text => say({ kind: 'err', text }));
+    else say({ kind: 'err', text: e.message });
+  };
 
   const codeToDiagram = () => {
     try {
@@ -108,7 +39,7 @@ export default function Sandbox() {
         text: `Ready: ${result.snapshots.length} execution steps. Select Next to begin. Yellow marks the next line and new or changed memory.`,
       });
     } catch (e) {
-      say({ kind: 'err', text: e.message });
+      reportError(e);
     }
   };
   const diagramToCode = () => {
@@ -118,8 +49,7 @@ export default function Sandbox() {
       setSavedPlayback(null);
       say({ kind: 'ok', text: 'Generated C from the current memory state.' });
     } catch (e) {
-      if (e instanceof ValidationError) e.errors.forEach(text => say({ kind: 'err', text }));
-      else say({ kind: 'err', text: e.message });
+      reportError(e);
     }
   };
   const onDiagramEdit = next => {
@@ -131,20 +61,14 @@ export default function Sandbox() {
       if (e instanceof ValidationError) say({ kind: 'err', text: e.errors[0] });
     }
   };
-  const shownState =
-    snapshots && step > 0 && step <= snapshots.length
-      ? snapshots[step - 1].state
-      : snapshots && step === 0
-        ? makeState(state.structTypes)
-        : state;
+
+  // Step 0 shows the empty machine before main() is entered; step n shows snapshot n - 1.
+  const emptyState = useMemo(() => makeState(state.structTypes), [state.structTypes]);
   const shownSnapshot = snapshots && step > 0 ? snapshots[step - 1] : null;
+  const shownState = snapshots ? (shownSnapshot?.state ?? emptyState) : state;
+  const previousState = shownSnapshot ? (step > 1 ? snapshots[step - 2].state : emptyState) : null;
   const nextLine = snapshots ? (step === 0 ? snapshots[0]?.line : shownSnapshot?.nextLine) : null;
-  const previousState =
-    snapshots && step > 0
-      ? step > 1
-        ? snapshots[step - 2].state
-        : makeState(state.structTypes)
-      : null;
+
   const editSnapshot = () => {
     setSavedPlayback({ state, snapshots, step });
     setState(structuredClone(shownState));
@@ -160,6 +84,11 @@ export default function Sandbox() {
     setStep(savedPlayback.step);
     setSavedPlayback(null);
   };
+  const onCode = value => {
+    setCode(value);
+    setSnapshots(null);
+    setSavedPlayback(null);
+  };
 
   return (
     <>
@@ -173,15 +102,7 @@ export default function Sandbox() {
               </span>
             )}
           </div>
-          <CodePanel
-            code={code}
-            onCode={value => {
-              setCode(value);
-              setSnapshots(null);
-              setSavedPlayback(null);
-            }}
-            activeLine={nextLine}
-          />
+          <CodePanel code={code} onCode={onCode} activeLine={nextLine} />
         </section>
         <div className="spine" role="group" aria-label="convert">
           <button className="convert-btn" title="Run C and show memory" onClick={codeToDiagram}>
@@ -200,7 +121,7 @@ export default function Sandbox() {
               </span>
             )}
             <div className="snapshot-actions">
-              {snapshots && step > 0 && (
+              {shownSnapshot && (
                 <button className="plain-btn" onClick={editSnapshot}>
                   Edit this snapshot
                 </button>

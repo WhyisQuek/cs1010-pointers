@@ -1,5 +1,5 @@
 /** Presentation-only workspace operations. Never stored in MemoryState. */
-import { GEOMETRY } from './layout.js';
+import { FRAME_MIN, GEOMETRY } from './layout.js';
 export const emptyLayout = () => ({ positions: {}, sizes: {}, routes: {} });
 const { padding: PAD, top: TOP } = GEOMETRY;
 
@@ -15,8 +15,8 @@ export function captureLayout(layout, nodes) {
 export function contentSize(nodes, frameId) {
   const children = nodes.filter(n => n.parentId === frameId);
   return {
-    width: Math.max(288, ...children.map(n => n.position.x + n.width + PAD)),
-    height: Math.max(160, ...children.map(n => n.position.y + n.height + PAD)),
+    width: Math.max(FRAME_MIN.width, ...children.map(n => n.position.x + n.width + PAD)),
+    height: Math.max(FRAME_MIN.height, ...children.map(n => n.position.y + n.height + PAD)),
   };
 }
 
@@ -59,16 +59,20 @@ export function resizeFrame(layout, nodes, id, rect, direction) {
   const oldRight = frame.position.x + frame.width,
     oldBottom = frame.position.y + frame.height;
   const left = direction.includes('w')
-    ? Math.min(rect.x, oldRight - 288, ...world.map(n => n.x - PAD))
+    ? Math.min(rect.x, oldRight - FRAME_MIN.width, ...world.map(n => n.x - PAD))
     : frame.position.x;
   const top = direction.includes('n')
-    ? Math.min(rect.y, oldBottom - 160, ...world.map(n => n.y - TOP))
+    ? Math.min(rect.y, oldBottom - FRAME_MIN.height, ...world.map(n => n.y - TOP))
     : frame.position.y;
   const right = direction.includes('e')
-    ? Math.max(rect.x + rect.width, left + 288, ...world.map(n => n.x + n.width + PAD))
+    ? Math.max(rect.x + rect.width, left + FRAME_MIN.width, ...world.map(n => n.x + n.width + PAD))
     : oldRight;
   const bottom = direction.includes('s')
-    ? Math.max(rect.y + rect.height, top + 160, ...world.map(n => n.y + n.height + PAD))
+    ? Math.max(
+        rect.y + rect.height,
+        top + FRAME_MIN.height,
+        ...world.map(n => n.y + n.height + PAD),
+      )
     : oldBottom;
   next.positions[id] = { x: left, y: top };
   next.sizes[id] = { width: right - left, height: bottom - top };

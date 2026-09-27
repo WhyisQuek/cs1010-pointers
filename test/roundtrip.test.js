@@ -1,12 +1,13 @@
 /**
  * Full integration suite using real Tree-sitter parsing.
- * Verifies C → MemoryState → generated C → MemoryState round-trip equivalence.
+ * Verifies C → MemoryState → generated C → MemoryState round-trip equivalence,
+ * plus execution-only function, control-flow, safety-limit and grading cases.
  */
-// Integration tests: real Tree-sitter parse → Mini-C AST → semantic machine → codegen → parse again.
+import test from 'node:test';
+import assert from 'node:assert/strict';
 import { initParser, interpret } from '../src/pipeline/interpreter.js';
 import { generate } from '../src/pipeline/codegen.js';
 import { equivalent } from '../src/pipeline/equivalence.js';
-import assert from 'node:assert/strict';
 import { resolveRef } from '../src/machine/memory.js';
 
 const programs = [
@@ -32,48 +33,30 @@ await initParser({
   grammarWasm: './public/tree-sitter-c.wasm',
 });
 
-let fail = 0;
+const named = (state, name) => state.allocations.find(a => a.name === name);
+
 for (const source of programs) {
-  try {
+  test(`round trip: ${source.slice(0, 76)}`, () => {
     const before = interpret(source).state;
     const generated = generate(before);
-    const after = interpret(generated).state;
-    const result = equivalent(before, after);
-    console.log(`${result.equal ? 'PASS' : 'FAIL'}  ${source.slice(0, 76)}`);
-    if (!result.equal) {
-      console.log('      ' + result.diffs.join('; '));
-      console.log(generated);
-      fail++;
-    }
-  } catch (e) {
-    console.log(`ERROR ${e.message}  ${source.slice(0, 70)}`);
-    fail++;
-  }
+    const result = equivalent(before, interpret(generated).state);
+    assert.ok(result.equal, `${result.diffs.join('; ')}\n${generated}`);
+  });
 }
 
 // Function integration is execution-only because a final call-stack trace does not
 // contain enough source information to synthesize the original function bodies.
-try {
+test('user function parsing, call frame, and pointer side effect', () => {
   const result = interpret(
     'void set_value(int *p) { *p = 25; } int main(void) { int value = 10; set_value(&value); return 0; }',
   );
-  const value = result.state.allocations.find(a => a.name === 'value');
-  const fnFrame = result.state.frames.find(f => f.name === 'set_value');
-  const ok =
-    value?.value?.value === 25 &&
-    fnFrame &&
-    !fnFrame.active &&
-    result.snapshots.some(s => s.function === 'set_value');
-  console.log(
-    `${ok ? 'PASS' : 'FAIL'}  user function parsing, call frame, and pointer side effect`,
-  );
-  if (!ok) fail++;
-} catch (e) {
-  console.log(`ERROR function integration: ${e.message}`);
-  fail++;
-}
+  const frame = result.state.frames.find(f => f.name === 'set_value');
+  assert.equal(named(result.state, 'value').value.value, 25);
+  assert.ok(frame && !frame.active);
+  assert.ok(result.snapshots.some(s => s.function === 'set_value'));
+});
 
-try {
+test('parsed for/if/break/continue semantics', () => {
   const result = interpret(`int main(void) {
     int sum = 0;
     for (int i = 0; i < 8; i++) {
@@ -83,21 +66,12 @@ try {
     }
     return 0;
   }`);
-  const sum = result.state.allocations.find(a => a.name === 'sum');
-  const loopI = result.state.allocations.find(a => a.name === 'i');
-  const ok =
-    sum?.value?.value === 8 &&
-    loopI &&
-    !loopI.alive &&
-    result.snapshots.some(s => s.statement === 'ForUpdate');
-  console.log(`${ok ? 'PASS' : 'FAIL'}  parsed for/if/break/continue semantics`);
-  if (!ok) fail++;
-} catch (e) {
-  console.log(`ERROR control-flow integration: ${e.message}`);
-  fail++;
-}
+  assert.equal(named(result.state, 'sum').value.value, 8);
+  assert.equal(named(result.state, 'i').alive, false);
+  assert.ok(result.snapshots.some(s => s.statement === 'ForUpdate'));
+});
 
-try {
+test('logical conditions short-circuit during parsed execution', () => {
   const result = interpret(`int main(void) {
     int *p = NULL;
     int x = 0;
@@ -105,50 +79,30 @@ try {
     if (!p || *p) x = 2;
     return 0;
   }`);
-  const x = result.state.allocations.find(a => a.name === 'x');
-  const ok = x?.value?.value === 2;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  logical conditions short-circuit during parsed execution`);
-  if (!ok) fail++;
-} catch (e) {
-  console.log(`ERROR logical integration: ${e.message}`);
-  fail++;
-}
+  assert.equal(named(result.state, 'x').value.value, 2);
+});
 
-try {
-  interpret(`int main(void) { while (1) { } return 0; }`);
-  console.log('FAIL  loop iteration safety limit');
-  fail++;
-} catch (e) {
-  const ok = /loop exceeded 256 iterations/.test(e.message);
-  console.log(`${ok ? 'PASS' : 'FAIL'}  loop iteration safety limit`);
-  if (!ok) fail++;
-}
+test('loop iteration safety limit', () => {
+  assert.throws(
+    () => interpret('int main(void) { while (1) { } return 0; }'),
+    /loop exceeded 256 iterations/,
+  );
+});
 
-try {
-  interpret(`int main(void) { int a[65]; return 0; }`);
-  console.log('FAIL  array safety limit');
-  fail++;
-} catch (e) {
-  const ok = /between 1 and 64/.test(e.message);
-  console.log(`${ok ? 'PASS' : 'FAIL'}  array safety limit`);
-  if (!ok) fail++;
-}
+test('array safety limit', () => {
+  assert.throws(() => interpret('int main(void) { int a[65]; return 0; }'), /between 1 and 64/);
+});
 
 // Grading must reject wrong target relationships, not merely wrong source text.
-try {
+test('grading rejects wrong pointer graph', () => {
   const target = interpret('int main(){ int a = 10; int *b = &a; }').state;
   const wrong = interpret('int main(){ int a = 10; int c = 4; int *b = &c; }').state;
   const result = equivalent(target, wrong);
-  console.log(
-    `${!result.equal && result.diffs.length ? 'PASS' : 'FAIL'}  grading rejects wrong pointer graph`,
-  );
-  if (result.equal) fail++;
-} catch (e) {
-  console.log(`ERROR grading sanity: ${e.message}`);
-  fail++;
-}
+  assert.equal(result.equal, false);
+  assert.ok(result.diffs.length);
+});
 
-try {
+test('pointer return types preserve depth, identity, null, and type checking', () => {
   const result = interpret(`
     int *(identity)(int *p) { return p; }
     int **identity2(int **p) { return p; }
@@ -161,7 +115,7 @@ try {
       int *nothing = empty();
     }
   `);
-  const allocation = name => result.state.allocations.find(a => a.name === name);
+  const allocation = name => named(result.state, name);
   assert.equal(allocation('x').value.value, 42);
   assert.equal(allocation('p').value.target.allocationId, allocation('x').id);
   assert.equal(allocation('pp').value.target.allocationId, allocation('p').id);
@@ -174,13 +128,9 @@ try {
     () => interpret('int (*bad(void))(int) { return NULL; } int main(void) {}'),
     /function pointer declarators are not supported/,
   );
-  console.log('PASS  pointer return types preserve depth, identity, null, and type checking');
-} catch (e) {
-  console.log(`ERROR pointer return integration: ${e.message}`);
-  fail++;
-}
+});
 
-try {
+test('recursive struct pointer return reverses all four links and handles an empty list', () => {
   const result = interpret(`
     typedef struct Node { int value; struct Node *next; } Node;
     Node *reverse(Node *head) {
@@ -204,7 +154,7 @@ try {
       Node *empty = reverse(NULL);
     }
   `);
-  const allocation = name => result.state.allocations.find(a => a.name === name);
+  const allocation = name => named(result.state, name);
   let link = allocation('newHead').value;
   for (const [name, value] of [
     ['d', 40],
@@ -219,14 +169,7 @@ try {
   }
   assert.equal(link.kind, 'null');
   assert.equal(allocation('empty').value.kind, 'null');
-  assert.equal(result.state.frames.filter(f => f.name === 'reverse').length, 5);
-  assert.ok(result.state.frames.filter(f => f.name === 'reverse').every(f => !f.active));
-  console.log(
-    'PASS  recursive struct pointer return reverses all four links and handles an empty list',
-  );
-} catch (e) {
-  console.log(`ERROR recursive pointer return integration: ${e.message}`);
-  fail++;
-}
-
-process.exitCode = fail ? 1 : 0;
+  const frames = result.state.frames.filter(f => f.name === 'reverse');
+  assert.equal(frames.length, 5);
+  assert.ok(frames.every(f => !f.active));
+});

@@ -1,5 +1,5 @@
 /** Interactive MemoryState editor. React Flow layout never becomes semantic state. */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Background, Controls, ReactFlow, useNodesInitialized, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { edgeTypes, nodeTypes } from '../flow/memoryFlow.jsx';
@@ -287,8 +287,14 @@ export default function MemoryCanvas({
       setSelectedId(a.id);
       setMenu(null);
     });
-  const selected = nodes.find(n => n.id === selectedId)?.data.allocation ?? null;
   const selectedNode = nodes.find(n => n.id === selectedId);
+  const selected = selectedNode?.data.allocation ?? null;
+  const changeViewMode = mode => {
+    setViewMode(mode);
+    saveViewMode(mode);
+    setSelectedEdgeId(null);
+    setStatus({ kind: 'ok', text: `${capitalize(mode)} view` });
+  };
   const selectedFrame =
     selectedNode?.type === 'frameGroup'
       ? selectedNode
@@ -375,31 +381,18 @@ export default function MemoryCanvas({
               key={mode}
               className="plain-btn"
               aria-pressed={viewMode === mode}
-              onClick={() => {
-                setViewMode(mode);
-                saveViewMode(mode);
-                setSelectedEdgeId(null);
-                setStatus({ kind: 'ok', text: `${mode[0].toUpperCase() + mode.slice(1)} view` });
-              }}
+              onClick={() => changeViewMode(mode)}
             >
-              {mode[0].toUpperCase() + mode.slice(1)}
+              {capitalize(mode)}
             </button>
           ))}
         </div>
         <label className="view-mode-select">
           View
-          <select
-            value={viewMode}
-            onChange={e => {
-              setViewMode(e.target.value);
-              saveViewMode(e.target.value);
-              setSelectedEdgeId(null);
-              setStatus({ kind: 'ok', text: `${e.target.value} view` });
-            }}
-          >
+          <select value={viewMode} onChange={e => changeViewMode(e.target.value)}>
             {VIEW_MODES.map(mode => (
               <option key={mode} value={mode}>
-                {mode[0].toUpperCase() + mode.slice(1)}
+                {capitalize(mode)}
               </option>
             ))}
           </select>
@@ -574,8 +567,13 @@ function CanvasViewport() {
   return null;
 }
 
+const capitalize = text => text[0].toUpperCase() + text.slice(1);
+
+/** First unused single-letter name, then v1, v2, ... (never a name already in use). */
 function nextName(state) {
   const used = new Set(state.allocations.map(a => a.name));
   for (const ch of 'abcdefghijklmnopqrstuvwxyz') if (!used.has(ch)) return ch;
-  return `v${state.allocations.length}`;
+  let n = 1;
+  while (used.has(`v${n}`)) n++;
+  return `v${n}`;
 }

@@ -18,7 +18,6 @@ import {
   makeState,
   pointerValue,
   ref,
-  setRefValue,
 } from '../src/machine/memory.js';
 import {
   ADDRESS_REGIONS,

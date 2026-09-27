@@ -18,9 +18,8 @@ import {
 } from '../language/types.js';
 import { makeAddressSpace, nextAddress, referenceOffset, upgradeMemoryState } from './addresses.js';
 
-// Kept for older callers. New states own their counters; interpreting a second
-// program can never reset identities in an editable diagram or snapshot copy.
-export function resetAllocationIds() {}
+// Each state owns its identity counters, so interpreting a second program can
+// never reset identities in an editable diagram or snapshot copy.
 function candidateId(state, kind) {
   const prefix = kind === 'allocation' ? 'a' : 'frame';
   const records = kind === 'allocation' ? state.allocations : state.frames;
@@ -28,7 +27,7 @@ function candidateId(state, kind) {
   while (records.some(r => r.id === `${prefix}${index}`)) index++;
   return `${prefix}${index}`;
 }
-export const freshAllocationId = state => candidateId(state, 'allocation');
+const freshAllocationId = state => candidateId(state, 'allocation');
 export const freshFrameId = (state, name = 'frame') =>
   name === 'main' && !state.frames.some(f => f.id === 'main')
     ? 'main'
@@ -68,12 +67,8 @@ export function addFrame(
   return frame;
 }
 
-export function getFrame(state, id) {
-  return state.frames.find(f => f.id === id) ?? null;
-}
-
 export function endFrame(state, frameId) {
-  const frame = getFrame(state, frameId);
+  const frame = state.frames.find(f => f.id === frameId);
   if (frame) frame.active = false;
   for (const a of state.allocations) {
     if (a.storage.kind === 'stack' && a.storage.frameId === frameId) a.alive = false;
@@ -146,12 +141,11 @@ export const pointerValue = target => ({
   kind: 'pointer',
   target: ref(target.allocationId, target.path ?? []),
 });
-export const refKey = r => `${r.allocationId}:${(r.path ?? []).map(String).join('.')}`;
+export function samePath(a = [], b = []) {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
 export function sameRef(a, b) {
-  if (!a || !b || a.allocationId !== b.allocationId) return false;
-  const ap = a.path ?? [],
-    bp = b.path ?? [];
-  return ap.length === bp.length && ap.every((x, i) => x === bp[i]);
+  return !!a && !!b && a.allocationId === b.allocationId && samePath(a.path ?? [], b.path ?? []);
 }
 
 export function resolveRef(state, targetRef, { allowDead = true } = {}) {
@@ -209,11 +203,8 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
 }
 
 export function setRefValue(state, targetRef, nextValue) {
-  const resolved = resolveRef(state, targetRef, { allowDead: false });
-  if (resolved.invalid || resolved.onePast) throw new Error('write outside object bounds');
-  const allocation = getAllocation(state, targetRef.allocationId);
-  if (!allocation.alive)
-    throw new Error(`write through pointer to an object whose lifetime has ended`);
+  const { allocation, invalid, onePast } = resolveRef(state, targetRef, { allowDead: false });
+  if (invalid || onePast) throw new Error('write outside object bounds');
   const path = targetRef.path ?? [];
   if (!path.length) {
     allocation.value = structuredClone(nextValue);
@@ -240,7 +231,6 @@ export function setRefValue(state, targetRef, nextValue) {
   else throw new Error(`invalid subobject path ${path.join('.')}`);
 }
 
-export const rootRef = allocation => ref(allocation.id, []);
 export const decayRef = allocation =>
   isArray(allocation.type) ? ref(allocation.id, [0]) : ref(allocation.id, []);
 
@@ -300,13 +290,6 @@ export const stackAllocations = state => state.allocations.filter(a => a.storage
 export const heapAllocations = state => state.allocations.filter(a => a.storage.kind === 'heap');
 export const frameAllocations = (state, frameId) =>
   stackAllocations(state).filter(a => a.storage.frameId === frameId);
-export function stackAllocationByName(state, name, frameId = null) {
-  return (
-    stackAllocations(state).find(
-      a => a.name === name && (frameId == null || a.storage.frameId === frameId),
-    ) ?? null
-  );
-}
 
 export function allocationDisplayName(state, allocation) {
   if (allocation.name) return allocation.name;

@@ -1,88 +1,84 @@
 /**
- * Instructor challenge editor.
- * Edits human-readable level metadata/reference C, previews the interpreted
- * target state, and persists custom levels through `data/levels.js`.
+ * Instructor challenge editor. The target state is authored as C, previewed
+ * live, and saved as { title, kind, prompt, code, hints, grading }: the target
+ * MemoryState is always derived from the code, never stored. Levels export and
+ * import as JSON so a course pack can be shared.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import MemoryCanvas from './MemoryCanvas.jsx';
-import { CodePanel } from './Sandbox.jsx';
+import { CodePanel } from './CodePanel.jsx';
 import { interpret } from '../pipeline/interpreter.js';
-import { loadCustomLevels, saveCustomLevels } from '../data/levels.js';
+import { loadCustomLevels, mergeLevels, normalizeLevel, saveCustomLevels } from '../data/levels.js';
 
-/**
- * LevelEditor — the professor authors the target state as C code (the
- * sandbox pipeline validates it and previews the resulting diagram live),
- * chooses the challenge direction, and saves. Levels export as JSON so a
- * course pack can be shared; the level format is just { title, kind,
- * prompt, code, hints } — the target IR is derived, never stored.
- */
+const DEFAULT_CODE = 'int main() {\n    int a = 10;\n    int *b = &a;\n}';
+const kindLabel = kind => (kind === 'code-to-diagram' ? 'code → diagram' : 'diagram → code');
+
+function tryInterpret(code) {
+  try {
+    return { state: interpret(code).state, error: null };
+  } catch (e) {
+    return { state: null, error: e.message };
+  }
+}
+
 export default function LevelEditor() {
-  const [levels, setLevels] = useState(loadCustomLevels());
+  const [levels, setLevels] = useState(loadCustomLevels);
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState('code-to-diagram');
   const [prompt, setPrompt] = useState('');
-  const [code, setCode] = useState('int main() {\n    int a = 10;\n    int *b = &a;\n}');
+  const [code, setCode] = useState(DEFAULT_CODE);
   const [hints, setHints] = useState('');
   const [compareNames, setCompareNames] = useState(true);
   const [compareLifetime, setCompareLifetime] = useState(true);
-  const [preview, setPreview] = useState(null);
+  const [preview, setPreview] = useState(() => tryInterpret(DEFAULT_CODE).state);
   const [error, setError] = useState(null);
 
-  const tryPreview = src => {
-    setCode(src);
-    try {
-      setPreview(interpret(src).state);
-      setError(null);
-    } catch (e) {
-      setPreview(null);
-      setError(e.message);
+  const persist = next => {
+    setLevels(next);
+    if (!saveCustomLevels(next)) {
+      setError('this browser blocked local storage; levels will be lost on reload — export them');
+      return false;
     }
+    return true;
+  };
+
+  const onCode = src => {
+    setCode(src);
+    const result = tryInterpret(src);
+    setPreview(result.state);
+    setError(result.error);
   };
 
   const save = () => {
-    if (!title.trim()) {
-      setError('give the level a title');
-      return;
-    }
-    try {
-      interpret(code);
-    } catch (e) {
-      setError(`target code invalid: ${e.message}`);
-      return;
-    }
-    const level = {
+    if (!title.trim()) return setError('give the level a title');
+    const { error: codeError } = tryInterpret(code);
+    if (codeError) return setError(`target code invalid: ${codeError}`);
+    const level = normalizeLevel({
       id: `custom-${Date.now()}`,
-      title: title.trim(),
+      title,
       kind,
-      prompt: prompt.trim() || 'Recreate this memory state.',
+      prompt,
       code,
-      hints: hints
-        .split('\n')
-        .map(h => h.trim())
-        .filter(Boolean),
+      hints: hints.split('\n'),
       grading: { compareNames, compareLifetime },
-    };
-    const next = [...levels, level];
-    setLevels(next);
-    saveCustomLevels(next);
+    });
+    if (persist(mergeLevels(levels, [level]))) setError(null);
     setTitle('');
     setPrompt('');
     setHints('');
-    setError(null);
   };
 
-  const remove = id => {
-    const next = levels.filter(l => l.id !== id);
-    setLevels(next);
-    saveCustomLevels(next);
-  };
+  const remove = id => persist(levels.filter(l => l.id !== id));
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(levels, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(levels, null, 2)], { type: 'application/json' }),
+    );
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = url;
     a.download = 'pointerviz-levels.json';
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   const importJson = file => {
@@ -91,26 +87,16 @@ export default function LevelEditor() {
       try {
         const imported = JSON.parse(reader.result);
         if (!Array.isArray(imported)) throw new Error('level pack must be an array');
-        const valid = imported.filter(l => {
-          if (
-            !l ||
-            typeof l.id !== 'string' ||
-            typeof l.code !== 'string' ||
-            !['code-to-diagram', 'diagram-to-code'].includes(l.kind)
-          )
-            return false;
-          try {
-            interpret(l.code);
-            return true;
-          } catch {
-            return false;
-          }
-        });
+        const valid = imported
+          .map(normalizeLevel)
+          .filter(level => level && !tryInterpret(level.code).error);
         if (!valid.length && imported.length) throw new Error('no valid levels found');
-        const next = [...levels, ...valid];
-        setLevels(next);
-        saveCustomLevels(next);
-        setError(null);
+        const skipped = imported.length - valid.length;
+        if (persist(mergeLevels(levels, valid))) {
+          setError(
+            skipped ? `imported ${valid.length} level(s); skipped ${skipped} invalid` : null,
+          );
+        }
       } catch (e) {
         setError(`could not import level pack: ${e.message}`);
       }
@@ -119,14 +105,7 @@ export default function LevelEditor() {
   };
 
   return (
-    <div
-      className="page"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(320px, 1fr) minmax(320px, 1fr)',
-        gap: 32,
-      }}
-    >
+    <div className="page level-editor">
       <div className="editor-form">
         <h2>Level editor</h2>
         <p className="lede">Create and preview a challenge.</p>
@@ -140,15 +119,11 @@ export default function LevelEditor() {
           placeholder="e.g. Swap via pointers"
         />
 
-        <div className="row">
-          <div>
-            <label htmlFor="lv-kind">challenge direction</label>
-            <select id="lv-kind" value={kind} onChange={e => setKind(e.target.value)}>
-              <option value="code-to-diagram">show code → student builds diagram</option>
-              <option value="diagram-to-code">show diagram → student writes code</option>
-            </select>
-          </div>
-        </div>
+        <label htmlFor="lv-kind">challenge direction</label>
+        <select id="lv-kind" value={kind} onChange={e => setKind(e.target.value)}>
+          <option value="code-to-diagram">show code → student builds diagram</option>
+          <option value="diagram-to-code">show diagram → student writes code</option>
+        </select>
 
         <label htmlFor="lv-prompt">prompt shown to students</label>
         <input
@@ -160,8 +135,8 @@ export default function LevelEditor() {
         />
 
         <label>target state (C code)</label>
-        <div style={{ height: 260, border: '1px solid var(--line)' }}>
-          <CodePanel code={code} onCode={tryPreview} />
+        <div className="editor-code">
+          <CodePanel code={code} onCode={onCode} />
         </div>
 
         <label htmlFor="lv-hints">hints — one per line, revealed in order</label>
@@ -194,38 +169,34 @@ export default function LevelEditor() {
         </div>
 
         {error && (
-          <div className="msgbar" style={{ border: 'none', paddingLeft: 0 }}>
-            <div className="err">{error}</div>
-          </div>
+          <p className="msgbar-inline err" role="alert">
+            {error}
+          </p>
         )}
 
-        <button className="primary-btn" onClick={save}>
-          Save level
-        </button>
-        <button className="ghost-btn" onClick={exportJson} disabled={!levels.length}>
-          Export pack
-        </button>
-        <label className="ghost-btn" style={{ display: 'inline-block', cursor: 'pointer' }}>
-          Import pack
-          <input
-            type="file"
-            accept=".json"
-            hidden
-            onChange={e => e.target.files[0] && importJson(e.target.files[0])}
-          />
-        </label>
+        <div className="editor-actions">
+          <button className="primary-btn" onClick={save}>
+            Save level
+          </button>
+          <button className="ghost-btn" onClick={exportJson} disabled={!levels.length}>
+            Export pack
+          </button>
+          <label className="ghost-btn file-btn">
+            Import pack
+            <input
+              type="file"
+              accept=".json"
+              hidden
+              onChange={e => {
+                if (e.target.files[0]) importJson(e.target.files[0]);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
 
         <div className="saved-list">
-          <h4
-            style={{
-              color: 'var(--muted)',
-              textTransform: 'uppercase',
-              fontSize: 12,
-              letterSpacing: '0.08em',
-            }}
-          >
-            your levels ({levels.length})
-          </h4>
+          <h4>your levels ({levels.length})</h4>
           {levels.length === 0 && (
             <p className="lede">
               No custom levels yet — saved levels appear in the Challenges tab immediately.
@@ -233,11 +204,9 @@ export default function LevelEditor() {
           )}
           {levels.map(l => (
             <div className="saved-row" key={l.id}>
-              <div className="t">
+              <div className="saved-title">
                 <div>{l.title}</div>
-                <div className="k">
-                  {l.kind === 'code-to-diagram' ? 'code → diagram' : 'diagram → code'}
-                </div>
+                <div className="saved-kind">{kindLabel(l.kind)}</div>
               </div>
               <button className="mini-btn danger" onClick={() => remove(l.id)}>
                 delete
@@ -247,25 +216,9 @@ export default function LevelEditor() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', minHeight: 420 }}>
-        <div
-          className="panel-head"
-          style={{ border: '1px solid var(--line)', borderRadius: '4px 4px 0 0' }}
-        >
-          target preview
-        </div>
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            minHeight: 0,
-            border: '1px solid var(--line)',
-            borderTop: 'none',
-            borderRadius: '0 0 4px 4px',
-            overflow: 'hidden',
-            position: 'relative',
-          }}
-        >
+      <div className="editor-preview">
+        <div className="panel-head">target preview</div>
+        <div className="editor-preview-body">
           {preview ? (
             <MemoryCanvas key={code} state={preview} editable={false} />
           ) : (

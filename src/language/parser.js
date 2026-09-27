@@ -19,9 +19,15 @@ import { convertNumber } from './numeric.js';
 
 let C = null;
 
-export async function initCParser({ runtimeWasm, grammarWasm = '/tree-sitter-c.wasm' } = {}) {
+/**
+ * Load both WASM files once. Paths are required: root-relative defaults break
+ * when the app is deployed below a subpath such as a GitHub Pages project site.
+ */
+export async function initCParser({ runtimeWasm, grammarWasm } = {}) {
   if (C) return;
-  await Parser.init(runtimeWasm ? { locateFile: () => runtimeWasm } : { locateFile: n => '/' + n });
+  if (!runtimeWasm || !grammarWasm)
+    throw new Error('initCParser requires runtimeWasm and grammarWasm paths');
+  await Parser.init({ locateFile: () => runtimeWasm });
   C = await Language.load(grammarWasm);
 }
 
@@ -458,7 +464,7 @@ function parseDeclarator(
       inferArrayLength,
     });
   }
-  if (node.type === 'parenthesized_declarator' || node.type === 'parenthesized_declarator') {
+  if (node.type === 'parenthesized_declarator') {
     return parseDeclarator(semanticChildren(node)[0], baseType, structTypes, {
       field,
       inferArrayLength,
@@ -763,9 +769,10 @@ function firstError(node) {
   return null;
 }
 function syntaxError(node) {
-  return new Error(
-    `C syntax error near line ${node.startPosition.row + 1}: "${node.text.slice(0, 50)}"`,
-  );
+  const line = node.startPosition.row + 1;
+  // A MISSING node has no source text; name the token the grammar expected instead.
+  if (node.isMissing) return new Error(`C syntax error near line ${line}: missing ${node.type}`);
+  return new Error(`C syntax error near line ${line}: "${node.text.slice(0, 50)}"`);
 }
 function operatorOf(node) {
   return (

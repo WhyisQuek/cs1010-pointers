@@ -1,4 +1,3 @@
-import { upgradeMemoryState, validateAddressSpace } from '../machine/addresses.js';
 /** MemoryState -> one canonical PointerViz Mini-C program. */
 import {
   declarationToC,
@@ -23,6 +22,7 @@ import {
   stackAllocations,
 } from '../machine/memory.js';
 import { convertNumber } from '../language/numeric.js';
+import { upgradeMemoryState, validateAddressSpace } from '../machine/addresses.js';
 
 export class ValidationError extends Error {
   constructor(errors) {

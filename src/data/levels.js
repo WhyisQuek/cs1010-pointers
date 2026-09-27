@@ -8,36 +8,89 @@ const LEVELS_KEY = 'pointerviz.levels';
 const PROGRESS_KEY = 'pointerviz.progress';
 const LEGACY_LEVELS_KEY = 'pointerlab.levels';
 const LEGACY_PROGRESS_KEY = 'pointerlab.progress';
+export const LEVEL_KINDS = Object.freeze(['code-to-diagram', 'diagram-to-code']);
+
+/** Storage can be unavailable (private mode, blocked site data) or full. */
+function readJson(key, legacyKey, fallback) {
+  try {
+    const current = localStorage.getItem(key);
+    if (current) return JSON.parse(current) ?? fallback;
+    const legacy = localStorage.getItem(legacyKey);
+    if (!legacy) return fallback;
+    const parsed = JSON.parse(legacy) ?? fallback;
+    writeJson(key, parsed);
+    return parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Coerce stored or imported data to the level shape the UI relies on.
+ * Returns null for anything without usable code and a known challenge kind.
+ */
+export function normalizeLevel(raw) {
+  if (
+    !raw ||
+    typeof raw !== 'object' ||
+    typeof raw.code !== 'string' ||
+    !LEVEL_KINDS.includes(raw.kind)
+  )
+    return null;
+  const text = (value, fallback) =>
+    typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  const grading = raw.grading && typeof raw.grading === 'object' ? raw.grading : {};
+  return {
+    id: text(raw.id, `custom-${Date.now()}`),
+    kind: raw.kind,
+    title: text(raw.title, 'Untitled level'),
+    prompt: text(raw.prompt, 'Recreate this memory state.'),
+    code: raw.code,
+    hints: Array.isArray(raw.hints) ? raw.hints.map(h => text(h, '')).filter(Boolean) : [],
+    grading: Object.fromEntries(
+      ['compareNames', 'compareLifetime']
+        .filter(k => typeof grading[k] === 'boolean')
+        .map(k => [k, grading[k]]),
+    ),
+  };
+}
+
+/** Append levels, renaming IDs that would collide with existing or seed levels. */
+export function mergeLevels(existing, incoming) {
+  const used = new Set([...seedLevels, ...existing].map(l => l.id));
+  const merged = [...existing];
+  for (const level of incoming) {
+    let id = level.id;
+    for (let n = 2; used.has(id); n++) id = `${level.id}-${n}`;
+    used.add(id);
+    merged.push({ ...level, id });
+  }
+  return merged;
+}
 
 export function loadCustomLevels() {
-  try {
-    const current = localStorage.getItem(LEVELS_KEY);
-    if (current) return JSON.parse(current) ?? [];
-    const legacy = localStorage.getItem(LEGACY_LEVELS_KEY);
-    if (!legacy) return [];
-    const parsed = JSON.parse(legacy) ?? [];
-    localStorage.setItem(LEVELS_KEY, JSON.stringify(parsed));
-    return parsed;
-  } catch {
-    return [];
-  }
+  const stored = readJson(LEVELS_KEY, LEGACY_LEVELS_KEY, []);
+  // Older versions could store duplicate IDs; merging also repairs those.
+  return Array.isArray(stored) ? mergeLevels([], stored.map(normalizeLevel).filter(Boolean)) : [];
 }
 
+/** Returns false when the browser refused to persist the levels. */
 export function saveCustomLevels(levels) {
-  localStorage.setItem(LEVELS_KEY, JSON.stringify(levels));
+  return writeJson(LEVELS_KEY, levels);
 }
+
 export function loadProgress() {
-  try {
-    const current = localStorage.getItem(PROGRESS_KEY);
-    if (current) return JSON.parse(current) ?? {};
-    const legacy = localStorage.getItem(LEGACY_PROGRESS_KEY);
-    if (!legacy) return {};
-    const parsed = JSON.parse(legacy) ?? {};
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(parsed));
-    return parsed;
-  } catch {
-    return {};
-  }
+  const stored = readJson(PROGRESS_KEY, LEGACY_PROGRESS_KEY, {});
+  return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
 }
 
 export function recordResult(levelId, { solved, attempts, usedHints }) {
@@ -52,7 +105,7 @@ export function recordResult(levelId, { solved, attempts, usedHints }) {
         ? Math.max(prev.stars, 2)
         : Math.max(prev.stars, 1);
   p[levelId] = { stars, attempts: prev.attempts + 1 };
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(p));
+  writeJson(PROGRESS_KEY, p);
   return p[levelId];
 }
 

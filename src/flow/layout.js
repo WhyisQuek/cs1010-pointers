@@ -1,6 +1,6 @@
-import { referenceLocation } from '../machine/addresses.js';
-import { describePointer } from './addressPresentation.js';
 /** Pure MemoryState → canvas layout. Coordinates never enter MemoryState. */
+import { isArray, isPointer, isStruct, typeToString } from '../language/types.js';
+import { referenceLocation } from '../machine/addresses.js';
 import {
   allocationDisplayName,
   frameAllocations,
@@ -10,9 +10,10 @@ import {
   scalarSubobjects,
   sameRef,
 } from '../machine/memory.js';
-import { isArray, isPointer, isStruct, typeToString } from '../language/types.js';
+import { describePointer } from './addressPresentation.js';
 import { curvePointer } from './routing.js';
 
+/** Row/box metrics; memoryMetricsStyle mirrors them into CSS custom properties. */
 export const GEOMETRY = {
   header: 34,
   metadata: 24,
@@ -24,6 +25,10 @@ export const GEOMETRY = {
   top: 52,
   gap: 32,
 };
+/** Smallest frame a user can resize to, shared with workspace operations. */
+export const FRAME_MIN = { width: 288, height: 160 };
+// SVG markers need literal colours; keep these in sync with --err, --heap and --ptr in styles.css.
+const EDGE_COLORS = { dangling: '#f85149', changed: '#e3b341', normal: '#58a6ff' };
 export const memoryMetricsStyle = Object.fromEntries(
   Object.entries(GEOMETRY).map(([key, value]) => [`--memory-${key}`, `${value}px`]),
 );
@@ -56,7 +61,7 @@ export function pathFromHandle(id) {
   return !raw || raw === 'root' ? [] : raw.split('.').map(x => (/^\d+$/.test(x) ? Number(x) : x));
 }
 
-export function allocationSize(a, state) {
+function allocationSize(a, state) {
   const textWidth = (allocationDisplayName(state, a).length + typeToString(a.type).length) * 8 + 40;
   return {
     width: Math.min(440, Math.max(320, textWidth)),
@@ -149,12 +154,12 @@ export function stateToFlow(
     });
     const width = Math.max(
       frameSizes[id]?.width ?? 600,
-      288,
+      FRAME_MIN.width,
       ...sizes.map((s, i) => locals[i].x + s.width + GEOMETRY.padding),
     );
     const height = Math.max(
       frameSizes[id]?.height ?? 240,
-      160,
+      FRAME_MIN.height,
       ...sizes.map((s, i) => locals[i].y + s.height + GEOMETRY.padding),
     );
     nodes.push({
@@ -259,7 +264,7 @@ export function stateToFlow(
       .filter(n => n.type === 'frameGroup')
       .map(n => ({ ...n.position, width: n.style.width, height: 34 })),
   ];
-  function anchor(r, side, kind = 'target') {
+  function anchor(r, side) {
     const box = boxes.get(r.allocationId),
       node = byId.get(r.allocationId);
     if (!box) return null;
@@ -289,7 +294,7 @@ export function stateToFlow(
         ? 'right'
         : 'left';
     const side = self ? 'right' : sourceSide === 'right' ? 'left' : 'right';
-    const source = anchor(e.source, sourceSide, 'source');
+    const source = anchor(e.source, sourceSide);
     if (!source) continue;
     const target = anchor(e.target, side);
     if (!target) continue;
@@ -299,7 +304,12 @@ export function stateToFlow(
     const changed = byId
       .get(e.source.allocationId)
       .data.changedPaths.has(JSON.stringify(e.source.path));
-    const color = e.status === 'dangling' ? '#f85149' : changed ? '#e3b341' : '#58a6ff';
+    const color =
+      e.status === 'dangling'
+        ? EDGE_COLORS.dangling
+        : changed
+          ? EDGE_COLORS.changed
+          : EDGE_COLORS.normal;
     edges.push({
       id,
       source: e.source.allocationId,

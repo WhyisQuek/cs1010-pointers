@@ -19,6 +19,29 @@ export function arithmeticType(a, b) {
   return INT;
 }
 
+function integerRange(type) {
+  const width = BigInt(bits[type.name]),
+    unsigned = type.name.startsWith('unsigned');
+  return {
+    unsigned,
+    width,
+    min: unsigned ? 0n : -(1n << (width - 1n)),
+    max: unsigned ? (1n << width) - 1n : (1n << (width - 1n)) - 1n,
+  };
+}
+
+/** Parse an edited diagram value without silently truncating or wrapping it. */
+export function scalarFromInput(text, type) {
+  const n = Number(text);
+  if (!String(text).trim() || !Number.isFinite(n)) throw new Error(`'${text}' is not a number`);
+  if (isFloatingType(type)) return convertNumber(n, type);
+  if (!Number.isInteger(n)) throw new Error(`${type.name} values must be whole numbers`);
+  const { min, max } = integerRange(type);
+  if (BigInt(n) < min || BigInt(n) > max)
+    throw new Error(`${n} is outside the range of ${type.name}`);
+  return convertNumber(n, type);
+}
+
 export function convertNumber(value, type, { arithmetic = false, fromFloat = false } = {}) {
   if (isFloatingType(type)) {
     const n = type.name === 'float' ? Math.fround(Number(value)) : Number(value);
@@ -36,10 +59,7 @@ export function convertNumber(value, type, { arithmetic = false, fromFloat = fal
     );
   }
   let n = typeof value === 'bigint' ? value : BigInt(Math.trunc(value));
-  const width = BigInt(bits[type.name]),
-    unsigned = type.name.startsWith('unsigned');
-  const min = unsigned ? 0n : -(1n << (width - 1n));
-  const max = unsigned ? (1n << width) - 1n : (1n << (width - 1n)) - 1n;
+  const { unsigned, width, min, max } = integerRange(type);
   if ((fromFloat || (arithmetic && !unsigned)) && (n < min || n > max)) {
     throw new Error(
       fromFloat

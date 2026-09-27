@@ -165,7 +165,7 @@ export function curvePointer(
 }
 
 /** Rounded corners stay within the routing gutter. */
-export function roundedPath(points, radius = 6) {
+function roundedPath(points, radius = 6) {
   if (!points?.length) return '';
   let path = `M ${points[0].x} ${points[0].y}`;
   for (let i = 1; i < points.length - 1; i++) {

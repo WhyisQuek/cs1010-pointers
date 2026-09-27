@@ -1,12 +1,5 @@
-import { referenceLocation } from '../machine/addresses.js';
-import {
-  describePointer,
-  formatAddress,
-  pointerAccessibleLabel,
-  pointerCaption,
-} from './addressPresentation.js';
 /** React components for the pure layout adapter in layout.js. */
-import React, { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import {
   BaseEdge,
   Handle,
@@ -16,10 +9,17 @@ import {
   useUpdateNodeInternals,
 } from '@xyflow/react';
 import { isArray, isPointer, isStruct, sizeOf, typeToString } from '../language/types.js';
+import { referenceLocation } from '../machine/addresses.js';
 import { allocationDisplayName, pointerCanTarget, ref, resolveRef } from '../machine/memory.js';
+import {
+  describePointer,
+  formatAddress,
+  pointerAccessibleLabel,
+  pointerCaption,
+} from './addressPresentation.js';
 import { allocationMetrics, handleId, memoryMetricsStyle, pathFromHandle } from './layout.js';
 
-export function FrameGroupNode({ id, data, selected }) {
+function FrameGroupNode({ id, data, selected }) {
   return (
     <>
       <div className="frame-group-label" title="Drag to move this call frame · Select to resize">
@@ -168,7 +168,7 @@ function Value({ state, value, type, viewMode }) {
   );
 }
 
-export function MemoryAllocationNode({ id, data, selected }) {
+function MemoryAllocationNode({ id, data, selected }) {
   const {
     allocation: a,
     state,
@@ -252,67 +252,69 @@ export function MemoryAllocationNode({ id, data, selected }) {
         </div>
       )}
       <div className="subobject-list">
-        {scalars.map((s, i) => (
-          <div
-            style={{ height: s.height }}
-            className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}${JSON.stringify(inspectedPath) === JSON.stringify(s.ref.path) ? ' inspected-row' : ''}`}
-            key={s.ref.path.join('.') || 'root'}
-            aria-label={
-              isPointer(s.type)
-                ? pointerAccessibleLabel(state, s)
-                : `${allocationDisplayName(state, a)}${formatPath(s.ref.path)}, address ${formatAddress(referenceLocation(state, s.ref).address)}`
-            }
-          >
-            {rowTargets[i].map(path => (
-              <TargetHandles key={path.join('.')} path={path} {...targetProps} />
-            ))}
-            <div className={`memory-value-line${aggregate ? ' aggregate-line' : ''}`}>
-              <button
-                className="sub-label inspect-label nodrag"
-                title={`Inspect ${allocationDisplayName(state, a)}${formatPath(s.ref.path)}`}
-                onClick={e => {
-                  e.stopPropagation();
-                  data.onInspect?.(s.ref.path);
-                }}
-              >
-                {s.ref.path.length ? formatPath(s.ref.path) : 'Value'}
-              </button>
-              {aggregate && viewMode !== 'arrows' && (
-                <code className="sub-address">
-                  {formatAddress(referenceLocation(state, s.ref).address)}
-                </code>
-              )}
-              <Value state={state} type={s.type} value={s.value} viewMode={viewMode} />
-            </div>
-            {isPointer(s.type) && (
-              <div
-                className={`pointer-caption ${['dangling', 'invalid', 'one-past'].includes(describePointer(state, s.value).status) ? 'warning' : ''}`}
-                title={pointerCaption(describePointer(state, s.value))}
-              >
-                {s.value.kind === 'null' && viewMode !== 'arrows'
-                  ? '0x00000000 · no target'
-                  : pointerCaption(describePointer(state, s.value))}
+        {scalars.map((s, i) => {
+          const pointerInfo = isPointer(s.type) ? describePointer(state, s.value) : null;
+          const address = formatAddress(referenceLocation(state, s.ref).address);
+          return (
+            <div
+              style={{ height: s.height }}
+              className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}${JSON.stringify(inspectedPath) === JSON.stringify(s.ref.path) ? ' inspected-row' : ''}`}
+              key={s.ref.path.join('.') || 'root'}
+              aria-label={
+                pointerInfo
+                  ? pointerAccessibleLabel(state, s)
+                  : `${allocationDisplayName(state, a)}${formatPath(s.ref.path)}, address ${address}`
+              }
+            >
+              {rowTargets[i].map(path => (
+                <TargetHandles key={path.join('.')} path={path} {...targetProps} />
+              ))}
+              <div className={`memory-value-line${aggregate ? ' aggregate-line' : ''}`}>
+                <button
+                  className="sub-label inspect-label nodrag"
+                  title={`Inspect ${allocationDisplayName(state, a)}${formatPath(s.ref.path)}`}
+                  onClick={e => {
+                    e.stopPropagation();
+                    data.onInspect?.(s.ref.path);
+                  }}
+                >
+                  {s.ref.path.length ? formatPath(s.ref.path) : 'Value'}
+                </button>
+                {aggregate && viewMode !== 'arrows' && (
+                  <code className="sub-address">{address}</code>
+                )}
+                <Value state={state} type={s.type} value={s.value} viewMode={viewMode} />
               </div>
-            )}
-            {isPointer(s.type) &&
-              ['left', 'right'].map(side => {
-                const available =
-                  editable && side === (sourceSides?.[JSON.stringify(s.ref.path)] ?? 'right');
-                return (
-                  <Handle
-                    key={side}
-                    type="source"
-                    id={handleId('src', s.ref.path, side)}
-                    position={side === 'left' ? Position.Left : Position.Right}
-                    className={`mem-handle src${available ? '' : ' hidden-handle'}`}
-                    title={`Drag to set ${allocationDisplayName(state, a)}${formatPath(s.ref.path)} — compatible targets appear as squares`}
-                    isConnectable={available}
-                    isConnectableEnd={false}
-                  />
-                );
-              })}
-          </div>
-        ))}
+              {pointerInfo && (
+                <div
+                  className={`pointer-caption ${['dangling', 'invalid', 'one-past'].includes(pointerInfo.status) ? 'warning' : ''}`}
+                  title={pointerCaption(pointerInfo)}
+                >
+                  {s.value.kind === 'null' && viewMode !== 'arrows'
+                    ? '0x00000000 · no target'
+                    : pointerCaption(pointerInfo)}
+                </div>
+              )}
+              {pointerInfo &&
+                ['left', 'right'].map(side => {
+                  const available =
+                    editable && side === (sourceSides?.[JSON.stringify(s.ref.path)] ?? 'right');
+                  return (
+                    <Handle
+                      key={side}
+                      type="source"
+                      id={handleId('src', s.ref.path, side)}
+                      position={side === 'left' ? Position.Left : Position.Right}
+                      className={`mem-handle src${available ? '' : ' hidden-handle'}`}
+                      title={`Drag to set ${allocationDisplayName(state, a)}${formatPath(s.ref.path)} — compatible targets appear as squares`}
+                      isConnectable={available}
+                      isConnectableEnd={false}
+                    />
+                  );
+                })}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

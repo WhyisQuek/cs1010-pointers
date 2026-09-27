@@ -3,43 +3,22 @@
  * Builds MemoryState/Mini-C AST objects directly to test the memory machine,
  * generator, and equivalence grader without needing Tree-sitter WASM.
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { array, pointer, primitive } from '../src/language/types.js';
-import {
-  addAllocation,
-  makeState,
-  pointerValue,
-  ref,
-  resetAllocationIds,
-  setRefValue,
-} from '../src/machine/memory.js';
+import { addAllocation, makeState, pointerValue, ref } from '../src/machine/memory.js';
 import { generate, validate, ValidationError } from '../src/pipeline/codegen.js';
 import { equivalent } from '../src/pipeline/equivalence.js';
 import { executeProgram } from '../src/machine/interpreter.js';
 
 const INT = primitive('int');
 
-function fresh() {
-  resetAllocationIds();
-  return makeState();
-}
+const fresh = () => makeState();
 function stack(s, name, type, value) {
   return addAllocation(s, { name, type, value, storage: { kind: 'stack', frameId: 'main' } });
 }
 function heap(s, type, value, alive = true) {
   return addAllocation(s, { type, value, alive, storage: { kind: 'heap' } });
-}
-
-let passed = 0;
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`PASS  ${name}`);
-    passed++;
-  } catch (e) {
-    console.error(`FAIL  ${name}\n      ${e.stack ?? e}`);
-    process.exitCode = 1;
-  }
 }
 
 test('dangling aliases preserve one freed allocation and codegen provenance', () => {
@@ -691,7 +670,6 @@ test('returning address of a local leaves a dangling pointer with frame provenan
 });
 
 test('canonical generator emits named struct definitions and field assignments', () => {
-  resetAllocationIds();
   const Node = {
     kind: 'struct',
     name: 'Node',
@@ -701,7 +679,7 @@ test('canonical generator emits named struct definitions and field assignments',
     ],
   };
   const s = makeState({ Node });
-  const a = addAllocation(s, {
+  addAllocation(s, {
     name: 'a',
     type: Node,
     storage: { kind: 'stack', frameId: 'main' },
@@ -717,5 +695,3 @@ test('canonical generator emits named struct definitions and field assignments',
   assert.match(c, /a\.value = 5;/);
   assert.match(c, /a\.next = NULL;/);
 });
-
-if (!process.exitCode) console.log(`\n${passed} core tests passed.`);

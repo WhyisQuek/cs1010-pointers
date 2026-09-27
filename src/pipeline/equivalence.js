@@ -7,10 +7,12 @@
  */
 import { typeEquals, typeToString } from '../language/types.js';
 import {
+  allocationDisplayName,
   getAllocation,
   heapAllocations,
   pointerStatus,
   resolveRef,
+  samePath,
   scalarSubobjects,
   stackAllocations,
 } from '../machine/memory.js';
@@ -200,7 +202,7 @@ function collectDiffs(A, B, map, config) {
   for (const [aId, bId] of map.entries()) {
     const a = getAllocation(A, aId),
       b = getAllocation(B, bId);
-    const label = a.name ? `'${a.name}'` : `heap allocation ${a.id}`;
+    const label = objectLabel(A, a);
     if (!typeEquals(a.type, b.type)) {
       diffs.push(`${label} should have type ${typeToString(a.type)}`);
       badIds.add(b.id);
@@ -216,7 +218,7 @@ function collectDiffs(A, B, map, config) {
     for (let i = 0; i < Math.min(as.length, bs.length); i++) {
       const av = as[i].value,
         bv = bs[i].value;
-      const sublabel = subobjectLabel(a, as[i].ref.path);
+      const sublabel = subobjectLabel(A, a, as[i].ref.path);
       if (av.kind !== bv.kind) {
         diffs.push(`${sublabel} should hold ${describeValue(A, av)}`);
         badIds.add(b.id);
@@ -251,10 +253,14 @@ function targetLabel(state, r) {
     return `${r.allocationId}:${r.path.join('.')}`;
   }
 }
-function subobjectLabel(allocation, path) {
-  let out = allocation.name ? `'${allocation.name}'` : `heap ${allocation.id}`;
+/** Student-facing labels use display names ("heap 2"), never internal IDs ("a7"). */
+function objectLabel(state, allocation) {
+  return `'${allocationDisplayName(state, allocation)}'`;
+}
+function subobjectLabel(state, allocation, path) {
+  let out = allocationDisplayName(state, allocation);
   for (const p of path) out += typeof p === 'number' ? `[${p}]` : `.${p}`;
-  return out;
+  return `'${out}'`;
 }
 function describeValue(state, v) {
   if (v.kind === 'scalar') return String(v.value);
@@ -264,10 +270,6 @@ function describeValue(state, v) {
     return `a ${pointerStatus(state, v)} pointer to ${targetLabel(state, v.target)}`;
   return v.kind;
 }
-function samePath(a = [], b = []) {
-  return a.length === b.length && a.every((x, i) => x === b[i]);
-}
-
 function frameKey(state, frameId) {
   if (!frameId || frameId === 'main') return 'main';
   const frame = state.frames?.find(f => f.id === frameId);

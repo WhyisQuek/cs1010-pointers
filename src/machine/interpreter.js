@@ -1,4 +1,3 @@
-import { addressOffset } from './addresses.js';
 /**
  * PointerViz Mini-C semantic interpreter.
  *
@@ -36,6 +35,7 @@ import {
 } from '../language/numeric.js';
 import { checkProgram } from '../language/checker.js';
 import { decodeCharLiteral } from '../language/literals.js';
+import { addressOffset } from './addresses.js';
 import {
   addAllocation,
   addFrame,
@@ -50,6 +50,8 @@ import {
   ref,
   refType,
   resolveRef,
+  samePath,
+  sameRef,
   setRefValue,
 } from './memory.js';
 
@@ -435,17 +437,14 @@ function initializeMembers(targetRef, type, elements, cursor, ctx, env, frame, n
 function zeroInitialize(targetRef, type, ctx) {
   if (isPrimitive(type)) setRefValue(ctx.state, targetRef, { kind: 'scalar', value: 0 });
   else if (isPointer(type)) setRefValue(ctx.state, targetRef, { kind: 'null' });
-  else {
-    const resolved = resolveRef(ctx.state, targetRef);
-    if (isArray(type))
-      for (let i = 0; i < type.length; i++)
-        zeroInitialize(ref(targetRef.allocationId, [...targetRef.path, i]), type.of, ctx);
-    else if (isStruct(type)) {
-      const def = resolveStructType(type, ctx.state.structTypes);
-      for (const f of def.fields)
-        zeroInitialize(ref(targetRef.allocationId, [...targetRef.path, f.name]), f.type, ctx);
-    } else throw new Error(`cannot zero initialize ${resolved.label}`);
-  }
+  else if (isArray(type)) {
+    for (let i = 0; i < type.length; i++)
+      zeroInitialize(ref(targetRef.allocationId, [...targetRef.path, i]), type.of, ctx);
+  } else if (isStruct(type)) {
+    const def = resolveStructType(type, ctx.state.structTypes);
+    for (const f of def.fields)
+      zeroInitialize(ref(targetRef.allocationId, [...targetRef.path, f.name]), f.type, ctx);
+  } else throw new Error(`cannot zero initialize ${resolveRef(ctx.state, targetRef).label}`);
 }
 
 function evalExpression(expr, ctx, env, frame, expectedType = null) {
@@ -529,11 +528,7 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
         const rhs = evalExpression(expr.right, ctx, env, frame, lhs.type);
         const rhsAccesses = ctx.accesses.slice(rhsStart);
         checkUnsequenced(lhsAccesses, rhsAccesses, ctx, expr);
-        if (
-          rhsAccesses.some(
-            a => a.depth === ctx.callDepth && a.update && sameRefValue(a.ref, lhs.ref),
-          )
-        )
+        if (rhsAccesses.some(a => a.depth === ctx.callDepth && a.update && sameRef(a.ref, lhs.ref)))
           throw semanticError(expr, 'unsequenced modifications of the assignment target');
         const value = assignToRef(lhs.ref, lhs.type, rhs, ctx, expr);
         return { type: lhs.type, value };
@@ -996,8 +991,12 @@ function scalarEquals(left, right, ctx, node) {
     const type = arithmeticType(left.type, right.type);
     return convertNumber(left.value.value, type) === convertNumber(right.value.value, type);
   }
-  if (isPointer(left.type) && isPointer(right.type) && !typeEquals(left.type, right.type))
-    throw semanticError(node, 'comparison of incompatible pointer types');
+  if (isPointer(left.type) && isPointer(right.type) && !typeEquals(left.type, right.type)) {
+    throw semanticError(
+      node,
+      `comparison of incompatible pointer types ${typeToString(left.type)} and ${typeToString(right.type)}`,
+    );
+  }
 
   const leftNull = isNullLike(left),
     rightNull = isNullLike(right);
@@ -1006,11 +1005,6 @@ function scalarEquals(left, right, ctx, node) {
   if (isPointer(right.type) && right.value.kind === 'pointer' && leftNull) return false;
 
   if (isPointer(left.type) && isPointer(right.type)) {
-    if (!typeEquals(left.type, right.type))
-      throw semanticError(
-        node,
-        `comparison of incompatible pointer types ${typeToString(left.type)} and ${typeToString(right.type)}`,
-      );
     if (left.value.kind === 'null' || right.value.kind === 'null')
       return left.value.kind === right.value.kind;
     if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer')
@@ -1064,10 +1058,6 @@ function isNullLike(rv) {
   return (
     rv.value.kind === 'null' || (isIntegerRuntime(rv) && rv.integerConstant && rv.value.value === 0)
   );
-}
-
-function sameRefValue(a, b) {
-  return a.allocationId === b.allocationId && samePath(a.path ?? [], b.path ?? []);
 }
 
 function checkUnsequenced(left, right, ctx, node) {
@@ -1313,9 +1303,6 @@ function isNumberRuntime(rv) {
 function requireNumber(rv, node) {
   if (!isNumberRuntime(rv))
     throw semanticError(node, `expected number, got ${typeToString(rv.type)}`);
-}
-function samePath(a = [], b = []) {
-  return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
 function semanticError(node, message) {

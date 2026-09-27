@@ -2,7 +2,6 @@
  * Browser entry point.
  * Mounts the React application and loads the one global stylesheet.
  */
-import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './styles.css';

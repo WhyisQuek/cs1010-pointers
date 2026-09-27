@@ -23,7 +23,18 @@ export const structType = (name, fields) => ({
 });
 
 export const INT = primitive('int');
-export const CHAR = primitive('char');
+
+/** Arithmetic types supported by the Mini-C subset, in editor display order. */
+export const PRIMITIVE_NAMES = Object.freeze([
+  'int',
+  'char',
+  'short',
+  'long',
+  'unsigned int',
+  'unsigned long',
+  'float',
+  'double',
+]);
 
 /** Bound the total storage of nested aggregates, not just each array dimension. */
 export function validateObjectType(type, structs = {}, visiting = new Set()) {
@@ -47,10 +58,6 @@ export function validateObjectType(type, structs = {}, visiting = new Set()) {
   return count;
 }
 
-export function cloneType(type) {
-  return structuredClone(type);
-}
-
 export function typeEquals(a, b) {
   if (!a || !b || a.kind !== b.kind) return false;
   if (a.kind === 'primitive') return a.name === b.name;
@@ -72,14 +79,6 @@ export function isArray(type) {
 }
 export function isStruct(type) {
   return type?.kind === 'struct';
-}
-export function isScalar(type) {
-  return isPrimitive(type) || isPointer(type);
-}
-
-export function pointeeType(type) {
-  if (!isPointer(type)) throw new Error(`expected pointer type, got ${typeToString(type)}`);
-  return type.to;
 }
 
 /** Resolve a named struct to its full definition from a state/program registry. */
@@ -136,9 +135,6 @@ const alignUp = (n, alignment) => Math.ceil(n / alignment) * alignment;
 export function sizeOf(type, structTypes = {}) {
   return layoutOf(type, structTypes).size;
 }
-export function alignmentOf(type, structTypes = {}) {
-  return layoutOf(type, structTypes).alignment;
-}
 
 export function typeToString(type) {
   if (!type) return '<unknown>';
@@ -162,12 +158,6 @@ export function declarationToC(type, name) {
   throw new Error(`cannot print declaration for ${JSON.stringify(type)}`);
 }
 
-function typeBase(type) {
-  if (type.kind === 'primitive') return type.name;
-  if (type.kind === 'struct') return type.alias ?? `struct ${type.name}`;
-  return typeToString(type);
-}
-
 export function pointerDepth(type) {
   let n = 0;
   while (type?.kind === 'pointer') {
@@ -184,16 +174,7 @@ export function basePrimitive(type) {
 }
 
 export function isSupportedPrimitiveName(name) {
-  return [
-    'int',
-    'char',
-    'short',
-    'long',
-    'unsigned int',
-    'unsigned long',
-    'float',
-    'double',
-  ].includes(name);
+  return PRIMITIVE_NAMES.includes(name);
 }
 
 export const C_KEYWORDS = new Set([

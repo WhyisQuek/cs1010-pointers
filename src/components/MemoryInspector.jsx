@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+/** Side panel for inspecting one object or member and editing it in editable diagrams. */
+import { useEffect, useMemo, useState } from 'react';
 import {
+  PRIMITIVE_NAMES,
   array,
   basePrimitive,
   isArray,
@@ -13,6 +15,7 @@ import {
   typeToString,
 } from '../language/types.js';
 import { MAX_ARRAY_LENGTH, clampArrayLength } from '../language/limits.js';
+import { scalarFromInput } from '../language/numeric.js';
 import {
   addressableSubobjects,
   allocationDisplayName,
@@ -47,7 +50,7 @@ export default function MemoryInspector({
     setName(a.name ?? '');
     setNotice('');
   }, [a.name, a.id]);
-  const subobjects = useMemo(() => addressableSubobjects(a, state), [a, state.structTypes]);
+  const subobjects = useMemo(() => addressableSubobjects(a, state), [a, state]);
   let selected;
   try {
     selected = resolveRef(state, ref(a.id, path));
@@ -289,7 +292,10 @@ export default function MemoryInspector({
                         selected.ref,
                         e.target.value === ''
                           ? { kind: 'uninit' }
-                          : { kind: 'scalar', value: Number(e.target.value) },
+                          : {
+                              kind: 'scalar',
+                              value: scalarFromInput(e.target.value, selected.type),
+                            },
                       ),
                     )
                   }
@@ -342,16 +348,7 @@ export default function MemoryInspector({
                     value={editor.base}
                     onChange={e => setType({ base: e.target.value })}
                   >
-                    {[
-                      'int',
-                      'char',
-                      'short',
-                      'long',
-                      'unsigned int',
-                      'unsigned long',
-                      'float',
-                      'double',
-                    ].map(t => (
+                    {PRIMITIVE_NAMES.map(t => (
                       <option key={t}>{t}</option>
                     ))}
                   </select>

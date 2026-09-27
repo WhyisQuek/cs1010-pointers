@@ -1,9 +1,16 @@
 /** Application shell: initializes the parser and switches between main pages. */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { initParser } from './pipeline/interpreter.js';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Sandbox from './components/Sandbox.jsx';
 import Challenges from './components/Challenges.jsx';
 import LevelEditor from './components/LevelEditor.jsx';
+
+const PAGES = [
+  ['sandbox', 'Sandbox', Sandbox],
+  ['challenges', 'Challenges', Challenges],
+  ['editor', 'Level editor', LevelEditor],
+];
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -23,19 +30,17 @@ export default function App() {
   if (error) return <div className="loading-screen">Could not load the C parser: {error}</div>;
   if (!ready) return <div className="loading-screen">Loading parser…</div>;
 
+  const Page = PAGES.find(([id]) => id === tab)[2];
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">PointerViz</div>
         <nav className="tabs" aria-label="sections">
-          {[
-            ['sandbox', 'Sandbox'],
-            ['challenges', 'Challenges'],
-            ['editor', 'Level editor'],
-          ].map(([id, label]) => (
+          {PAGES.map(([id, label]) => (
             <button
               key={id}
               className={`tab${tab === id ? ' active' : ''}`}
+              aria-current={tab === id ? 'page' : undefined}
               onClick={() => setTab(id)}
             >
               {label}
@@ -43,9 +48,9 @@ export default function App() {
           ))}
         </nav>
       </header>
-      {tab === 'sandbox' && <Sandbox />}
-      {tab === 'challenges' && <Challenges />}
-      {tab === 'editor' && <LevelEditor />}
+      <ErrorBoundary resetKey={tab}>
+        <Page />
+      </ErrorBoundary>
     </div>
   );
 }
