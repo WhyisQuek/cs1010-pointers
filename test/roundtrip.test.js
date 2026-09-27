@@ -51,17 +51,27 @@ for (const source of programs) {
   }
 }
 
-
 // Function integration is execution-only because a final call-stack trace does not
 // contain enough source information to synthesize the original function bodies.
 try {
-  const result = interpret('void set_value(int *p) { *p = 25; } int main(void) { int value = 10; set_value(&value); return 0; }');
+  const result = interpret(
+    'void set_value(int *p) { *p = 25; } int main(void) { int value = 10; set_value(&value); return 0; }',
+  );
   const value = result.state.allocations.find(a => a.name === 'value');
   const fnFrame = result.state.frames.find(f => f.name === 'set_value');
-  const ok = value?.value?.value === 25 && fnFrame && !fnFrame.active && result.snapshots.some(s => s.function === 'set_value');
-  console.log(`${ok ? 'PASS' : 'FAIL'}  user function parsing, call frame, and pointer side effect`);
+  const ok =
+    value?.value?.value === 25 &&
+    fnFrame &&
+    !fnFrame.active &&
+    result.snapshots.some(s => s.function === 'set_value');
+  console.log(
+    `${ok ? 'PASS' : 'FAIL'}  user function parsing, call frame, and pointer side effect`,
+  );
   if (!ok) fail++;
-} catch (e) { console.log(`ERROR function integration: ${e.message}`); fail++; }
+} catch (e) {
+  console.log(`ERROR function integration: ${e.message}`);
+  fail++;
+}
 
 try {
   const result = interpret(`int main(void) {
@@ -75,10 +85,17 @@ try {
   }`);
   const sum = result.state.allocations.find(a => a.name === 'sum');
   const loopI = result.state.allocations.find(a => a.name === 'i');
-  const ok = sum?.value?.value === 8 && loopI && !loopI.alive && result.snapshots.some(s => s.statement === 'ForUpdate');
+  const ok =
+    sum?.value?.value === 8 &&
+    loopI &&
+    !loopI.alive &&
+    result.snapshots.some(s => s.statement === 'ForUpdate');
   console.log(`${ok ? 'PASS' : 'FAIL'}  parsed for/if/break/continue semantics`);
   if (!ok) fail++;
-} catch (e) { console.log(`ERROR control-flow integration: ${e.message}`); fail++; }
+} catch (e) {
+  console.log(`ERROR control-flow integration: ${e.message}`);
+  fail++;
+}
 
 try {
   const result = interpret(`int main(void) {
@@ -92,11 +109,15 @@ try {
   const ok = x?.value?.value === 2;
   console.log(`${ok ? 'PASS' : 'FAIL'}  logical conditions short-circuit during parsed execution`);
   if (!ok) fail++;
-} catch (e) { console.log(`ERROR logical integration: ${e.message}`); fail++; }
+} catch (e) {
+  console.log(`ERROR logical integration: ${e.message}`);
+  fail++;
+}
 
 try {
   interpret(`int main(void) { while (1) { } return 0; }`);
-  console.log('FAIL  loop iteration safety limit'); fail++;
+  console.log('FAIL  loop iteration safety limit');
+  fail++;
 } catch (e) {
   const ok = /loop exceeded 256 iterations/.test(e.message);
   console.log(`${ok ? 'PASS' : 'FAIL'}  loop iteration safety limit`);
@@ -105,7 +126,8 @@ try {
 
 try {
   interpret(`int main(void) { int a[65]; return 0; }`);
-  console.log('FAIL  array safety limit'); fail++;
+  console.log('FAIL  array safety limit');
+  fail++;
 } catch (e) {
   const ok = /between 1 and 64/.test(e.message);
   console.log(`${ok ? 'PASS' : 'FAIL'}  array safety limit`);
@@ -117,9 +139,14 @@ try {
   const target = interpret('int main(){ int a = 10; int *b = &a; }').state;
   const wrong = interpret('int main(){ int a = 10; int c = 4; int *b = &c; }').state;
   const result = equivalent(target, wrong);
-  console.log(`${!result.equal && result.diffs.length ? 'PASS' : 'FAIL'}  grading rejects wrong pointer graph`);
+  console.log(
+    `${!result.equal && result.diffs.length ? 'PASS' : 'FAIL'}  grading rejects wrong pointer graph`,
+  );
   if (result.equal) fail++;
-} catch (e) { console.log(`ERROR grading sanity: ${e.message}`); fail++; }
+} catch (e) {
+  console.log(`ERROR grading sanity: ${e.message}`);
+  fail++;
+}
 
 try {
   const result = interpret(`
@@ -139,10 +166,19 @@ try {
   assert.equal(allocation('p').value.target.allocationId, allocation('x').id);
   assert.equal(allocation('pp').value.target.allocationId, allocation('p').id);
   assert.equal(allocation('nothing').value.kind, 'null');
-  assert.throws(() => interpret('int *bad(void) { return 7; } int main(void) { int *p = bad(); }'), /cannot assign int to int \*/);
-  assert.throws(() => interpret('int (*bad(void))(int) { return NULL; } int main(void) {}'), /function pointer declarators are not supported/);
+  assert.throws(
+    () => interpret('int *bad(void) { return 7; } int main(void) { int *p = bad(); }'),
+    /cannot assign int to int \*/,
+  );
+  assert.throws(
+    () => interpret('int (*bad(void))(int) { return NULL; } int main(void) {}'),
+    /function pointer declarators are not supported/,
+  );
   console.log('PASS  pointer return types preserve depth, identity, null, and type checking');
-} catch (e) { console.log(`ERROR pointer return integration: ${e.message}`); fail++; }
+} catch (e) {
+  console.log(`ERROR pointer return integration: ${e.message}`);
+  fail++;
+}
 
 try {
   const result = interpret(`
@@ -170,7 +206,12 @@ try {
   `);
   const allocation = name => result.state.allocations.find(a => a.name === name);
   let link = allocation('newHead').value;
-  for (const [name, value] of [['d', 40], ['c', 30], ['b', 20], ['a', 10]]) {
+  for (const [name, value] of [
+    ['d', 40],
+    ['c', 30],
+    ['b', 20],
+    ['a', 10],
+  ]) {
     assert.deepEqual(link.target, allocation(name).value.target);
     const node = resolveRef(result.state, link.target).value;
     assert.equal(node.fields.value.value, value);
@@ -180,7 +221,12 @@ try {
   assert.equal(allocation('empty').value.kind, 'null');
   assert.equal(result.state.frames.filter(f => f.name === 'reverse').length, 5);
   assert.ok(result.state.frames.filter(f => f.name === 'reverse').every(f => !f.active));
-  console.log('PASS  recursive struct pointer return reverses all four links and handles an empty list');
-} catch (e) { console.log(`ERROR recursive pointer return integration: ${e.message}`); fail++; }
+  console.log(
+    'PASS  recursive struct pointer return reverses all four links and handles an empty list',
+  );
+} catch (e) {
+  console.log(`ERROR recursive pointer return integration: ${e.message}`);
+  fail++;
+}
 
 process.exitCode = fail ? 1 : 0;

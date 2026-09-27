@@ -9,70 +9,121 @@ import { initParser, interpret } from '../src/pipeline/interpreter.js';
 
 const distro = process.env.POINTERVIZ_WSL_DISTRO;
 const compiler = process.env.POINTERVIZ_CC ?? 'cc';
-const command = (exe, args) => distro
-  ? spawnSync('wsl', ['-d', distro, '--', exe, ...args], { encoding: 'utf8', timeout: 60000 })
-  : spawnSync(exe, args, { encoding: 'utf8', timeout: 60000 });
+const command = (exe, args) =>
+  distro
+    ? spawnSync('wsl', ['-d', distro, '--', exe, ...args], { encoding: 'utf8', timeout: 60000 })
+    : spawnSync(exe, args, { encoding: 'utf8', timeout: 60000 });
 const available = command(compiler, ['--version']).status === 0;
-const compilerFlags = ['-std=c11', '-O0', '-fsanitize=undefined', '-fno-sanitize-recover=undefined'];
-test('defined programs match a native LP64 C11 compiler with undefined-behavior sanitizer', {
-  skip: !available && !process.env.POINTERVIZ_REQUIRE_NATIVE ? 'LP64 C compiler unavailable; set POINTERVIZ_CC or POINTERVIZ_WSL_DISTRO' : false,
-}, async t => {
-  assert.ok(available, 'native C compiler is required but unavailable');
-  const cases = [
-    ...values.map(([name, body, expected]) => [name, `int main(void) { ${body} }`, expected]),
-    ...programs,
-  ];
-  const scratch = mkdtempSync(path.join(process.cwd(), '.native-c-'));
-  const relative = name => path.relative(process.cwd(), path.join(scratch, name)).split(path.sep).join('/');
-  try {
-    // A compiler can exist but target a different data model (for example, Windows LLP64).
-    // Check both the model and the sanitizer runtime before compiling all fixtures.
-    writeFileSync(path.join(scratch, 'probe.c'), `#include <stdio.h>
+const compilerFlags = [
+  '-std=c11',
+  '-O0',
+  '-fsanitize=undefined',
+  '-fno-sanitize-recover=undefined',
+];
+test(
+  'defined programs match a native LP64 C11 compiler with undefined-behavior sanitizer',
+  {
+    skip:
+      !available && !process.env.POINTERVIZ_REQUIRE_NATIVE
+        ? 'LP64 C compiler unavailable; set POINTERVIZ_CC or POINTERVIZ_WSL_DISTRO'
+        : false,
+  },
+  async t => {
+    assert.ok(available, 'native C compiler is required but unavailable');
+    const cases = [
+      ...values.map(([name, body, expected]) => [name, `int main(void) { ${body} }`, expected]),
+      ...programs,
+    ];
+    const scratch = mkdtempSync(path.join(process.cwd(), '.native-c-'));
+    const relative = name =>
+      path.relative(process.cwd(), path.join(scratch, name)).split(path.sep).join('/');
+    try {
+      // A compiler can exist but target a different data model (for example, Windows LLP64).
+      // Check both the model and the sanitizer runtime before compiling all fixtures.
+      writeFileSync(
+        path.join(scratch, 'probe.c'),
+        `#include <stdio.h>
 #include <limits.h>
 int main(void) {
   printf("sizeof(long)=%zu, sizeof(void*)=%zu, CHAR_MIN=%d\\n", sizeof(long), sizeof(void*), CHAR_MIN);
   return sizeof(long)==8 && sizeof(void*)==8 && CHAR_MIN==-128 ? 0 : 77;
 }
-`);
-    const probeOutput = relative(process.platform === 'win32' && !distro ? 'probe.exe' : 'probe');
-    const probeBuilt = command(compiler, [...compilerFlags, relative('probe.c'), '-o', probeOutput]);
-    const probeRun = probeBuilt.status === 0 ? command(`./${probeOutput}`, []) : null;
-    const unsupported = probeBuilt.status !== 0
-      ? `C11 compiler with undefined-behavior sanitizer unavailable: ${probeBuilt.stderr || probeBuilt.error}`
-      : probeRun.status !== 0
-        ? `LP64 signed-char compiler/runtime unavailable: ${probeRun.stdout || ''} ${probeRun.stderr || probeRun.error || ''}`
-        : '';
-    if (unsupported) {
-      assert.ok(!process.env.POINTERVIZ_REQUIRE_NATIVE, `native C compiler is required: ${unsupported}`);
-      t.skip(`${unsupported.trim()}; set POINTERVIZ_CC or POINTERVIZ_WSL_DISTRO to a compatible compiler`);
-      return;
+`,
+      );
+      const probeOutput = relative(process.platform === 'win32' && !distro ? 'probe.exe' : 'probe');
+      const probeBuilt = command(compiler, [
+        ...compilerFlags,
+        relative('probe.c'),
+        '-o',
+        probeOutput,
+      ]);
+      const probeRun = probeBuilt.status === 0 ? command(`./${probeOutput}`, []) : null;
+      const unsupported =
+        probeBuilt.status !== 0
+          ? `C11 compiler with undefined-behavior sanitizer unavailable: ${probeBuilt.stderr || probeBuilt.error}`
+          : probeRun.status !== 0
+            ? `LP64 signed-char compiler/runtime unavailable: ${probeRun.stdout || ''} ${probeRun.stderr || probeRun.error || ''}`
+            : '';
+      if (unsupported) {
+        assert.ok(
+          !process.env.POINTERVIZ_REQUIRE_NATIVE,
+          `native C compiler is required: ${unsupported}`,
+        );
+        t.skip(
+          `${unsupported.trim()}; set POINTERVIZ_CC or POINTERVIZ_WSL_DISTRO to a compatible compiler`,
+        );
+        return;
+      }
+      await initParser({
+        runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm',
+        grammarWasm: './public/tree-sitter-c.wasm',
+      });
+      const files = cases.map(([, source], i) => {
+        const end = source.lastIndexOf('}');
+        const observed =
+          source.slice(0, end) +
+          `printf("${i} %.17g\\n", (double)result); return 0;` +
+          source.slice(end);
+        writeFileSync(
+          path.join(scratch, `case${i}.c`),
+          `#include <stdio.h>\n#include <stdlib.h>\n#include <limits.h>\n_Static_assert(sizeof(long)==8 && sizeof(void*)==8 && CHAR_MIN==-128, "requires LP64 signed-char model");\n#define main case${i}\n#define f helper${i}\n${observed}\n`,
+        );
+        return relative(`case${i}.c`);
+      });
+      writeFileSync(
+        path.join(scratch, 'runner.c'),
+        cases.map((_, i) => `int case${i}(void);`).join('\n') +
+          `\nint main(void){${cases.map((_, i) => `case${i}();`).join('')}return 0;}\n`,
+      );
+      const output = relative(
+        process.platform === 'win32' && !distro ? 'reference.exe' : 'reference',
+      );
+      const built = command(compiler, [
+        ...compilerFlags,
+        ...files,
+        relative('runner.c'),
+        '-o',
+        output,
+      ]);
+      assert.equal(built.status, 0, built.stderr || String(built.error));
+      const executed = command(`./${output}`, []);
+      assert.equal(executed.status, 0, executed.stderr || String(executed.error));
+      const lines = executed.stdout.trim().split(/\r?\n/);
+      assert.equal(lines.length, cases.length);
+      cases.forEach(([name, source, expected], i) => {
+        const [index, actual] = lines[i].split(' ').map(Number);
+        assert.equal(index, i);
+        assert.equal(actual, expected, `native expectation: ${name}`);
+        const state = interpret(source).state;
+        const value = state.allocations.find(
+          a => a.name === 'result' && a.storage.frameId === 'main',
+        ).value.value;
+        assert.equal(value, actual, `interpreter/native difference: ${name}`);
+      });
+    } finally {
+      // mkdtemp creates a checked, dedicated child of this workspace.
+      assert.equal(path.dirname(scratch), process.cwd());
+      rmSync(scratch, { recursive: true, force: true });
     }
-    await initParser({ runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm', grammarWasm: './public/tree-sitter-c.wasm' });
-    const files = cases.map(([, source], i) => {
-      const end = source.lastIndexOf('}');
-      const observed = source.slice(0, end) + `printf("${i} %.17g\\n", (double)result); return 0;` + source.slice(end);
-      writeFileSync(path.join(scratch, `case${i}.c`), `#include <stdio.h>\n#include <stdlib.h>\n#include <limits.h>\n_Static_assert(sizeof(long)==8 && sizeof(void*)==8 && CHAR_MIN==-128, "requires LP64 signed-char model");\n#define main case${i}\n#define f helper${i}\n${observed}\n`);
-      return relative(`case${i}.c`);
-    });
-    writeFileSync(path.join(scratch, 'runner.c'), cases.map((_, i) => `int case${i}(void);`).join('\n') + `\nint main(void){${cases.map((_, i) => `case${i}();`).join('')}return 0;}\n`);
-    const output = relative(process.platform === 'win32' && !distro ? 'reference.exe' : 'reference');
-    const built = command(compiler, [...compilerFlags, ...files, relative('runner.c'), '-o', output]);
-    assert.equal(built.status, 0, built.stderr || String(built.error));
-    const executed = command(`./${output}`, []);
-    assert.equal(executed.status, 0, executed.stderr || String(executed.error));
-    const lines = executed.stdout.trim().split(/\r?\n/);
-    assert.equal(lines.length, cases.length);
-    cases.forEach(([name, source, expected], i) => {
-      const [index, actual] = lines[i].split(' ').map(Number);
-      assert.equal(index, i);
-      assert.equal(actual, expected, `native expectation: ${name}`);
-      const state = interpret(source).state;
-      const value = state.allocations.find(a => a.name === 'result' && a.storage.frameId === 'main').value.value;
-      assert.equal(value, actual, `interpreter/native difference: ${name}`);
-    });
-  } finally {
-    // mkdtemp creates a checked, dedicated child of this workspace.
-    assert.equal(path.dirname(scratch), process.cwd());
-    rmSync(scratch, { recursive: true, force: true });
-  }
-});
+  },
+);

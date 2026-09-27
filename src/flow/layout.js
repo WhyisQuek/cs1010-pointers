@@ -1,37 +1,83 @@
 import { referenceLocation } from '../machine/addresses.js';
 import { describePointer } from './addressPresentation.js';
 /** Pure MemoryState → canvas layout. Coordinates never enter MemoryState. */
-import { allocationDisplayName, frameAllocations, heapAllocations, pointerEdges, resolveRef, scalarSubobjects, sameRef } from '../machine/memory.js';
+import {
+  allocationDisplayName,
+  frameAllocations,
+  heapAllocations,
+  pointerEdges,
+  resolveRef,
+  scalarSubobjects,
+  sameRef,
+} from '../machine/memory.js';
 import { isArray, isPointer, isStruct, typeToString } from '../language/types.js';
 import { curvePointer } from './routing.js';
 
-export const GEOMETRY = { header: 34, metadata: 24, columns: 24, row: 32, pointerStatus: 20, lifetime: 24, padding: 24, top: 52, gap: 32 };
-export const memoryMetricsStyle = Object.fromEntries(Object.entries(GEOMETRY).map(([key, value]) => [`--memory-${key}`, `${value}px`]));
+export const GEOMETRY = {
+  header: 34,
+  metadata: 24,
+  columns: 24,
+  row: 32,
+  pointerStatus: 20,
+  lifetime: 24,
+  padding: 24,
+  top: 52,
+  gap: 32,
+};
+export const memoryMetricsStyle = Object.fromEntries(
+  Object.entries(GEOMETRY).map(([key, value]) => [`--memory-${key}`, `${value}px`]),
+);
 export function allocationMetrics(a, state) {
   const aggregate = isArray(a.type) || isStruct(a.type);
-  let top = GEOMETRY.header + GEOMETRY.metadata + (aggregate ? GEOMETRY.columns : 0) + (a.alive ? 0 : GEOMETRY.lifetime);
+  let top =
+    GEOMETRY.header +
+    GEOMETRY.metadata +
+    (aggregate ? GEOMETRY.columns : 0) +
+    (a.alive ? 0 : GEOMETRY.lifetime);
   const rows = scalarSubobjects(a, state).map(s => {
     const height = GEOMETRY.row + (isPointer(s.type) ? GEOMETRY.pointerStatus : 0);
-    const row = { ...s, top, height }; top += height; return row;
+    const row = { ...s, top, height };
+    top += height;
+    return row;
   });
   return { aggregate, rows, height: top + 2 };
 }
 const locationKey = (state, scalar) => {
-  try { return `${referenceLocation(state, scalar.ref).address}:${isPointer(scalar.type) ? describePointer(state, scalar.value).address : ''}`; }
-  catch { return 'invalid'; }
+  try {
+    return `${referenceLocation(state, scalar.ref).address}:${isPointer(scalar.type) ? describePointer(state, scalar.value).address : ''}`;
+  } catch {
+    return 'invalid';
+  }
 };
-export const handleId = (kind, path = [], side = 'left') => `${kind}:${path.length ? path.join('.') : 'root'}:${side}`;
+export const handleId = (kind, path = [], side = 'left') =>
+  `${kind}:${path.length ? path.join('.') : 'root'}:${side}`;
 export function pathFromHandle(id) {
   const raw = id?.split(':')[1];
-  return !raw || raw === 'root' ? [] : raw.split('.').map(x => /^\d+$/.test(x) ? Number(x) : x);
+  return !raw || raw === 'root' ? [] : raw.split('.').map(x => (/^\d+$/.test(x) ? Number(x) : x));
 }
 
 export function allocationSize(a, state) {
   const textWidth = (allocationDisplayName(state, a).length + typeToString(a.type).length) * 8 + 40;
-  return { width: Math.min(440, Math.max(320, textWidth)), height: allocationMetrics(a, state).height };
+  return {
+    width: Math.min(440, Math.max(320, textWidth)),
+    height: allocationMetrics(a, state).height,
+  };
 }
 
-export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, routes = {}, editable = false, badIds = new Set(), showExpired = false, previousState = null, viewMode = 'both', revealedPointer = null } = {}) {
+export function stateToFlow(
+  state,
+  {
+    positions = {},
+    sizes: frameSizes = {},
+    routes = {},
+    editable = false,
+    badIds = new Set(),
+    showExpired = false,
+    previousState = null,
+    viewMode = 'both',
+    revealedPointer = null,
+  } = {},
+) {
   const nodes = [];
   const oldAllocations = new Map(previousState?.allocations.map(a => [a.id, a]) ?? []);
   const semanticEdges = pointerEdges(state);
@@ -39,51 +85,116 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
     const old = oldAllocations.get(a.id);
     const changedPaths = new Set();
     if (previousState) {
-      const oldRows = new Map(old ? scalarSubobjects(old, previousState).map(s => [JSON.stringify(s.ref.path), s]) : []);
+      const oldRows = new Map(
+        old ? scalarSubobjects(old, previousState).map(s => [JSON.stringify(s.ref.path), s]) : [],
+      );
       for (const s of scalarSubobjects(a, state)) {
         const key = JSON.stringify(s.ref.path);
         const prior = oldRows.get(key);
-        if (JSON.stringify(prior?.value) !== JSON.stringify(s.value) || (prior && locationKey(previousState, prior) !== locationKey(state, s))) changedPaths.add(key);
+        if (
+          JSON.stringify(prior?.value) !== JSON.stringify(s.value) ||
+          (prior && locationKey(previousState, prior) !== locationKey(state, s))
+        )
+          changedPaths.add(key);
       }
     }
-    return { changed: !!previousState && (!old || old.alive !== a.alive || changedPaths.size > 0), changedPaths, sourceSides: {},
-      targetPaths: new Set(semanticEdges.filter(e => e.target?.allocationId === a.id).map(e => JSON.stringify(e.target.path))) };
+    return {
+      changed: !!previousState && (!old || old.alive !== a.alive || changedPaths.size > 0),
+      changedPaths,
+      sourceSides: {},
+      targetPaths: new Set(
+        semanticEdges
+          .filter(e => e.target?.allocationId === a.id)
+          .map(e => JSON.stringify(e.target.path)),
+      ),
+    };
   };
-  const frames = state.frames?.length ? state.frames : state.allocations.some(a => a.storage.kind === 'stack')
-    ? [{ id: 'main', name: 'main', depth: 0, active: true }] : [];
-  let frameX = 30, rightEdge = 30;
+  const frames = state.frames?.length
+    ? state.frames
+    : state.allocations.some(a => a.storage.kind === 'stack')
+      ? [{ id: 'main', name: 'main', depth: 0, active: true }]
+      : [];
+  let frameX = 30,
+    rightEdge = 30;
   for (const frame of frames) {
     if (!frame.active && !showExpired) continue;
     const allocations = frameAllocations(state, frame.id).filter(a => a.alive || showExpired);
     const sizes = allocations.map(a => allocationSize(a, state));
-    const id = `frame:${frame.id}`, position = positions[id] ?? { x: frameX, y: 72 };
+    const id = `frame:${frame.id}`,
+      position = positions[id] ?? { x: frameX, y: 72 };
     let y = GEOMETRY.top;
     // New objects occupy unused space; remembered positions are never reflowed.
-    const occupied = allocations.flatMap((a, i) => positions[a.id] ? [{ ...positions[a.id], ...sizes[i] }] : []);
+    const occupied = allocations.flatMap((a, i) =>
+      positions[a.id] ? [{ ...positions[a.id], ...sizes[i] }] : [],
+    );
     const locals = allocations.map((a, i) => {
       let p = positions[a.id];
       if (!p) {
         p = { x: GEOMETRY.padding, y };
-        while (occupied.some(r => p.x < r.x + r.width + GEOMETRY.gap && p.x + sizes[i].width + GEOMETRY.gap > r.x && p.y < r.y + r.height + GEOMETRY.gap && p.y + sizes[i].height + GEOMETRY.gap > r.y)) p = { ...p, y: p.y + GEOMETRY.gap };
+        while (
+          occupied.some(
+            r =>
+              p.x < r.x + r.width + GEOMETRY.gap &&
+              p.x + sizes[i].width + GEOMETRY.gap > r.x &&
+              p.y < r.y + r.height + GEOMETRY.gap &&
+              p.y + sizes[i].height + GEOMETRY.gap > r.y,
+          )
+        )
+          p = { ...p, y: p.y + GEOMETRY.gap };
       }
       p = { x: Math.max(GEOMETRY.padding, p.x), y: Math.max(GEOMETRY.top, p.y) };
-      occupied.push({ ...p, ...sizes[i] }); y = p.y + sizes[i].height + GEOMETRY.gap;
+      occupied.push({ ...p, ...sizes[i] });
+      y = p.y + sizes[i].height + GEOMETRY.gap;
       return p;
     });
-    const width = Math.max(frameSizes[id]?.width ?? 600, 288, ...sizes.map((s, i) => locals[i].x + s.width + GEOMETRY.padding));
-    const height = Math.max(frameSizes[id]?.height ?? 240, 160, ...sizes.map((s, i) => locals[i].y + s.height + GEOMETRY.padding));
-    nodes.push({ id, type: 'frameGroup', position, data: { frame, editable: editable && frame.active },
-      draggable: true, dragHandle: '.frame-group-label', selectable: true, deletable: false,
-      zIndex: 0, width, height, style: { width, height }, className: `frame-group${frame.active ? '' : ' returned'}${previousState && !previousState.frames?.some(f => f.id === frame.id && f.active === frame.active) ? ' memory-changed' : ''}`,
+    const width = Math.max(
+      frameSizes[id]?.width ?? 600,
+      288,
+      ...sizes.map((s, i) => locals[i].x + s.width + GEOMETRY.padding),
+    );
+    const height = Math.max(
+      frameSizes[id]?.height ?? 240,
+      160,
+      ...sizes.map((s, i) => locals[i].y + s.height + GEOMETRY.padding),
+    );
+    nodes.push({
+      id,
+      type: 'frameGroup',
+      position,
+      data: { frame, editable: editable && frame.active },
+      draggable: true,
+      dragHandle: '.frame-group-label',
+      selectable: true,
+      deletable: false,
+      zIndex: 0,
+      width,
+      height,
+      style: { width, height },
+      className: `frame-group${frame.active ? '' : ' returned'}${previousState && !previousState.frames?.some(f => f.id === frame.id && f.active === frame.active) ? ' memory-changed' : ''}`,
       ariaLabel: `${frame.name}() ${frame.active ? 'active' : 'returned'} call frame`,
     });
     allocations.forEach((a, i) => {
       const size = sizes[i];
-      nodes.push({ id: a.id, type: 'memoryAllocation', parentId: id, expandParent: false,
+      nodes.push({
+        id: a.id,
+        type: 'memoryAllocation',
+        parentId: id,
+        expandParent: false,
         position: locals[i],
-        draggable: a.alive, selectable: true, deletable: editable && frame.active && a.alive,
-        zIndex: 2, ...size, style: size,
-        data: { allocation: a, state, viewMode, ...changes(a), editable: editable && frame.active && a.alive, bad: badIds.has(a.id) },
+        draggable: a.alive,
+        selectable: true,
+        deletable: editable && frame.active && a.alive,
+        zIndex: 2,
+        ...size,
+        style: size,
+        data: {
+          allocation: a,
+          state,
+          viewMode,
+          ...changes(a),
+          editable: editable && frame.active && a.alive,
+          bad: badIds.has(a.id),
+        },
       });
     });
     // Every invocation gets a distinct slot, even with the same depth/name.
@@ -92,48 +203,91 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
   }
   let heapY = 124;
   const heap = heapAllocations(state);
-  const occupiedHeap = heap.flatMap(a => positions[a.id] ? [{ ...positions[a.id], ...allocationSize(a, state) }] : []);
+  const occupiedHeap = heap.flatMap(a =>
+    positions[a.id] ? [{ ...positions[a.id], ...allocationSize(a, state) }] : [],
+  );
   for (const a of heap) {
     const size = allocationSize(a, state);
     let position = positions[a.id];
     if (!position) {
       position = { x: rightEdge + 96, y: heapY };
-      while (occupiedHeap.some(r => position.x < r.x + r.width + GEOMETRY.gap && position.x + size.width + GEOMETRY.gap > r.x && position.y < r.y + r.height + GEOMETRY.gap && position.y + size.height + GEOMETRY.gap > r.y)) position = { ...position, y: position.y + GEOMETRY.gap };
+      while (
+        occupiedHeap.some(
+          r =>
+            position.x < r.x + r.width + GEOMETRY.gap &&
+            position.x + size.width + GEOMETRY.gap > r.x &&
+            position.y < r.y + r.height + GEOMETRY.gap &&
+            position.y + size.height + GEOMETRY.gap > r.y,
+        )
+      )
+        position = { ...position, y: position.y + GEOMETRY.gap };
     }
     occupiedHeap.push({ ...position, ...size });
-    nodes.push({ id: a.id, type: 'memoryAllocation', position,
-      ...size, style: size, zIndex: 2, draggable: a.alive, selectable: true, deletable: editable && a.alive,
-      data: { allocation: a, state, viewMode, ...changes(a), editable: editable && a.alive, bad: badIds.has(a.id) },
+    nodes.push({
+      id: a.id,
+      type: 'memoryAllocation',
+      position,
+      ...size,
+      style: size,
+      zIndex: 2,
+      draggable: a.alive,
+      selectable: true,
+      deletable: editable && a.alive,
+      data: {
+        allocation: a,
+        state,
+        viewMode,
+        ...changes(a),
+        editable: editable && a.alive,
+        bad: badIds.has(a.id),
+      },
     });
     heapY += size.height + GEOMETRY.gap;
   }
   const byId = new Map(nodes.map(n => [n.id, n]));
-  const boxes = new Map(nodes.filter(n => n.type === 'memoryAllocation').map(n => {
-    const parent = byId.get(n.parentId)?.position ?? { x: 0, y: 0 };
-    return [n.id, { x: n.position.x + parent.x, y: n.position.y + parent.y, ...n.style }];
-  }));
-  const obstacles = [...boxes.values(), ...nodes.filter(n => n.type === 'frameGroup').map(n => ({ ...n.position, width: n.style.width, height: 34 }))];
+  const boxes = new Map(
+    nodes
+      .filter(n => n.type === 'memoryAllocation')
+      .map(n => {
+        const parent = byId.get(n.parentId)?.position ?? { x: 0, y: 0 };
+        return [n.id, { x: n.position.x + parent.x, y: n.position.y + parent.y, ...n.style }];
+      }),
+  );
+  const obstacles = [
+    ...boxes.values(),
+    ...nodes
+      .filter(n => n.type === 'frameGroup')
+      .map(n => ({ ...n.position, width: n.style.width, height: 34 })),
+  ];
   function anchor(r, side, kind = 'target') {
-    const box = boxes.get(r.allocationId), node = byId.get(r.allocationId);
+    const box = boxes.get(r.allocationId),
+      node = byId.get(r.allocationId);
     if (!box) return null;
     const rows = allocationMetrics(node.data.allocation, state).rows;
     let row = rows.findIndex(s => JSON.stringify(s.ref.path) === JSON.stringify(r.path));
     if (row < 0 && r.path.length) {
       const resolved = resolveRef(state, r);
-      if (!resolved.invalid && !resolved.onePast) row = rows.findIndex(s => r.path.every((part, i) => s.ref.path[i] === part));
+      if (!resolved.invalid && !resolved.onePast)
+        row = rows.findIndex(s => r.path.every((part, i) => s.ref.path[i] === part));
     }
     // Aggregate roots attach to the header; one-past references have no target row.
     if (row < 0 && r.path.length) return null;
-    return { x: box.x + (side === 'right' ? box.width : 0),
-      y: box.y + 1 + (row < 0 ? GEOMETRY.header / 2 : rows[row].top + GEOMETRY.row / 2) };
+    return {
+      x: box.x + (side === 'right' ? box.width : 0),
+      y: box.y + 1 + (row < 0 ? GEOMETRY.header / 2 : rows[row].top + GEOMETRY.row / 2),
+    };
   }
   const edges = [];
   for (const e of semanticEdges) {
     if (e.status === 'invalid' || e.status === 'one-past') continue;
     if (!boxes.has(e.source.allocationId) || !boxes.has(e.target.allocationId)) continue;
-    const sourceBox = boxes.get(e.source.allocationId), targetBox = boxes.get(e.target.allocationId);
+    const sourceBox = boxes.get(e.source.allocationId),
+      targetBox = boxes.get(e.target.allocationId);
     const self = e.source.allocationId === e.target.allocationId;
-    const sourceSide = self || targetBox.x + targetBox.width / 2 >= sourceBox.x + sourceBox.width / 2 ? 'right' : 'left';
+    const sourceSide =
+      self || targetBox.x + targetBox.width / 2 >= sourceBox.x + sourceBox.width / 2
+        ? 'right'
+        : 'left';
     const side = self ? 'right' : sourceSide === 'right' ? 'left' : 'right';
     const source = anchor(e.source, sourceSide, 'source');
     if (!source) continue;
@@ -142,12 +296,19 @@ export function stateToFlow(state, { positions = {}, sizes: frameSizes = {}, rou
     byId.get(e.source.allocationId).data.sourceSides[JSON.stringify(e.source.path)] = sourceSide;
     const id = `${e.source.allocationId}:${e.source.path.join('.')}->${e.target.allocationId}:${e.target.path.join('.')}`;
     const route = curvePointer(source, target, sourceSide, side, obstacles, routes[id], self);
-    const changed = byId.get(e.source.allocationId).data.changedPaths.has(JSON.stringify(e.source.path));
+    const changed = byId
+      .get(e.source.allocationId)
+      .data.changedPaths.has(JSON.stringify(e.source.path));
     const color = e.status === 'dangling' ? '#f85149' : changed ? '#e3b341' : '#58a6ff';
-    edges.push({ id,
-      source: e.source.allocationId, sourceHandle: handleId('src', e.source.path, sourceSide),
-      target: e.target.allocationId, targetHandle: handleId('tgt', e.target.path, side),
-      type: 'memoryPointer', data: { ...route, manual: !!routes[id] }, zIndex: 1,
+    edges.push({
+      id,
+      source: e.source.allocationId,
+      sourceHandle: handleId('src', e.source.path, sourceSide),
+      target: e.target.allocationId,
+      targetHandle: handleId('tgt', e.target.path, side),
+      type: 'memoryPointer',
+      data: { ...route, manual: !!routes[id] },
+      zIndex: 1,
       hidden: viewMode === 'addresses' && !sameRef(e.source, revealedPointer),
       selectable: true,
       reconnectable: editable && byId.get(e.source.allocationId).data.editable ? 'target' : false,

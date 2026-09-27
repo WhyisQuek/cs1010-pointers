@@ -16,21 +16,36 @@ export default function App() {
     initParser({
       runtimeWasm: `${import.meta.env.BASE_URL}tree-sitter.wasm`,
       grammarWasm: `${import.meta.env.BASE_URL}tree-sitter-c.wasm`,
-    }).then(() => setReady(true)).catch(e => setError(e.message));
+    })
+      .then(() => setReady(true))
+      .catch(e => setError(e.message));
   }, []);
   if (error) return <div className="loading-screen">Could not load the C parser: {error}</div>;
   if (!ready) return <div className="loading-screen">Loading parser…</div>;
 
-  return <div className="app">
-    <header className="topbar">
-      <div className="brand">PointerViz</div>
-      <nav className="tabs" aria-label="sections">
-        {[['sandbox', 'Sandbox'], ['challenges', 'Challenges'], ['editor', 'Level editor']].map(([id, label]) =>
-          <button key={id} className={`tab${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>{label}</button>)}
-      </nav>
-    </header>
-    {tab === 'sandbox' && <Sandbox />}
-    {tab === 'challenges' && <Challenges />}
-    {tab === 'editor' && <LevelEditor />}
-  </div>;
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">PointerViz</div>
+        <nav className="tabs" aria-label="sections">
+          {[
+            ['sandbox', 'Sandbox'],
+            ['challenges', 'Challenges'],
+            ['editor', 'Level editor'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              className={`tab${tab === id ? ' active' : ''}`}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      </header>
+      {tab === 'sandbox' && <Sandbox />}
+      {tab === 'challenges' && <Challenges />}
+      {tab === 'editor' && <LevelEditor />}
+    </div>
+  );
 }

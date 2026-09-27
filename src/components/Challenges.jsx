@@ -18,14 +18,22 @@ export default function Challenges() {
   const progress = loadProgress();
 
   if (active) {
-    return <ChallengeRunner level={active} onExit={() => { setActive(null); bump((n) => n + 1); }} />;
+    return (
+      <ChallengeRunner
+        level={active}
+        onExit={() => {
+          setActive(null);
+          bump(n => n + 1);
+        }}
+      />
+    );
   }
   return (
     <div className="page">
       <h2>Challenges</h2>
       <p className="lede">Select a challenge.</p>
       <div className="level-grid">
-        {levels.map((lv) => {
+        {levels.map(lv => {
           const stars = progress[lv.id]?.stars ?? 0;
           return (
             <button key={lv.id} className="level-card" onClick={() => setActive(lv)}>
@@ -35,7 +43,8 @@ export default function Challenges() {
               <h3>{lv.title}</h3>
               <p>{lv.prompt}</p>
               <div className="stars" aria-label={`${stars} of 3 stars`}>
-                {'★'.repeat(stars)}<span className="empty">{'★'.repeat(3 - stars)}</span>
+                {'★'.repeat(stars)}
+                <span className="empty">{'★'.repeat(3 - stars)}</span>
               </div>
             </button>
           );
@@ -69,13 +78,17 @@ function ChallengeRunner({ level, onExit }) {
     }
     setBadIds(result.badIds ?? new Set());
     setVerdict({ pass: result.equal, diffs: result.diffs });
-    const rec = recordResult(level.id, { solved: result.equal, attempts: n, usedHints: hintIdx > 0 });
+    const rec = recordResult(level.id, {
+      solved: result.equal,
+      attempts: n,
+      usedHints: hintIdx > 0,
+    });
     if (result.equal) setVerdict({ pass: true, diffs: [], stars: rec.stars });
   };
 
   const showHint = () => {
     if (hintIdx < (level.hints?.length ?? 0)) {
-      setMessages((m) => [...m, { kind: 'hint', text: `hint: ${level.hints[hintIdx]}` }]);
+      setMessages(m => [...m, { kind: 'hint', text: `hint: ${level.hints[hintIdx]}` }]);
       setHintIdx(hintIdx + 1);
     }
   };
@@ -83,15 +96,21 @@ function ChallengeRunner({ level, onExit }) {
   return (
     <>
       <div className="challenge-head">
-        <button className="back-btn" onClick={onExit}>← levels</button>
+        <button className="back-btn" onClick={onExit}>
+          ← levels
+        </button>
         <div>
           <strong>{level.title}</strong>
           <div className="prompt">{level.prompt}</div>
         </div>
         {level.hints?.length > 0 && hintIdx < level.hints.length && (
-          <button className="hint-btn" onClick={showHint}>hint ({level.hints.length - hintIdx})</button>
+          <button className="hint-btn" onClick={showHint}>
+            hint ({level.hints.length - hintIdx})
+          </button>
         )}
-        <button className="check-btn" onClick={check}>Check answer</button>
+        <button className="check-btn" onClick={check}>
+          Check answer
+        </button>
       </div>
 
       <div className="workbench">
@@ -105,27 +124,43 @@ function ChallengeRunner({ level, onExit }) {
         </section>
         <div className="spine" />
         <section className="panel">
-          <div className="panel-head">{isC2D ? 'your memory diagram' : 'target memory (read-only)'}</div>
+          <div className="panel-head">
+            {isC2D ? 'your memory diagram' : 'target memory (read-only)'}
+          </div>
           <MemoryCanvas
             state={isC2D ? studentState : target}
             onChange={isC2D ? setStudentState : undefined}
             editable={isC2D}
             badIds={badIds}
-            onMessage={(m) => setMessages((prev) => [...prev.slice(-4), m])}
+            onMessage={m => setMessages(prev => [...prev.slice(-4), m])}
           />
         </section>
       </div>
 
       {messages.length > 0 && (
-        <div className="msgbar">{messages.map((m, i) => <div key={i} className={m.kind}>{m.text}</div>)}</div>
+        <div className="msgbar">
+          {messages.map((m, i) => (
+            <div key={i} className={m.kind}>
+              {m.text}
+            </div>
+          ))}
+        </div>
       )}
       {verdict && (
         <div className={`verdict ${verdict.pass ? 'pass' : 'fail'}`} role="status">
           {verdict.pass ? (
-            <>Correct — memory states match. {'★'.repeat(verdict.stars ?? 1)} earned ({attempts} attempt{attempts > 1 ? 's' : ''})</>
+            <>
+              Correct — memory states match. {'★'.repeat(verdict.stars ?? 1)} earned ({attempts}{' '}
+              attempt{attempts > 1 ? 's' : ''})
+            </>
           ) : (
-            <>Not yet — {attempts} attempt{attempts > 1 ? 's' : ''} so far:
-              <ul>{verdict.diffs.map((d, i) => <li key={i}>{d}</li>)}</ul>
+            <>
+              Not yet — {attempts} attempt{attempts > 1 ? 's' : ''} so far:
+              <ul>
+                {verdict.diffs.map((d, i) => (
+                  <li key={i}>{d}</li>
+                ))}
+              </ul>
             </>
           )}
         </div>

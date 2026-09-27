@@ -2,20 +2,28 @@
   "name": "pointerviz",
   "version": "2.2.1",
   "private": true,
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:core": "node test/core.test.js",
-    "test:integration": "node test/roundtrip.test.js",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check && npm test",
+    "test": "node --test \"test/*.test.js\"",
+    "test:core": "node --test test/core.test.js",
+    "test:integration": "node --test test/roundtrip.test.js",
     "test:layout": "node --test test/layout.test.js",
     "test:flow-integration": "node --test test/flow-integration.test.js",
+    "test:playback": "node --test test/playback.test.js",
     "test:semantics": "node --test test/c-semantics.test.js",
     "test:addresses": "node --test test/addresses.test.js",
     "test:native": "node --test test/native-c.test.js",
-    "test": "node test/core.test.js && node test/roundtrip.test.js && node --test test/layout.test.js test/flow-integration.test.js test/playback.test.js test/c-semantics.test.js test/addresses.test.js test/native-c.test.js"
+    "audit:n3088": "node test/audit-n3088.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.3.0",
@@ -24,7 +32,14 @@
     "web-tree-sitter": "^0.25.0"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
     "@vitejs/plugin-react": "^4.3.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.12.0",
+    "prettier": "3.9.9",
     "vite": "^5.4.0"
   }
 }

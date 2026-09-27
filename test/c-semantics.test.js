@@ -1,4 +1,4 @@
-import { values, programs } from "./c-semantics-fixtures.js";
+import { values, programs } from './c-semantics-fixtures.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initParser, interpret } from '../src/pipeline/interpreter.js';
@@ -6,16 +6,21 @@ import { generate, validate, ValidationError } from '../src/pipeline/codegen.js'
 import { equivalent } from '../src/pipeline/equivalence.js';
 import { pointerStatus, resolveRef, setRefValue } from '../src/machine/memory.js';
 
-await initParser({ runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm', grammarWasm: './public/tree-sitter-c.wasm' });
+await initParser({
+  runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm',
+  grammarWasm: './public/tree-sitter-c.wasm',
+});
 const run = body => interpret(`int main(void) { ${body} }`);
-const scalar = (state, name) => state.allocations.find(a => a.name === name && a.storage.frameId === 'main').value.value;
+const scalar = (state, name) =>
+  state.allocations.find(a => a.name === name && a.storage.frameId === 'main').value.value;
 
 // Expected values follow C11 N1570 clauses cited in docs/C_SEMANTICS_AUDIT.md.
 
-for (const [name, body, expected] of values) test(name, () => assert.equal(scalar(run(body).state, 'result'), expected));
+for (const [name, body, expected] of values)
+  test(name, () => assert.equal(scalar(run(body).state, 'result'), expected));
 
-
-for (const [name, source, expected] of programs) test(name, () => assert.equal(scalar(interpret(source).state, 'result'), expected));
+for (const [name, source, expected] of programs)
+  test(name, () => assert.equal(scalar(interpret(source).state, 'result'), expected));
 
 const errors = [
   ['omitted array size requires initializer', 'int a[];', /requires an initializer list/],
@@ -25,7 +30,11 @@ const errors = [
   ['multiple omitted dimensions are rejected', 'int a[][]={{1}};', /outermost array size/],
   ['pointer to incomplete array stays unsupported', 'int (*a)[]={0};', /outermost array size/],
   ['inferred array length bound', `int a[]={${Array(65).fill(1).join(',')}};`, /between 1 and 64/],
-  ['inferred array still checks element types', 'int a[]={1,NULL};int *p[]={a,3};', /cannot assign/],
+  [
+    'inferred array still checks element types',
+    'int a[]={1,NULL};int *p[]={a,3};',
+    /cannot assign/,
+  ],
   ['inferred array still checks row capacity', 'int a[][2]={{1,2,3}};', /too many/],
   ['sizeof own incomplete array is rejected', 'int a[]={sizeof(a)};', /complete array type/],
   ['inferred array bounds are enforced', 'int a[]={1,2};int x=a[2];', /bounds/],
@@ -39,7 +48,11 @@ const errors = [
   ['floating pointer offset', 'int a[3]; int *p=a+1.5;', /not supported|integer/],
   ['floating subscript', 'int a[3];int x=a[1.5];', /integer/],
   ['nonconstant zero pointer initialization', 'int zero=0;int *p=zero;', /cannot assign/],
-  ['nonconstant zero pointer comparison', 'int zero=0;int *p=NULL;int x=p==zero;', /cannot compare/],
+  [
+    'nonconstant zero pointer comparison',
+    'int zero=0;int *p=NULL;int x=p==zero;',
+    /cannot compare/,
+  ],
   ['incompatible null pointer assignment', 'char *p=NULL;int *q=p;', /incompatible/],
   ['incompatible null pointer comparison', 'char *p=NULL;int *q=NULL;int x=p==q;', /incompatible/],
   ['free returns void', 'int x=free(NULL);', /cannot assign/],
@@ -81,14 +94,19 @@ const errors = [
   ['sizeof void expression rejected', 'int x=sizeof(free(NULL));', /sizeof unsupported/],
   ['unreachable break outside loop rejected', 'return 0;break;', /outside a loop/],
   ['function name shadowing', 'int free=0;free(NULL);', /not a function/],
-  ['dangling pointer comparison rejected', 'int *p=malloc(sizeof(int));free(p);int n=p==NULL;', /dangling/],
+  [
+    'dangling pointer comparison rejected',
+    'int *p=malloc(sizeof(int));free(p);int n=p==NULL;',
+    /dangling/,
+  ],
   ['dangling pointer copy rejected', 'int *p=malloc(sizeof(int));free(p);int *q=p;', /dangling/],
   ['nested object storage bound', 'int a[64][64][64];', /4096 scalar/],
   ['character escape must fit byte', "int x='\\x100';", /character escape/],
   ['nonconstant zero to free is invalid', 'int x=0;free(x);', /pointer or NULL/],
   ['NULL macro cannot be declared', 'int NULL=1;', /predefined macro/],
 ];
-for (const [name, body, pattern] of errors) test(name, () => assert.throws(() => run(body), pattern));
+for (const [name, body, pattern] of errors)
+  test(name, () => assert.throws(() => run(body), pattern));
 
 for (const source of [
   '#define X 1\nint main(void){int x=X;}',
@@ -100,7 +118,9 @@ for (const source of [
   'int f(int a,int b){return a+b;}int main(void){int i=0;int n=f(i++,i);}',
   'int main(void){int x=f();}int f(void){return 1;}',
   'int main(void){struct Local {int x;};}',
-]) test(`reject unsupported or invalid translation unit: ${source.slice(0, 45)}`, () => assert.throws(() => interpret(source)));
+])
+  test(`reject unsupported or invalid translation unit: ${source.slice(0, 45)}`, () =>
+    assert.throws(() => interpret(source)));
 
 for (const body of [
   'int a[]={1,2,3};int *p=a+2;',
@@ -111,39 +131,48 @@ for (const body of [
   'int a[3];int (*p)[3]=&a+1;',
   'double d=3.5;float f=0.1f;unsigned int u=4294967295U;long l=2147483648L;',
   'int *p=malloc(sizeof(int));*p=7;p++;',
-]) test(`canonical C round-trip: ${body}`, () => {
-  const before=run(body).state;
-  const source=generate(before);
-  const after=interpret(source).state;
-  assert.equal(equivalent(before,after).equal,true,source);
-});
+])
+  test(`canonical C round-trip: ${body}`, () => {
+    const before = run(body).state;
+    const source = generate(before);
+    const after = interpret(source).state;
+    assert.equal(equivalent(before, after).equal, true, source);
+  });
 
 test('memory setters and grading reject out-of-bounds reference paths', () => {
-  const state=run('int a[2];int *p=a;').state;
-  const a=state.allocations.find(a=>a.name==='a');
-  assert.throws(()=>setRefValue(state,{allocationId:a.id,path:[2]},{kind:'scalar',value:9}),/bounds/);
-  const p=state.allocations.find(a=>a.name==='p');
-  p.value.target.path=[3];
-  assert.throws(()=>validate(state),ValidationError);
-  p.value.target={allocationId:'missing',path:[]};
-  assert.throws(()=>validate(state),ValidationError);
+  const state = run('int a[2];int *p=a;').state;
+  const a = state.allocations.find(a => a.name === 'a');
+  assert.throws(
+    () => setRefValue(state, { allocationId: a.id, path: [2] }, { kind: 'scalar', value: 9 }),
+    /bounds/,
+  );
+  const p = state.allocations.find(a => a.name === 'p');
+  p.value.target.path = [3];
+  assert.throws(() => validate(state), ValidationError);
+  p.value.target = { allocationId: 'missing', path: [] };
+  assert.throws(() => validate(state), ValidationError);
 });
 
 test('singleton and nested one-past pointer statuses remain visible', () => {
-  const state=run('int x;int *p=&x+1;int a[2][3];int *q=&a[1][3];').state;
-  for(const name of ['p','q']) assert.equal(pointerStatus(state,state.allocations.find(a=>a.name===name).value),'one-past');
-  const a=state.allocations.find(a=>a.name==='a');
-  assert.equal(resolveRef(state,{allocationId:a.id,path:[2,0]}).invalid,true);
+  const state = run('int x;int *p=&x+1;int a[2][3];int *q=&a[1][3];').state;
+  for (const name of ['p', 'q'])
+    assert.equal(
+      pointerStatus(state, state.allocations.find(a => a.name === name).value),
+      'one-past',
+    );
+  const a = state.allocations.find(a => a.name === 'a');
+  assert.equal(resolveRef(state, { allocationId: a.id, path: [2, 0] }).invalid, true);
 });
 
 test('NULL uses the documented integer-zero macro definition', () => {
-  const state=run('int n=NULL;int result=sizeof(NULL);int *p=NULL;').state;
-  assert.equal(scalar(state,'n'),0);
-  assert.equal(scalar(state,'result'),4);
-  assert.equal(state.allocations.find(a=>a.name==='p').value.kind,'null');
+  const state = run('int n=NULL;int result=sizeof(NULL);int *p=NULL;').state;
+  assert.equal(scalar(state, 'n'), 0);
+  assert.equal(scalar(state, 'result'), 4);
+  assert.equal(state.allocations.find(a => a.name === 'p').value.kind, 'null');
 });
 
 test('comments act as whitespace in expressions, calls, return and initializers', () => {
-  const source='int f(int n){return /* return */ n;}int main(void){int a[2]={/*first*/3,/*second*/4};int result=f(/*arg*/a[0])+ (/*paren*/a[1]);int n=sizeof /*size*/ result;}';
-  assert.equal(scalar(interpret(source).state,'result'),7);
+  const source =
+    'int f(int n){return /* return */ n;}int main(void){int a[2]={/*first*/3,/*second*/4};int result=f(/*arg*/a[0])+ (/*paren*/a[1]);int n=sizeof /*size*/ result;}';
+  assert.equal(scalar(interpret(source).state, 'result'), 7);
 });
