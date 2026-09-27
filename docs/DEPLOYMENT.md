@@ -33,6 +33,15 @@ The workflow obtains the base path from GitHub Pages, so scripts, styles, and
 both parser WASM files load below the correct repository path. Keep the two
 `.wasm` files in `public/`; Vite copies them into the deployed output.
 
+### Troubleshooting a blank page
+
+If the live site is a white screen and the browser console shows a 404 for
+`/src/main.jsx`, Pages is serving the raw repository instead of the built
+`dist/` folder. In **Settings → Pages → Build and deployment**, set **Source**
+to **GitHub Actions** (not "Deploy from a branch"), then re-run **Deploy to
+GitHub Pages**. A "pages build and deployment" run in the Actions list is the
+sign that branch publishing is still enabled.
+
 ## Test the production build locally
 
 Requires Node.js 22 or 24 and installed dependencies (`npm ci`).

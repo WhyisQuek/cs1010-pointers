@@ -7,9 +7,11 @@ Read [the maintainer guide](docs/MAINTAINER_GUIDE.md) before changing semantics.
 Before opening a pull request:
 
 ```bash
-npm test
+npm run check
 npm run build
 ```
+
+`npm run check` runs ESLint, the Prettier format check and all tests; `npm run format` fixes formatting. CI rejects unformatted or lint-failing code.
 
 For canvas changes, also run the [browser checks](docs/TESTING.md). Describe the original problem, resulting behavior, and validation in the pull request. GitHub Actions runs tests and builds on Windows and Linux with Node 22 and 24.
 

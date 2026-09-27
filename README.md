@@ -19,7 +19,7 @@ It supports:
 
 ## Run locally
 
-Requires Node.js 22 or 24 and npm. Extract the ZIP and open the `pointerviz` folder as the repository root.
+Requires Node.js 22 or 24 and npm. From the repository root:
 
 ```bash
 npm ci
@@ -28,14 +28,14 @@ npm run dev
 
 Open the **HTTP** URL printed by Vite, normally `http://127.0.0.1:3000/` with the supplied configuration.
 
-## Test
+## Test and check
 
 ```bash
-npm test
+npm run check
 npm run build
 ```
 
-The integration suite uses `web-tree-sitter` and therefore requires the npm dependencies to be installed.
+`npm run check` runs ESLint, the Prettier format check and every test suite. Use `npm test` for tests only and `npm run format` to apply formatting. The integration suites use `web-tree-sitter` and therefore require the npm dependencies to be installed. See [TESTING.md](docs/TESTING.md).
 
 ## Publish for testing
 
@@ -55,17 +55,9 @@ Returned frames and expired stack locals are hidden by default. **Show expired**
 
 Arrows choose attachment sides automatically and use smooth curves with obstacle-aware detours. Select an arrow and drag its diamond to bend it, or drag its arrowhead to reconnect it. **Edit this snapshot** makes an editable copy of a playback step; right-click inside an active frame to add a variable at that position. **Run** starts playback at step zero; yellow highlights the next source line and memory changed by the current step. The editor includes C syntax colouring. See [visualization behavior and limits](docs/VISUALIZATION.md).
 
-## Start a GitHub repository
+## Contributing
 
-The extracted `pointerviz` folder contains the source, tests, examples, documentation, lockfile and GitHub Actions workflow. Initialize Git in that folder:
-
-```bash
-git init
-git add .
-git commit -m "Initial PointerViz project"
-```
-
-Create your GitHub repository and follow its instructions to add a remote and push. Generated files are excluded by `.gitignore`; no repository or remote is bundled in the ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Generated files are excluded by `.gitignore`.
 
 ## Documentation
 
@@ -77,6 +69,8 @@ Create your GitHub repository and follow its instructions to add a remote and pu
 - [`docs/TESTING.md`](docs/TESTING.md) — automated checks and browser regression steps.
 - [`docs/C_SEMANTICS_AUDIT.md`](docs/C_SEMANTICS_AUDIT.md) — C11 audit, native compiler comparisons and explicit implementation limits.
 - [`docs/MEMORY_ADDRESSES_DESIGN.md`](docs/MEMORY_ADDRESSES_DESIGN.md) — simulated-address design, implementation scope, and remaining validation gates.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — GitHub Pages publishing, production preview and troubleshooting.
+- [`docs/CODE_AUDIT.md`](docs/CODE_AUDIT.md) — September 2026 code audit: issues found, fixes and follow-ups.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
 
 ## Core design rule

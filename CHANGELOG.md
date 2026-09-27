@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — code audit and maintenance
+
+See [docs/CODE_AUDIT.md](docs/CODE_AUDIT.md) for the full report.
+
+### Fixed
+
+- The level editor's C code was invisible: a form style also matched the editor's transparent overlay textarea.
+- The level editor preview was blank until the code was first edited.
+- A custom level whose code no longer parses crashed the Challenges page; it now shows an explanation.
+- Blocked or full browser storage made Check answer and Save level throw; storage failures are now handled and reported.
+- Imported level packs could introduce duplicate IDs and unvalidated fields; levels are normalized and IDs kept unique (existing duplicates are repaired on load).
+- Editing a value to a fraction or out-of-range number stored an invalid value; inputs are now checked against the C type.
+- Grading feedback exposed internal heap IDs such as `a3`; it now uses display names such as `heap 1`.
+- Adding more than 26 variables could reuse an existing name.
+- Syntax errors for a missing token now name it ("missing ;") instead of quoting empty text.
+- Exported level packs no longer leak an object URL.
+- A render error in any page no longer blanks the whole app.
+
+### Maintenance
+
+- Adopted Prettier and ESLint (`npm run lint`, `npm run format`, `npm run check`); CI enforces both.
+- Moved every suite onto Node's test runner; `npm test` runs `test/*.test.js`.
+- Removed dead code: the `pipeline/ir.js` shim, the no-op `resetAllocationIds`, and nine unused exports; de-duplicated path helpers, primitive type lists, frame minimum sizes and view-mode handling.
+- Extracted `CodePanel` from the sandbox; replaced level-editor inline styles with CSS classes; removed unused CSS rules.
+- Parser initialization now requires explicit WASM paths (root-relative defaults break subpath deployments).
+- Split React, React Flow and Tree-sitter into separate cacheable build chunks (removes the >500 kB warning).
+- Applied non-breaking `npm audit` fixes to dev dependencies.
+- Updated maintainer, architecture, testing, deployment and README documentation.
+
 ## Unreleased — simulated memory addresses
 
 - Added deterministic stack/heap addresses with LP64 array strides and struct padding, state-owned identities, and no address reuse within a run.

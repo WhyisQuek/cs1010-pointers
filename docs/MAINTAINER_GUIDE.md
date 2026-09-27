@@ -16,32 +16,42 @@ This guide explains what each main file owns and where changes should be made.
 
 ```text
 src/
-├── App.jsx
-├── main.jsx
+├── App.jsx                     application shell and page switching
+├── main.jsx                    React entry point
 ├── styles.css
 ├── components/
-│   ├── Sandbox.jsx
-│   ├── MemoryCanvas.jsx
-│   ├── Challenges.jsx
-│   └── LevelEditor.jsx
+│   ├── Sandbox.jsx             code ⇄ memory workbench and playback
+│   ├── CodePanel.jsx           shared syntax-highlighted C editor
+│   ├── MemoryCanvas.jsx        interactive React Flow memory editor
+│   ├── MemoryInspector.jsx     object/member inspector and editor
+│   ├── Challenges.jsx          challenge browser and runner
+│   ├── LevelEditor.jsx         instructor level authoring
+│   └── ErrorBoundary.jsx       per-page render-failure fallback
 ├── data/
-│   └── levels.js
+│   └── levels.js               seed levels, custom-level validation, storage
 ├── flow/
-│   ├── layout.js
-│   ├── routing.js
-│   └── memoryFlow.jsx
+│   ├── layout.js               MemoryState → nodes/edges (pure)
+│   ├── routing.js              pointer edge curves and detours (pure)
+│   ├── workspace.js            layout move/resize/undo operations (pure)
+│   ├── addressPresentation.js  address formatting and view-mode preference
+│   └── memoryFlow.jsx          React Flow node/edge components
 ├── language/
-│   ├── limits.js
-│   ├── parser.js
-│   └── types.js
+│   ├── limits.js               browser-safety limits
+│   ├── types.js                type constructors, LP64 layout, printing
+│   ├── numeric.js              LP64 integer/floating arithmetic
+│   ├── literals.js             character constants
+│   ├── highlight.js            display tokenizer for the editor
+│   ├── checker.js              pre-execution constraint checks
+│   └── parser.js               Tree-sitter → Mini-C AST
 ├── machine/
-│   ├── memory.js
-│   └── interpreter.js
+│   ├── memory.js               MemoryState model and references
+│   ├── addresses.js            simulated address placement
+│   ├── editing.js              atomic diagram-editing operations
+│   └── interpreter.js          Mini-C execution
 └── pipeline/
-    ├── interpreter.js
-    ├── ir.js
-    ├── codegen.js
-    └── equivalence.js
+    ├── interpreter.js          parse + execute facade
+    ├── codegen.js              MemoryState → canonical C, validation
+    └── equivalence.js          challenge grading
 ```
 
 ## 3. Main files
@@ -160,11 +170,7 @@ Public C-to-memory facade:
 parseMiniC(source) → executeProgram(ast)
 ```
 
-UI code should normally call this rather than parser/machine internals directly.
-
-### `src/pipeline/ir.js`
-
-Compatibility re-export for memory-model helpers. Canonical implementation remains in `machine/memory.js`.
+UI code should normally call this rather than parser/machine internals directly. `initParser()` requires both WASM paths; the app derives them from Vite's `BASE_URL` so a subpath deployment (GitHub Pages) resolves them correctly.
 
 ### `src/pipeline/codegen.js`
 
@@ -186,29 +192,37 @@ It must not own semantic mutations.
 
 ### `src/flow/layout.js` and `src/flow/routing.js`
 
-The pure adapter filters visible lifetimes, sizes frames and cells, assigns separate slots per invocation, clamps parent-relative locals, and derives handle/edge data. The router scores orthogonal lanes against boxes and frame headers and rounds the chosen path. Keep `GEOMETRY` in sync with CSS.
+The pure adapter filters visible lifetimes, sizes frames and cells, assigns separate slots per invocation, places parent-relative locals, and derives handle/edge data. The router draws curves and falls back to obstacle-aware orthogonal detours. `GEOMETRY` is mirrored into CSS custom properties; `FRAME_MIN` is shared with `workspace.js`, which implements moving, resizing and layout undo/redo.
 
 These files have no React dependency and are tested directly. See [VISUALIZATION.md](VISUALIZATION.md) for routing and visibility boundaries.
 
 ### `src/components/MemoryCanvas.jsx`
 
-Interactive memory editor. Clones semantic state before edits and uses shared type/pointer rules. Owns the current state's drag positions, selection, Show expired toggle, and viewport fitting. Resets positions on semantic state changes; accepts frame drags and clamps local drags. Dead locals cannot be edited or dragged. GUI coordinates remain outside `MemoryState`.
+Interactive memory editor. Clones semantic state before edits and uses shared type/pointer rules. Owns layout (positions, frame sizes, arrow bends) with undo/redo, selection, view mode, Show expired and viewport fitting. Layout survives edits and playback steps; frames grow to contain moved locals. Dead locals cannot be edited or dragged. GUI coordinates remain outside `MemoryState`.
 
-### `src/components/Sandbox.jsx`
+### `src/components/MemoryInspector.jsx`
 
-Bidirectional workbench. Owns source text, current state, snapshots and current step. Its reusable `CodePanel` provides four-space Tab indentation and is shared by challenge/editor code inputs.
+Shows own/stored addresses and target values for the selected object or member. Edits go through `onEdit`, which the canvas applies to a cloned state; typed values are range-checked with `scalarFromInput()`.
+
+### `src/components/Sandbox.jsx` and `CodePanel.jsx`
+
+Bidirectional workbench. Owns source text, current state, snapshots and current step. `CodePanel` is the shared editor (four-space Tab/Shift+Tab indentation, syntax colouring, next-line highlight) also used by challenges and the level editor.
 
 ### `src/components/Challenges.jsx`
 
-Student challenge runner. Both target and student answers are reduced to `MemoryState` and graded with `equivalent()`.
+Student challenge runner. Both target and student answers are reduced to `MemoryState` and graded with `equivalent()`. A level whose reference code no longer runs shows an error instead of crashing the page.
 
 ### `src/components/LevelEditor.jsx`
 
 Instructor challenge authoring. Reference C is interpreted live before a level can be saved.
 
+### `src/components/ErrorBoundary.jsx`
+
+Wraps the active page so a render error shows a message and a retry button instead of a blank screen. Switching tabs resets it.
+
 ### `src/data/levels.js`
 
-Built-in levels plus browser persistence. Target states are kept as readable C and interpreted at runtime. Custom content/progress use `pointerviz.*` localStorage keys.
+Built-in levels plus browser persistence. Target states are kept as readable C and interpreted at runtime. Custom content/progress use `pointerviz.*` localStorage keys. Every stored or imported level passes through `normalizeLevel()`, and `mergeLevels()` keeps IDs unique. Storage access never throws: reads fall back to defaults and `saveCustomLevels()` returns `false` when the browser refuses to persist.
 
 ## 4. Common changes
 
@@ -254,9 +268,11 @@ Never fix a wrong arrow only in React Flow if the stored pointer is wrong.
 Before a merge:
 
 ```bash
-npm test
+npm run check
 npm run build
 ```
+
+`npm run check` runs ESLint, the Prettier format check and the full test suite. Run `npm run format` to apply formatting.
 
 The layout suite checks frame separation, containment, visibility and routing. The flow integration suite feeds parsed C snapshots into the adapter. [TESTING.md](TESTING.md) lists browser checks for dragging, stepping and handle geometry. GitHub CI runs tests/build on Windows and Linux with Node 22 and 24.
 
@@ -276,7 +292,7 @@ Also manually check:
 ## 6. Known boundaries
 
 - `do ... while`, `switch`, `goto` and ternary expressions are not implemented.
-- Struct ABI padding is not modelled.
+- Struct layout follows the LP64 teaching profile (member alignment and tail padding); it is not a specific compiler's ABI, and padding bytes are not shown as fields.
 - Diagram-to-code does not synthesize arbitrary function/control-flow source from runtime frames.
 - Manual diagram editing can use struct definitions present in state, but does not define new struct tags from scratch.
 - Advanced source using same-name shadowing/reuse can leave multiple historical stack allocations with the same source name. Execution can represent those lifetimes, but such states are not intended as diagram-to-code challenge targets yet.

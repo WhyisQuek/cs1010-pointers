@@ -4,21 +4,25 @@
 
 ```bash
 npm ci
-npm test
+npm run check   # ESLint + Prettier check + all tests
 npm run build
 ```
 
-The suites are:
+`npm test` runs every `test/*.test.js` file with Node's built-in test runner. Each suite can also be run alone:
 
 | Command | Coverage |
 | --- | --- |
-| `npm run test:core` | 22 parser-independent interpreter, memory, grading and generation cases |
-| `npm run test:integration` | 21 real-C parsing, execution and round-trip cases |
+| `npm run test:core` | Parser-independent interpreter, memory, grading and generation cases |
+| `npm run test:integration` | Real-C parsing, execution and C → memory → C round trips |
 | `npm run test:layout` | Frame growth/resizing, lifetime, handle, routing, and layout history cases |
-| `npm run test:flow-integration` | 4 cases that feed real C execution snapshots through the layout adapter, including typed pointer targets |
-| `npm run test:semantics` | 153 C semantic, constraint, lifetime, bounds and round-trip tests |
+| `npm run test:flow-integration` | Real C execution snapshots fed through the layout adapter, including typed pointer targets |
+| `npm run test:playback` | Step snapshots, next-line tracking, typedefs and syntax-error locations |
+| `npm run test:semantics` | C semantic, constraint, lifetime, bounds and round-trip tests |
 | `npm run test:addresses` | Simulated placement, LP64 offsets, provenance/status, history, atomic edits, view geometry, and address-independent grading/generation |
-| `npm run test:native` | 76 defined programs compared with a native LP64 C11 compiler |
+| `npm run test:native` | Defined programs compared with a native LP64 C11 compiler |
+| `node --test test/maintenance.test.js` | Regressions from the [code audit](CODE_AUDIT.md): storage failures, level import, input range checks, labels, WASM paths |
+
+`npm run audit:n3088` runs the separate C-standard audit probes; it reports discrepancies and is not a pass/fail suite.
 
 The native suite first compiles and runs a small probe to check LP64 sizes, signed char, and the undefined-behavior sanitizer runtime. It skips with a reason when the compiler is missing or incompatible, including Windows compilers with 4-byte `long`. Linux CI sets `POINTERVIZ_REQUIRE_NATIVE=1`, which makes these conditions fail instead of skip. After the probe succeeds, fixture compilation, execution, and result mismatches always fail the test. Set `POINTERVIZ_CC` to a compatible compiler command or `POINTERVIZ_WSL_DISTRO` to an installed Linux distribution on Windows. See [the C semantics audit](C_SEMANTICS_AUDIT.md).
 
@@ -32,11 +36,11 @@ Use [the address examples](../examples/memory-addresses.md). Verify all three mo
 
 Check wide and narrow panes, keyboard focus, toolbar wrapping, long names, mixed pointer/scalar rows, and 64-element arrays. Browser accessible labels must identify own and stored addresses separately. Check Sandbox, both challenge directions, and instructor previews. The full design also calls for 200% zoom, touch/screen-reader testing, performance comparisons, and novice learning checks; automated DOM checks alone do not establish those results.
 
-GitHub Actions runs the full test/build commands on Windows and Linux with Node 22 and 24.
+GitHub Actions runs lint, the format check, and the full test/build commands on Windows and Linux with Node 22 and 24.
 
 ## Browser regression checks
 
-1. Run the starter struct example and step into `set_value`. Use Fit view to see both frames; pointer targets remain the struct header and typed fields.
+1. In the Sandbox, run a program that passes a struct pointer to a function (for example `void set(struct Node *n) { n->value = 5; }` called from `main`) and step into the call. Use Fit view to see both frames; pointer targets remain the struct header and typed fields.
 2. Drag a function header. Its locals and arrows move with it. Resize every edge/corner; child world positions remain fixed and shrinking cannot clip contents.
 3. Drag a local horizontally and vertically, including past each frame boundary. The frame grows, retains its ownership, and does not displace siblings.
 4. Edit this snapshot, then right-click inside the active function frame and Add variable here. Edit values and types. Existing positions, frame sizes, and manual arrow bends remain intact.

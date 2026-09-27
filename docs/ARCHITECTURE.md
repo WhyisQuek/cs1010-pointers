@@ -125,7 +125,7 @@ Pointers store these references. This preserves array contiguity, fields and poi
 
 `MemoryState` contains no GUI coordinates. `flow/layout.js` derives visible frames, allocation nodes, subobject handles and pointer edges. `flow/routing.js` chooses rounded orthogonal routes; `flow/memoryFlow.jsx` renders the React components.
 
-The live view filters expired stack objects without removing their semantic records. An optional history view exposes them. Every visible call has a separate layout slot. Locals use parent-relative coordinates and are clamped inside the frame. Drag positions reset on state/snapshot changes.
+The live view filters expired stack objects without removing their semantic records. An optional history view exposes them. Every visible call has a separate layout slot. Locals use parent-relative coordinates, and a frame grows to contain any local moved past its edge. Layout (positions, frame sizes, arrow bends) survives edits and playback steps and has its own undo/redo; a new Run or Clear starts a fresh layout.
 
 See [visualization behavior](VISUALIZATION.md) for lifetime visibility, routing limits and presentation invariants.
 
