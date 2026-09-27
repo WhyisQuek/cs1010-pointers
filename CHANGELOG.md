@@ -27,6 +27,9 @@ See [docs/CODE_AUDIT.md](docs/CODE_AUDIT.md) for the full report.
 - Parser initialization now requires explicit WASM paths (root-relative defaults break subpath deployments).
 - Split React, React Flow and Tree-sitter into separate cacheable build chunks (removes the >500 kB warning).
 - Applied non-breaking `npm audit` fixes to dev dependencies.
+- Upgraded to Vite 8 (Rolldown) and `@vitejs/plugin-react` 6, clearing the last `npm audit` advisory; Node.js 22.12 or later is now required.
+- The Tree-sitter runtime WASM is imported from the `web-tree-sitter` package instead of a vendored copy in `public/`, removing a duplicate 205 kB asset and version drift.
+- Added Playwright browser smoke tests (`npm run test:e2e`) against the production build under the Pages path, with a CI job.
 - Updated maintainer, architecture, testing, deployment and README documentation.
 
 ## Unreleased — simulated memory addresses

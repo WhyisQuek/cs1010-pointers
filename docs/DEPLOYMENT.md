@@ -30,8 +30,12 @@ also rejects manual runs from other branches. No personal access token is
 needed in repository secrets.
 
 The workflow obtains the base path from GitHub Pages, so scripts, styles, and
-both parser WASM files load below the correct repository path. Keep the two
-`.wasm` files in `public/`; Vite copies them into the deployed output.
+both parser WASM files load below the correct repository path. The Tree-sitter
+runtime (`tree-sitter.wasm`) is imported from the `web-tree-sitter` package, so
+it always matches the installed JavaScript and is emitted once as a hashed
+asset. The C grammar (`tree-sitter-c.wasm`) has no npm source here: keep it in
+`public/`, and rebuild it with a compatible Tree-sitter ABI when upgrading
+`web-tree-sitter`.
 
 ### Troubleshooting a blank page
 
@@ -44,7 +48,10 @@ sign that branch publishing is still enabled.
 
 ## Test the production build locally
 
-Requires Node.js 22 or 24 and installed dependencies (`npm ci`).
+Requires Node.js 22 (22.12 or later) or 24 and installed dependencies (`npm ci`).
+
+`npm run test:e2e` builds with the Pages base path, serves it, and runs the
+Playwright smoke tests against it automatically. To inspect the build by hand:
 
 ```bash
 npm test

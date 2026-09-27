@@ -27,3 +27,24 @@ jobs:
         env:
           POINTERVIZ_REQUIRE_NATIVE: ${{ runner.os == 'Linux' && '1' || '' }}
       - run: npm run build
+
+  e2e:
+    # Browser smoke tests against the production build under the Pages subpath.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

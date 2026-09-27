@@ -25,13 +25,15 @@ defects are in [`test/maintenance.test.js`](../test/maintenance.test.js).
 | --- | --- | --- | --- |
 | User-facing defects | 12 | 12 | 0 |
 | Structure and code debt | 14 | 14 | 0 |
-| Dependencies and build | 3 | 2 | 1 |
+| Dependencies and build | 3 | 3 | 0 |
 | Documentation drift | 8 | 8 | 0 |
-| Recommended follow-ups | — | — | 7 |
+| Recommended follow-ups | 7 | 3 | 4 |
 
 After the changes: ESLint reports 0 problems, Prettier reports every file
 formatted, 280 tests pass (1 native-compiler suite skipped locally; it runs in
-Linux CI), and the production build has no warnings from project code.
+Linux CI), 7 Playwright browser tests pass, `npm audit` reports 0
+vulnerabilities, and the production build has no warnings from project code.
+Follow-ups 1, 2 and 4 were completed after the initial audit (section 7).
 
 ## 1. User-facing defects
 
@@ -79,7 +81,7 @@ is unusable or the page is lost; **Medium** means wrong or lost data;
 | --- | --- | --- |
 | B1 | `npm audit` reported advisories in dev-only packages (`browserslist`, `nanoid`, `postcss`, `baseline-browser-mapping`). Production dependencies had none. | Applied the non-breaking `npm audit fix`. |
 | B2 | The production bundle was one 600 kB chunk, triggering Vite's size warning and forcing a full re-download on every deploy. | React, React Flow and Tree-sitter are split into separately cached chunks (largest now 184 kB); the warning is gone. |
-| B3 | Remaining advisory: `esbuild ≤ 0.24.2` via Vite 5. It affects the **development server only**, not the deployed site. | **Deferred.** The fix requires a Vite major upgrade (5 → 6 or later), which should be done and browser-tested on its own. |
+| B3 | Remaining advisory: `esbuild ≤ 0.24.2` via Vite 5. It affects the **development server only**, not the deployed site. | Initially deferred, then resolved by follow-up 1: upgraded to Vite 8 (section 7). |
 
 ## 4. Documentation drift
 
@@ -108,23 +110,18 @@ is unusable or the page is lost; **Medium** means wrong or lost data;
   error instead of crashing, and a diagram-to-code challenge graded
   correctly. No console errors.
 
-## 6. Recommended follow-ups (not done)
+## 6. Recommended follow-ups
 
-1. **Upgrade Vite** to clear the dev-server `esbuild` advisory (B3). Re-test
-   WASM loading in a production preview afterwards.
-2. **Duplicate WASM in the build.** `dist/assets/` contains a hashed copy of
-   `tree-sitter.wasm` (205 kB) that `web-tree-sitter` references internally,
-   while the app loads the copy in `public/`. Confirm which one is fetched in
-   production and drop the other.
+Items 1, 2 and 4 are done; see section 7.
+
+1. ~~**Upgrade Vite** to clear the dev-server `esbuild` advisory (B3).~~ Done.
+2. ~~**Duplicate WASM in the build.**~~ Done.
 3. **Split the two largest modules.** `machine/interpreter.js` (about 900
    lines) and `language/parser.js` mix statement, expression and declaration
    handling; splitting by concern would make review easier. This was not done
    in the audit because it is a behaviour-neutral refactor best done with
    focused review.
-4. **Component-level tests.** Logic modules are well covered, but the React
-   components (canvas, inspector, editor) have no automated tests; browser
-   checks in `TESTING.md` are manual. Consider Playwright smoke tests for the
-   checks in section 5.
+4. ~~**Component-level tests.**~~ Done as Playwright browser tests.
 5. **Inspector labels show internal frame IDs** (for example
    `set_value() [frame3]`). Frame qualification is required by the address
    design to tell recursive calls apart, but a call number ("call #2") would
@@ -133,3 +130,61 @@ is unusable or the page is lost; **Medium** means wrong or lost data;
    `CONTRIBUTING.md`).
 7. **Changelog and version.** There are now two "Unreleased" sections and the
    package is still 2.2.1; cut a release (for example 2.3.0) when these ship.
+
+## 7. Follow-up work completed
+
+### Follow-up 1 — Vite 8
+
+- Upgraded `vite` 5.4 → 8.3 and `@vitejs/plugin-react` 4.7 → 6.1. Vite 8
+  bundles with Rolldown instead of Rollup and esbuild; `npm audit` now reports
+  0 vulnerabilities across all dependencies.
+- Moved the chunk configuration from the deprecated
+  `build.rollupOptions.output.manualChunks` function to
+  `build.rolldownOptions.output.codeSplitting.groups`. The output is
+  unchanged: separate `react`, `react-flow` and `tree-sitter` chunks, largest
+  177 kB.
+- Vite 8 requires Node.js 20.19+ or 22.12+, so `engines.node` is now
+  `>=22.12`. CI already runs current Node 22 and 24 releases.
+- The only remaining build messages come from `web-tree-sitter` itself (its
+  use of `eval` and of Node built-ins that are externalized for the browser),
+  as under Vite 5.
+- Verified the development server, the production build under the Pages
+  subpath, and all browser tests.
+
+### Follow-up 2 — duplicate Tree-sitter runtime
+
+- Cause: the app passed `locateFile` pointing at a hand-vendored copy in
+  `public/tree-sitter.wasm`, while `web-tree-sitter`'s JavaScript also
+  references `new URL('tree-sitter.wasm', import.meta.url)`. Vite therefore
+  emitted a second, hashed copy that was never fetched. All three files were
+  byte-identical, but only by coincidence: the runtime JavaScript and WASM
+  must match exactly, and the vendored copy would silently go stale on a
+  `web-tree-sitter` upgrade.
+- Fix: `App.jsx` imports `web-tree-sitter/tree-sitter.wasm?url` (a path the
+  package exports) and passes it to `initParser`, and
+  `public/tree-sitter.wasm` is deleted. The build now emits the runtime once,
+  fingerprinted and base-path aware, always from the installed package. The
+  grammar `tree-sitter-c.wasm` has no npm source in this project, so it stays
+  in `public/`.
+- Saves 205 kB per deployment and removes a version-drift hazard.
+
+### Follow-up 4 — browser tests
+
+- Added Playwright (`@playwright/test`, Chromium) with `npm run test:e2e`.
+  `playwright.config.js` builds with the Pages base path and serves it with
+  `vite preview`, so the tests exercise the deployed configuration.
+- A shared fixture (`e2e/fixtures.js`) fails any test that logs a console
+  error, throws an uncaught page error, or receives an HTTP 4xx/5xx response.
+  This covers WASM and base-path loading implicitly.
+- Seven tests in `e2e/sandbox.spec.js`, `challenges.spec.js` and
+  `level-editor.spec.js` automate the section 5 checks: playback,
+  range-checked editing and C generation, challenge grading (wrong and
+  correct), broken and duplicate-ID stored levels, and level-editor
+  visibility, preview, save and delete.
+- Checked that the tests catch regressions: re-introducing defect D1's CSS
+  makes the level-editor test fail with the opaque background colour.
+- CI has a new `e2e` job on Ubuntu that uploads the HTML report and traces
+  when it fails.
+- Scope: these are end-to-end smoke tests, not isolated component tests. Drag,
+  resize, arrow routing and keyboard interactions remain on the manual
+  checklist in `TESTING.md`.

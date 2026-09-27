@@ -1,4 +1,4 @@
-/** Lint configuration. Formatting is Prettier's job; these rules catch defects and dead code. */
+﻿/** Lint configuration. Formatting is Prettier's job; these rules catch defects and dead code. */
 import js from '@eslint/js';
 import globals from 'globals';
 import react from 'eslint-plugin-react';
@@ -6,7 +6,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import prettier from 'eslint-config-prettier';
 
 export default [
-  { ignores: ['dist/', 'coverage/', 'node_modules/'] },
+  { ignores: ['dist/', 'coverage/', 'node_modules/', 'playwright-report/', 'test-results/'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx,mjs}'],
@@ -35,7 +35,7 @@ export default [
     },
   },
   {
-    files: ['test/**/*.{js,mjs}', '*.config.js'],
+    files: ['test/**/*.{js,mjs}', 'e2e/**/*.js', '*.config.js'],
     languageOptions: { globals: globals.node },
   },
   prettier,

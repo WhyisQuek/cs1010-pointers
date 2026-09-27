@@ -274,7 +274,7 @@ npm run build
 
 `npm run check` runs ESLint, the Prettier format check and the full test suite. Run `npm run format` to apply formatting.
 
-The layout suite checks frame separation, containment, visibility and routing. The flow integration suite feeds parsed C snapshots into the adapter. [TESTING.md](TESTING.md) lists browser checks for dragging, stepping and handle geometry. GitHub CI runs tests/build on Windows and Linux with Node 22 and 24.
+The layout suite checks frame separation, containment, visibility and routing. The flow integration suite feeds parsed C snapshots into the adapter. `npm run test:e2e` runs Playwright smoke tests against the production build under the Pages path; [TESTING.md](TESTING.md) lists them and the remaining manual checks for dragging, stepping and handle geometry. GitHub CI runs tests/build on Windows and Linux with Node 22 and 24, and the browser tests on Linux.
 
 Also manually check:
 

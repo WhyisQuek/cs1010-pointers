@@ -3,7 +3,7 @@
   "version": "2.2.1",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "type": "module",
   "scripts": {
@@ -23,7 +23,8 @@
     "test:semantics": "node --test test/c-semantics.test.js",
     "test:addresses": "node --test test/addresses.test.js",
     "test:native": "node --test test/native-c.test.js",
-    "audit:n3088": "node test/audit-n3088.mjs"
+    "audit:n3088": "node test/audit-n3088.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@xyflow/react": "^12.3.0",
@@ -33,13 +34,14 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
-    "@vitejs/plugin-react": "^4.3.0",
+    "@playwright/test": "^1.63.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.12.0",
     "prettier": "3.9.9",
-    "vite": "^5.4.0"
+    "vite": "^8.3.1"
   }
 }

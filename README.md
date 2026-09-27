@@ -19,7 +19,7 @@ It supports:
 
 ## Run locally
 
-Requires Node.js 22 or 24 and npm. From the repository root:
+Requires Node.js 22 (22.12 or later) or 24 and npm. From the repository root:
 
 ```bash
 npm ci
@@ -35,7 +35,16 @@ npm run check
 npm run build
 ```
 
-`npm run check` runs ESLint, the Prettier format check and every test suite. Use `npm test` for tests only and `npm run format` to apply formatting. The integration suites use `web-tree-sitter` and therefore require the npm dependencies to be installed. See [TESTING.md](docs/TESTING.md).
+`npm run check` runs ESLint, the Prettier format check and every test suite. Use `npm test` for tests only and `npm run format` to apply formatting. The integration suites use `web-tree-sitter` and therefore require the npm dependencies to be installed.
+
+Browser smoke tests use Playwright against the production build served at the GitHub Pages path:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+See [TESTING.md](docs/TESTING.md).
 
 ## Publish for testing
 
