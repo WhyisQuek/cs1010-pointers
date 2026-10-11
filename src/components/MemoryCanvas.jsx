@@ -14,7 +14,9 @@ import { GEOMETRY, pathFromHandle, stateToFlow } from '../flow/layout.js';
 import {
   captureLayout,
   contentSize,
+  editTimeline,
   emptyLayout,
+  emptyTimeline,
   initialHistory,
   layoutHistory,
   moveNode,
@@ -24,6 +26,7 @@ import { isPointer, primitive, typeToString } from '../language/types.js';
 import {
   addAllocation,
   addFrame,
+  allocationDisplayName,
   getAllocation,
   makeState,
   pointerCanTarget,
@@ -73,13 +76,38 @@ export default function MemoryCanvas({
   }, [status]);
   const [history, setHistory] = useState(initialHistory);
   const historyRef = useRef(history);
-  const dispatch = useCallback(action => {
-    const next = layoutHistory(historyRef.current, action);
-    if (next !== historyRef.current) {
+  // Ctrl+Z order across layout steps and diagram edits; see editTimeline.
+  const timeline = useRef(emptyTimeline());
+  // Bumped on every timeline change so the Undo/Redo buttons re-render.
+  const [, setTimelineVersion] = useState(0);
+  const updateTimeline = useCallback((action, from = timeline.current) => {
+    const next = editTimeline(from, action);
+    if (next === timeline.current) return;
+    timeline.current = next;
+    setTimelineVersion(v => v + 1);
+  }, []);
+  const record = useCallback(entry => updateTimeline({ type: 'record', entry }), [updateTimeline]);
+  const dispatch = useCallback(
+    action => {
+      const previous = historyRef.current;
+      const next = layoutHistory(previous, action);
+      if (next === previous) return;
       historyRef.current = next;
       setHistory(next);
-    }
-  }, []);
+      // A finished drag, resize or bend added one layout undo step.
+      if ((action.type === 'set' || action.type === 'end') && next.past !== previous.past)
+        record('layout');
+    },
+    [record],
+  );
+  // The last state this canvas emitted. Any other incoming state replaced the diagram.
+  const emitted = useRef(rawState);
+  useEffect(() => {
+    if (rawState === emitted.current) return;
+    emitted.current = rawState;
+    updateTimeline({ type: 'forgetEdits' });
+  }, [rawState, updateTimeline]);
+  const wrap = useRef(null);
   const setLayout = useCallback(layout => dispatch({ type: 'set', layout }), [dispatch]);
   const begin = useCallback(() => dispatch({ type: 'begin' }), [dispatch]);
   const end = useCallback(() => dispatch({ type: 'end' }), [dispatch]);
@@ -131,14 +159,42 @@ export default function MemoryCanvas({
     dispatch({ type: 'sync', layout: captureLayout(historyRef.current.present, nodes) });
   }, [nodes, dispatch]);
 
+  const emit = useCallback(
+    next => {
+      setEditedPreviousState(state);
+      emitted.current = next;
+      onChange?.(next);
+      // Deleting from the inspector removes the focused button; keep Ctrl+Z reachable.
+      requestAnimationFrame(() => {
+        if (!document.activeElement || document.activeElement === document.body)
+          wrap.current?.focus({ preventScroll: true });
+      });
+    },
+    [state, onChange],
+  );
+  const nextStep = direction => {
+    const entry = direction === 'undo' ? timeline.current.past.at(-1) : timeline.current.future[0];
+    // Diagram edits only replay into a diagram that can still be edited.
+    return entry && (entry === 'layout' || editable) ? entry : null;
+  };
+  const undoOrRedo = direction => {
+    const entry = nextStep(direction);
+    if (!entry) return;
+    updateTimeline({ type: direction });
+    if (entry === 'layout') dispatch({ type: direction });
+    else {
+      emit(direction === 'undo' ? entry.before : entry.after);
+      setStatus(null);
+    }
+  };
   const mutate = useCallback(
     fn => {
       if (!editable) return false;
       try {
         const next = structuredClone(state),
           message = fn(next);
-        setEditedPreviousState(state);
-        onChange?.(next);
+        record({ before: state, after: next });
+        emit(next);
         if (typeof message === 'string') notify({ kind: 'ok', text: message });
         else setStatus(null);
         return true;
@@ -147,7 +203,7 @@ export default function MemoryCanvas({
         return false;
       }
     },
-    [state, onChange, editable, notify],
+    [state, editable, notify, record, emit],
   );
   const closeInspector = () => {
     setSelectedId(null);
@@ -239,6 +295,7 @@ export default function MemoryCanvas({
       if (removed.length)
         mutate(s => {
           for (const ch of removed) removeAllocation(s, ch.id);
+          return 'Deleted. Ctrl+Z undoes it.';
         });
     },
     [mutate, setLayout],
@@ -317,14 +374,18 @@ export default function MemoryCanvas({
       setMenu(null);
     });
   const clearDiagram = () => {
+    const empty = makeState(state.structTypes);
     dispatch({ type: 'clear' });
+    // Clear starts a fresh layout, so only the cleared diagram itself can be restored.
+    updateTimeline({ type: 'record', entry: { before: state, after: empty } }, emptyTimeline());
     setViewportSession(s => s + 1);
     setSelectedId(null);
     setSelectedEdgeId(null);
     setMenu(null);
     setInspection(null);
+    emit(empty);
     setEditedPreviousState(null);
-    onChange?.(makeState(state.structTypes));
+    notify({ kind: 'ok', text: 'Cleared the diagram. Ctrl+Z restores it.' });
   };
   const selectedNode = nodes.find(n => n.id === selectedId);
   const selected = selectedNode?.data.allocation ?? null;
@@ -404,13 +465,15 @@ export default function MemoryCanvas({
 
   return (
     <div
+      ref={wrap}
+      tabIndex={-1}
       className="canvas-wrap"
       onKeyDown={event => {
         if (event.target.closest('input, textarea, select, [contenteditable=true]')) return;
         if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) {
           event.preventDefault();
           event.stopPropagation();
-          dispatch({ type: event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo' });
+          undoOrRedo(event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo');
         }
         if (event.key === 'Escape') {
           setMenu(null);
@@ -460,8 +523,24 @@ export default function MemoryCanvas({
           <Background color="#30363d" gap={24} size={1} />
           <Controls showInteractive={false} fitViewOptions={FIT}>
             <ControlButton
+              onClick={() => undoOrRedo('undo')}
+              disabled={!nextStep('undo')}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+            >
+              ↶
+            </ControlButton>
+            <ControlButton
+              onClick={() => undoOrRedo('redo')}
+              disabled={!nextStep('redo')}
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+            >
+              ↷
+            </ControlButton>
+            <ControlButton
               onClick={() => setLayout(emptyLayout())}
-              title="Reset layout (Ctrl+Z undoes layout changes)"
+              title="Reset layout (Ctrl+Z undoes it)"
               aria-label="Reset layout"
             >
               ↺
@@ -536,8 +615,22 @@ export default function MemoryCanvas({
             editable={!!selectedNode?.data.editable}
             onEdit={fn => mutate(s => fn(getAllocation(s, selected.id), s))}
             onDelete={() => {
-              if (mutate(s => removeAllocation(s, selected.id))) closeInspector();
+              const label = allocationDisplayName(state, selected);
+              const deleted = mutate(s => {
+                removeAllocation(s, selected.id);
+                return `Deleted ${label}. Ctrl+Z undoes it.`;
+              });
+              if (deleted) closeInspector();
             }}
+            onRestore={
+              editable && !selected.alive && selected.storage.kind === 'heap'
+                ? () =>
+                    mutate(s => {
+                      getAllocation(s, selected.id).alive = true;
+                      return 'Diagram edit: this block is allocated again. Ctrl+Z undoes it.';
+                    })
+                : undefined
+            }
             onSelectPath={path => inspect(selected.id, path)}
             onShowTarget={showTarget}
             onClose={closeInspector}

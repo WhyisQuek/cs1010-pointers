@@ -45,6 +45,8 @@ export function guardLoopIteration(iterations, stmt) {
 }
 
 export function markNext(ctx, node, frame) {
+  // Where execution is about to go; a runtime error is reported at this position.
+  ctx.position = { line: node.loc?.startLine ?? null, frame };
   const previous = ctx.snapshots.at(-1);
   if (previous) {
     previous.nextLine = node.loc?.startLine ?? null;

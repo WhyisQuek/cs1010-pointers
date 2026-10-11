@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — fixes
+
+### Changed
+
+- A runtime error (NULL dereference, use after free, out-of-bounds access, step or loop limit) no longer discards the run. Playback opens at the step where execution stopped, with the failing line in red and "Stopped by an error" in the code header; earlier steps remain available.
+- The sandbox stays loaded while another tab is open, so its code, diagram, playback, layout and undo history survive switching to Challenges or the Level editor.
+- Ctrl+Z / Ctrl+Shift+Z now undo and redo diagram edits as well as layout changes, in one timeline: values, pointer targets, names, types, adding and deleting objects, Mark as freed, and Clear diagram. Deleting, freeing and clearing confirm with "Ctrl+Z undoes it". **Undo** and **Redo** buttons are back in the canvas controls, so this also works without a keyboard.
+- Freed heap blocks and out-of-scope variables can be dragged like any other box; only their contents are read-only.
+- In an editable diagram, a freed heap block's inspector has **Mark as not freed** and **Delete object** (previously a freed block could be neither restored nor deleted).
+
+### Fixed
+
+- Generate C freed heap blocks in allocation order, so a freed linked list produced `free(head); free(head->next);` (a use after free). Blocks reached through another block are now freed first.
+- `%g` / `%G` dropped the final zero of a two-digit exponent (`1.23457e+1` instead of `1.23457e+10`).
+- Defining a function named `malloc` or `free` was accepted but never called; it is now rejected like `printf`.
+- `NULL`, `malloc`, `free` and `printf` can no longer name variables or parameters, in code or in the diagram, so Generate C cannot emit code like `free(free);`. The inspector refuses invalid, reserved, typedef and duplicate names instead of storing them, and a nameless stack object is labelled "(unnamed)" rather than "heap".
+
 ## Unreleased — `printf`
 
 ### Added

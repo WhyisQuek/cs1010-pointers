@@ -9,10 +9,13 @@ import Sandbox from './components/Sandbox.jsx';
 import Challenges from './components/Challenges.jsx';
 import LevelEditor from './components/LevelEditor.jsx';
 
+// [id, label, component, keepAlive]. A kept-alive page stays mounted while hidden, so the
+// sandbox keeps its code, diagram, playback, layout and undo history across tab switches.
+// The others remount on every visit and so always read fresh levels and progress.
 const PAGES = [
-  ['sandbox', 'Sandbox', Sandbox],
-  ['challenges', 'Challenges', Challenges],
-  ['editor', 'Level editor', LevelEditor],
+  ['sandbox', 'Sandbox', Sandbox, true],
+  ['challenges', 'Challenges', Challenges, false],
+  ['editor', 'Level editor', LevelEditor, false],
 ];
 
 export default function App() {
@@ -33,7 +36,6 @@ export default function App() {
   if (error) return <div className="loading-screen">Could not load the C parser: {error}</div>;
   if (!ready) return <div className="loading-screen">Loading parser…</div>;
 
-  const Page = PAGES.find(([id]) => id === tab)[2];
   return (
     <div className="app">
       <header className="topbar">
@@ -51,9 +53,16 @@ export default function App() {
           ))}
         </nav>
       </header>
-      <ErrorBoundary resetKey={tab}>
-        <Page />
-      </ErrorBoundary>
+      {PAGES.map(
+        ([id, , Page, keepAlive]) =>
+          (keepAlive || tab === id) && (
+            <div key={id} className="page-host" hidden={tab !== id}>
+              <ErrorBoundary resetKey={tab}>
+                <Page />
+              </ErrorBoundary>
+            </div>
+          ),
+      )}
     </div>
   );
 }

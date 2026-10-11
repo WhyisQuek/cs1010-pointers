@@ -77,8 +77,11 @@ test('expired locals and returned frames are hidden without deleting semantic pr
   assert.equal(edges.length, 0);
   assert.equal(JSON.stringify(state), before);
   const history = stateToFlow(state, { showExpired: true });
-  assert.equal(history.nodes.find(n => n.id === 'p').draggable, false);
+  // Expired objects can be moved, but their contents are read-only.
+  assert.equal(history.nodes.find(n => n.id === 'p').draggable, true);
   assert.equal(history.nodes.find(n => n.id === 'p').data.editable, false);
+  const editable = stateToFlow(state, { showExpired: true, editable: true });
+  assert.equal(editable.nodes.find(n => n.id === 'p').deletable, false);
 });
 
 test('an active frame with no locals is still visible', () => {
@@ -161,7 +164,13 @@ test('freed heap objects remain available as dangling targets', () => {
     value: { kind: 'pointer', target: ref('heap') },
   });
   assert.equal(stateToFlow(state).edges[0].className, 'dangling-edge');
-  assert.equal(stateToFlow(state).nodes.find(n => n.id === 'heap').draggable, false);
+  const heap = stateToFlow(state).nodes.find(n => n.id === 'heap');
+  assert.equal(heap.draggable, true);
+  assert.equal(heap.deletable, false);
+  assert.equal(heap.data.editable, false);
+  const editable = stateToFlow(state, { editable: true }).nodes.find(n => n.id === 'heap');
+  assert.equal(editable.deletable, true);
+  assert.equal(editable.data.editable, false);
 });
 
 test('struct root references have a real header target and one-past references have no fake row', () => {
@@ -232,7 +241,9 @@ test('routing detours around a middle box instead of passing through it', () => 
 import {
   captureLayout,
   contentSize,
+  editTimeline,
   emptyLayout,
+  emptyTimeline,
   initialHistory,
   layoutHistory,
   moveNode,
@@ -351,6 +362,33 @@ test('one drag is one undo step; redo restores sizes and bends; clear isolates r
   assert.deepEqual(history.present, bent);
   history = layoutHistory(history, { type: 'clear' });
   assert.deepEqual(history, initialHistory());
+});
+
+test('one undo timeline orders layout steps and diagram edits', () => {
+  const [s0, s1, s2, s3] = [{}, {}, {}, {}];
+  const record = (t, entry) => editTimeline(t, { type: 'record', entry });
+  let t = record(emptyTimeline(), { before: s0, after: s1 });
+  t = record(t, 'layout');
+  t = record(t, { before: s1, after: s2 });
+  t = editTimeline(t, { type: 'undo' });
+  assert.equal(t.future[0].before, s1);
+  t = editTimeline(t, { type: 'undo' });
+  assert.equal(t.future[0], 'layout');
+  t = editTimeline(t, { type: 'redo' });
+  assert.equal(t.past.at(-1), 'layout');
+  // A new step drops the redo branch.
+  t = record(t, { before: s1, after: s3 });
+  assert.deepEqual(t.future, []);
+  // Two edits computed from the same state in one event are one step.
+  t = record(t, { before: s1, after: s2 });
+  assert.equal(t.past.length, 3);
+  assert.equal(t.past.at(-1).after, s2);
+  // A diagram replaced from outside keeps layout steps only.
+  t = editTimeline(t, { type: 'forgetEdits' });
+  assert.deepEqual(t.past, ['layout']);
+  // Undo past the start is a no-op.
+  const start = emptyTimeline();
+  assert.equal(editTimeline(start, { type: 'undo' }), start);
 });
 
 test('curves choose both attachment sides and manual bends follow moving endpoints', () => {

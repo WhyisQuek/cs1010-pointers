@@ -20,7 +20,7 @@
 import { checkProgram } from '../language/checker.js';
 import { INT } from '../language/types.js';
 import { callFunction } from './execution/calls.js';
-import { makeState } from './memory.js';
+import { cloneState, makeState } from './memory.js';
 
 export function executeProgram(program) {
   const normalized = normalizeProgram(program);
@@ -41,7 +41,11 @@ export function executeProgram(program) {
     output: '',
   };
   if (!ctx.functions.has('main')) throw new Error('no main() function found');
-  callFunction(ctx, ctx.functions.get('main'), [], null, true);
+  try {
+    callFunction(ctx, ctx.functions.get('main'), [], null, true);
+  } catch (error) {
+    throw withPlayback(error, ctx);
+  }
   return {
     state,
     snapshots: ctx.snapshots,
@@ -49,6 +53,28 @@ export function executeProgram(program) {
     output: ctx.output,
     ast: normalized,
   };
+}
+
+/**
+ * A runtime error (a NULL dereference, a use after free, a step limit) keeps the steps that ran,
+ * plus a final step showing memory where execution stopped, so the failure can be played back.
+ * Errors found before execution starts have no playback.
+ */
+function withPlayback(error, ctx) {
+  const { line = null, frame = null } = ctx.position ?? {};
+  ctx.snapshots.push({
+    line,
+    nextLine: line,
+    function: frame?.name ?? 'main',
+    frameId: frame?.id ?? 'main',
+    statement: 'RuntimeError',
+    error: error.message,
+    events: ctx.trace.slice(ctx.snapshotTraceIndex),
+    output: ctx.output,
+    state: cloneState(ctx.state),
+  });
+  error.playback = { state: ctx.state, snapshots: ctx.snapshots, output: ctx.output };
+  return error;
 }
 
 function normalizeProgram(program) {

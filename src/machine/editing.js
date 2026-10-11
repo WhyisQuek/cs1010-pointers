@@ -54,7 +54,9 @@ export function changeAllocationType(state, id, type) {
 
 export function removeAllocation(state, id) {
   const removed = getAllocation(state, id);
-  if (!removed.alive) throw new Error('expired objects are read-only');
+  // A freed heap block is a diagram choice that can be undone; an expired local belongs to its frame.
+  if (!removed.alive && removed.storage.kind !== 'heap')
+    throw new Error('expired objects are read-only');
   const incoming = [];
   for (const a of state.allocations) {
     if (a.id === id) continue;

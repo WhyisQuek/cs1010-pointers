@@ -204,7 +204,8 @@ function formatFloating(spec, x) {
       p > exponent && exponent >= -4
         ? fixed(value, p - 1 - exponent, alternate)
         : exponential(value, p - 1, alternate);
-    if (!alternate && body.includes('.')) body = body.replace(/\.?0+(?=e|$)/, '');
+    // Trailing zeros come off the fraction only, never the exponent (1.5e+10, not 1.5e+1).
+    if (!alternate) body = body.replace(/(\.\d*?)0+(?=e|$)/, '$1').replace(/\.(?=e|$)/, '');
   }
   if (upper(spec.conversion)) body = body.toUpperCase();
   return pad(spec, prefix, body);

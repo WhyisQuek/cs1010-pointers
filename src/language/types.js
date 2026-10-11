@@ -271,3 +271,18 @@ export function validIdentifier(name) {
     name !== 'size_t'
   );
 }
+
+/** Names PointerViz implements itself; programs and diagrams may not redefine them. */
+export const LIBRARY_NAMES = Object.freeze(new Set(['NULL', 'malloc', 'free', 'printf']));
+
+/** Why `name` cannot name a variable, or null. Struct typedef names are taken too. */
+export function variableNameError(name, structTypes = {}) {
+  if (!name) return 'a variable needs a name';
+  if (!validIdentifier(name)) return `'${name}' is not a valid, non-keyword C identifier`;
+  if (LIBRARY_NAMES.has(name)) return `'${name}' is reserved for the standard library`;
+  const typedefs = Object.values(structTypes).flatMap(
+    def => def.typedefNames ?? (def.alias ? [def.alias] : []),
+  );
+  if (typedefs.includes(name)) return `'${name}' is already a type name`;
+  return null;
+}

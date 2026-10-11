@@ -141,6 +141,8 @@ Supported:
 - character and integer literals;
 - `NULL` and zero as null pointer constants in pointer context.
 
+`NULL`, `malloc`, `free` and `printf` are reserved: they cannot name a function, variable or parameter, in code or in a diagram. (C reserves the library functions as external names; PointerViz also forbids them as local names so every program state can be regenerated as C.) A diagram variable also cannot reuse a struct typedef name.
+
 `NULL` is predefined as integer constant `0`. A variable whose value happens to be zero is not a null pointer constant. `sizeof` returns an unsigned-long `size_t`; pointer subtraction returns signed-long `ptrdiff_t`. Character constants have type `int`. As in C11 `<stdbool.h>`, `true` and `false` are the integer constants `1` and `0`.
 
 Converting any number or pointer to `bool` yields `1` if it compares unequal to zero and `0` otherwise (`bool b = 256;` and `bool b = p;` are both `true`); it never truncates. `bool` operands promote to `int`, so `b++` leaves `true` and `b--` toggles. The diagram shows stored `bool` values as `true`/`false`.

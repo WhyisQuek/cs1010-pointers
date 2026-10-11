@@ -10,8 +10,8 @@ import {
   resolveStructType,
   typeEquals,
   typeToString,
-  validIdentifier,
   validateObjectType,
+  variableNameError,
 } from '../language/types.js';
 import {
   allocationDisplayName,
@@ -44,8 +44,8 @@ export function validate(state) {
     if (a.storage?.kind === 'stack') {
       const frameId = a.storage.frameId ?? 'main';
       const names = namesByFrame.get(frameId) ?? new Set();
-      if (!validIdentifier(a.name))
-        errors.push(`stack object needs a valid, non-keyword C identifier`);
+      const nameError = variableNameError(a.name, state.structTypes);
+      if (nameError) errors.push(`stack object name: ${nameError}`);
       else if (names.has(a.name))
         errors.push(`duplicate variable name '${a.name}' in one stack frame`);
       names.add(a.name);
@@ -167,6 +167,8 @@ export function generate(state) {
     state,
     lines: [],
     heapAnchor: new Map(),
+    // Heap block whose storage holds each anchor expression (null for a stack variable).
+    anchorOwner: new Map(),
     heapInitialized: new Set(),
     initializing: new Set(),
   };
@@ -194,9 +196,16 @@ export function generate(state) {
       ]);
     }
   }
-  for (const heap of heapAllocations(state))
-    if (!heap.alive && ctx.heapAnchor.has(heap.id))
-      ctx.lines.push(`free(${ctx.heapAnchor.get(heap.id)});`);
+  // An anchor such as head->next reads its owner block, so free the deepest blocks first.
+  const anchorDepth = id => {
+    let depth = 0;
+    for (let owner = ctx.anchorOwner.get(id); owner; owner = ctx.anchorOwner.get(owner)) depth++;
+    return depth;
+  };
+  heapAllocations(state)
+    .filter(heap => !heap.alive && ctx.heapAnchor.has(heap.id))
+    .sort((a, b) => anchorDepth(b.id) - anchorDepth(a.id))
+    .forEach(heap => ctx.lines.push(`free(${ctx.heapAnchor.get(heap.id)});`));
 
   const definitions = emitStructDefinitions(state);
   const cleaned = trimBlankLines(ctx.lines);
@@ -253,7 +262,7 @@ function emitPointerStorage(a, ctx) {
   }
 }
 
-function emitPointerAssignment(lhs, pointerType, value, ctx) {
+function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
   if (value.kind === 'uninit') return;
   if (value.kind === 'null') {
     ctx.lines.push(`${lhs} = NULL;`);
@@ -268,7 +277,7 @@ function emitPointerAssignment(lhs, pointerType, value, ctx) {
     );
     return;
   }
-  ensureHeapAllocated(target, lhs, pointerType, value.target.path, ctx);
+  ensureHeapAllocated(target, lhs, pointerType, value.target.path, ctx, owner);
   const rhs = pointerExprForHeapTarget(
     target,
     value.target.path,
@@ -279,8 +288,9 @@ function emitPointerAssignment(lhs, pointerType, value, ctx) {
   initializeHeap(target, ctx);
 }
 
-function ensureHeapAllocated(heap, lhs, pointerType, targetPath, ctx) {
+function ensureHeapAllocated(heap, lhs, pointerType, targetPath, ctx, owner) {
   if (ctx.heapAnchor.has(heap.id)) return;
+  ctx.anchorOwner.set(heap.id, owner);
   const expected = heapBasePointerType(heap);
   if (!typeEquals(pointerType, expected))
     throw new ValidationError([
@@ -304,7 +314,7 @@ function initializeHeap(heap, ctx) {
     const lhs = lvalueForHeapSubobject(heap, s.ref.path, anchor, ctx.state);
     if (isPrimitive(s.type) && s.value.kind === 'scalar')
       ctx.lines.push(`${lhs} = ${numberToC(s.value.value, s.type)};`);
-    else if (isPointer(s.type)) emitPointerAssignment(lhs, s.type, s.value, ctx);
+    else if (isPointer(s.type)) emitPointerAssignment(lhs, s.type, s.value, ctx, heap.id);
   }
   ctx.initializing.delete(heap.id);
   ctx.heapInitialized.add(heap.id);

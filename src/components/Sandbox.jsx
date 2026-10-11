@@ -34,20 +34,30 @@ export default function Sandbox() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  const loadPlayback = (result, startStep) => {
+    setCanvasSession(s => s + 1);
+    setSavedPlayback(null);
+    setState(result.state);
+    setSnapshots(result.snapshots);
+    setStep(startStep);
+  };
   const codeToDiagram = () => {
     try {
       const result = interpret(code);
-      setCanvasSession(s => s + 1);
-      setSavedPlayback(null);
-      setState(result.state);
-      setSnapshots(result.snapshots);
-      setStep(0);
+      loadPlayback(result, 0);
       setNotice({
         kind: 'ok',
         text: `Ready: ${result.snapshots.length} execution steps. Select Next to begin.`,
       });
     } catch (e) {
-      reportError(e);
+      if (!e.playback) return reportError(e);
+      // A runtime error opens playback at the step where execution stopped.
+      const steps = e.playback.snapshots.length;
+      loadPlayback(e.playback, steps);
+      setNotice({
+        kind: 'err',
+        text: `Stopped at step ${steps}: ${e.message}. Select Previous to see how it got there.`,
+      });
     }
   };
 
@@ -114,14 +124,23 @@ export default function Sandbox() {
         <section className="panel" aria-label="C code">
           <div className="panel-head">
             C code
-            {snapshots && !nextLine && <span className="panel-context">Execution complete</span>}
+            {shownSnapshot?.error ? (
+              <span className="panel-context error-context">Stopped by an error</span>
+            ) : (
+              snapshots && !nextLine && <span className="panel-context">Execution complete</span>
+            )}
             <div className="panel-actions">
               <button className="primary-btn head-btn" onClick={codeToDiagram}>
                 Run
               </button>
             </div>
           </div>
-          <CodePanel code={code} onCode={onCode} activeLine={nextLine} />
+          <CodePanel
+            code={code}
+            onCode={onCode}
+            activeLine={nextLine}
+            activeError={!!shownSnapshot?.error}
+          />
           {snapshots?.at(-1)?.output && (
             <section className="program-output" aria-label="Program output">
               <div className="program-output-head">Output</div>

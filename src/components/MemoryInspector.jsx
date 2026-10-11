@@ -13,6 +13,7 @@ import {
   sizeOf,
   typeEquals,
   typeToString,
+  variableNameError,
 } from '../language/types.js';
 import { MAX_ARRAY_LENGTH, clampArrayLength } from '../language/limits.js';
 import { scalarFromInput } from '../language/numeric.js';
@@ -40,6 +41,7 @@ export default function MemoryInspector({
   editable,
   onEdit,
   onDelete,
+  onRestore,
   onSelectPath,
   onShowTarget,
   onClose,
@@ -327,10 +329,28 @@ export default function MemoryInspector({
                     value={name}
                     onChange={e => setName(e.target.value)}
                     onBlur={() => {
-                      if (name !== a.name)
-                        onEdit(obj => {
-                          obj.name = name;
-                        });
+                      if (name === a.name) return;
+                      // Reject before storing so a bad name never reaches the diagram.
+                      const error =
+                        variableNameError(name, state.structTypes) ??
+                        (state.allocations.some(
+                          o =>
+                            o.id !== a.id &&
+                            o.alive &&
+                            o.storage.kind === 'stack' &&
+                            o.storage.frameId === a.storage.frameId &&
+                            o.name === name,
+                        )
+                          ? `'${name}' is already used in this frame`
+                          : null);
+                      if (error) {
+                        setNotice(`Name not changed: ${error}.`);
+                        setName(a.name ?? '');
+                        return;
+                      }
+                      onEdit(obj => {
+                        obj.name = name;
+                      });
                     }}
                     onKeyDown={e => {
                       if (e.key === 'Enter') e.currentTarget.blur();
@@ -405,12 +425,26 @@ export default function MemoryInspector({
                 onClick={() =>
                   onEdit(obj => {
                     obj.alive = false;
+                    return 'Marked as freed. Ctrl+Z undoes it.';
                   })
                 }
               >
                 Mark as freed
               </button>
             )}
+            <button className="plain-btn danger" onClick={onDelete}>
+              Delete object
+            </button>
+          </div>
+        </div>
+      )}
+      {onRestore && (
+        // Only for freed heap blocks in an editable diagram: C has no "unfree"; this is a drawing edit.
+        <div className="object-editor">
+          <div className="inspector-actions">
+            <button className="plain-btn" onClick={onRestore}>
+              Mark as not freed
+            </button>
             <button className="plain-btn danger" onClick={onDelete}>
               Delete object
             </button>

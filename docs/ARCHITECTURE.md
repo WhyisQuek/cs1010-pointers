@@ -105,7 +105,7 @@ Semantic operations emit trace events such as:
 - `EndLifetime`;
 - `Break` / `Continue` / `Return`.
 
-Snapshots contain a cloned `MemoryState` for deterministic step-through playback. Statements inside branches/loops are snapshotted as they actually execute. A `for` update is represented by the synthetic snapshot kind `ForUpdate`.
+Snapshots contain a cloned `MemoryState` for deterministic step-through playback. A runtime error (after the checker has passed) is thrown with `error.playback`: the snapshots recorded so far plus a final `RuntimeError` snapshot of memory where execution stopped, with the error message and the failing line. Errors found before execution have no playback. Statements inside branches/loops are snapshotted as they actually execute. A `for` update is represented by the synthetic snapshot kind `ForUpdate`.
 
 ## 5. Structures and subobjects
 
@@ -125,7 +125,7 @@ Pointers store these references. This preserves array contiguity, fields and poi
 
 `MemoryState` contains no GUI coordinates. `flow/layout.js` derives visible frames, allocation nodes, subobject handles and pointer edges. `flow/routing.js` chooses rounded orthogonal routes; `flow/memoryFlow.jsx` renders the React components.
 
-The live view filters expired stack objects without removing their semantic records. An optional history view exposes them. Every visible call has a separate layout slot. Locals use parent-relative coordinates, and a frame grows to contain any local moved past its edge. Layout (positions, frame sizes, arrow bends) survives edits and playback steps and has its own undo/redo; a new Run or Clear starts a fresh layout.
+The live view filters expired stack objects without removing their semantic records. An optional history view exposes them. Every visible call has a separate layout slot. Locals use parent-relative coordinates, and a frame grows to contain any local moved past its edge. Layout (positions, frame sizes, arrow bends) survives edits and playback steps; a new Run or Clear starts a fresh layout. Undo/redo follows one timeline (`editTimeline` in `flow/workspace.js`) whose entries are either a layout step, replayed by `layoutHistory`, or a diagram edit holding the MemoryState before and after it. Diagram edits are forgotten when the diagram is replaced from outside the canvas (a new Run, a playback step).
 
 See [visualization behavior](VISUALIZATION.md) for lifetime visibility, routing limits and presentation invariants.
 

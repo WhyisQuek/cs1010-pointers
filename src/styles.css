@@ -48,6 +48,16 @@ button {
   display: flex;
   flex-direction: column;
 }
+/* Each page fills the space under the top bar, exactly as when it was a direct child of .app. */
+.page-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page-host[hidden] {
+  display: none;
+}
 .loading-screen {
   padding: 24px;
   color: var(--muted);
@@ -342,6 +352,17 @@ button:disabled {
   color: #e3b341;
   font-weight: bold;
 }
+/* The line a runtime error stopped on. */
+.next-line.error-line {
+  background: #f8514922;
+  box-shadow: -3px 0 var(--err);
+}
+.next-line-number.error-line {
+  color: var(--err);
+}
+.panel-context.error-context {
+  color: var(--err);
+}
 .memory-changed {
   outline: 2px solid #e3b341;
   outline-offset: 1px;
@@ -353,6 +374,10 @@ button:disabled {
   color: #f2cc60;
 }
 
+/* Focusable (tabIndex -1) only so Ctrl+Z keeps working after the focused control is removed. */
+.canvas-wrap:focus {
+  outline: none;
+}
 .canvas-wrap {
   flex: 1;
   min-height: 0;

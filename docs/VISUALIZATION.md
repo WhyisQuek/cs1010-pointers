@@ -32,7 +32,7 @@ Messages about canvas actions appear as a short toast at the bottom of the canva
 
 Playback is read-only for memory values and pointer targets, while layout remains adjustable. **Edit** (memory header) clones the displayed state and enables creation and editing in active frames. **+ Variable** and **+ Heap block** float at the top-left of the canvas; + Variable uses the selected active frame, defaulting to main. Select a frame and use its own **+ Variable**, or right-click its background and choose **Add variable here**. Right-clicking empty canvas offers **Add heap block here** and **Clear diagram**. The owning frame is highlighted. **Back to playback** restores the recorded state and step, discarding semantic edits to the copy.
 
-Returned frames and expired locals remain read-only. **Generate C** converts the memory currently on screen, including a selected playback step, and leaves that memory displayed as an editable diagram. It still requires a single main frame; multiple function-frame diagrams can be explored but cannot yet be converted back into function-call code. Editing source or successfully generating C exits the saved-playback workflow.
+Returned frames and expired locals remain read-only, though they can be moved. Freed heap blocks can be moved too; in an editable diagram they can also be marked not freed or deleted. **Generate C** converts the memory currently on screen, including a selected playback step, and leaves that memory displayed as an editable diagram. It still requires a single main frame; multiple function-frame diagrams can be explored but cannot yet be converted back into function-call code. Editing source or successfully generating C exits the saved-playback workflow.
 
 ## Boxes and arrows
 

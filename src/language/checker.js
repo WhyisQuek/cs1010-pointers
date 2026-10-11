@@ -1,6 +1,7 @@
 /** Constraint checks run before execution, including branches that will be skipped. */
 import {
   INT,
+  LIBRARY_NAMES,
   isArray,
   isPointer,
   isPrimitive,
@@ -29,8 +30,10 @@ export function checkProgram(program) {
   const functions = new Map(program.functions.map(f => [f.name, f]));
   const visibleFunctions = new Set();
   if (functions.size !== program.functions.length) throw new Error('duplicate function definition');
-  if (functions.has('printf'))
-    throw new Error("cannot define 'printf': it is the standard library function");
+  // C11 7.1.3 reserves these; a definition would also be silently bypassed by the built-ins.
+  for (const name of LIBRARY_NAMES)
+    if (name !== 'NULL' && functions.has(name))
+      throw new Error(`cannot define '${name}': it is a standard library function`);
   const decay = t => (isArray(t) ? pointer(t.of) : t);
   const scalar = t => isPrimitive(t) || isPointer(t) || t.kind === 'null-pointer-constant';
   const fail = (e, message) => {
@@ -45,6 +48,7 @@ export function checkProgram(program) {
   const scope = parent => ({ parent, names: new Map() });
   function declare(env, name, type, e) {
     if (name === 'NULL') fail(e, 'NULL is a predefined macro in PointerViz');
+    if (LIBRARY_NAMES.has(name)) fail(e, `'${name}' is reserved for the standard library`);
     if (env.names.has(name)) fail(e, `redeclaration of '${name}'`);
     env.names.set(name, type);
   }

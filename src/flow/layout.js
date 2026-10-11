@@ -188,7 +188,8 @@ export function stateToFlow(
         parentId: id,
         expandParent: false,
         position: locals[i],
-        draggable: a.alive,
+        // Position is presentation only, so expired objects move too; their contents stay read-only.
+        draggable: true,
         selectable: true,
         deletable: editable && frame.active && a.alive,
         zIndex: 2,
@@ -236,9 +237,10 @@ export function stateToFlow(
       ...size,
       style: size,
       zIndex: 2,
-      draggable: a.alive,
+      draggable: true,
       selectable: true,
-      deletable: editable && a.alive,
+      // A freed block can still be deleted from an editable diagram.
+      deletable: editable,
       data: {
         allocation: a,
         state,

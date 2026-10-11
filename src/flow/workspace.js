@@ -87,6 +87,8 @@ export function resizeFrame(layout, nodes, id, rect, direction) {
 export function initialHistory() {
   return { present: emptyLayout(), past: [], future: [], gesture: null };
 }
+/** Undo steps kept by both histories. */
+const HISTORY_LIMIT = 50;
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export function layoutHistory(history, action) {
   const { present, past, future, gesture } = history;
@@ -99,7 +101,7 @@ export function layoutHistory(history, action) {
       : {
           ...history,
           gesture: null,
-          past: equal(gesture, present) ? past : [...past.slice(-49), gesture],
+          past: equal(gesture, present) ? past : [...past.slice(1 - HISTORY_LIMIT), gesture],
           future: equal(gesture, present) ? future : [],
         };
   if (action.type === 'set') {
@@ -107,7 +109,7 @@ export function layoutHistory(history, action) {
     return {
       ...history,
       present: action.layout,
-      past: gesture ? past : [...past.slice(-49), present],
+      past: gesture ? past : [...past.slice(1 - HISTORY_LIMIT), present],
       future: [],
     };
   }
@@ -122,4 +124,33 @@ export function layoutHistory(history, action) {
     return { present: future[0], past: [...past, present], future: future.slice(1), gesture: null };
   if (action.type === 'clear') return initialHistory();
   return history;
+}
+
+/**
+ * The order of Ctrl+Z steps across both kinds of change. Each entry is either 'layout'
+ * (replayed by layoutHistory, which holds the layouts) or a diagram edit
+ * { before, after } holding the MemoryState on each side of the edit.
+ */
+export const emptyTimeline = () => ({ past: [], future: [] });
+export function editTimeline(timeline, action) {
+  const { past, future } = timeline;
+  if (action.type === 'record') {
+    // Edits computed from the same state in one event (deleting a node also deletes its
+    // edges) are one step; the last one is the state that was applied.
+    const top = past.at(-1);
+    const sameEvent =
+      action.entry !== 'layout' && top && top !== 'layout' && top.before === action.entry.before;
+    const kept = sameEvent ? past.slice(0, -1) : past;
+    return { past: [...kept.slice(1 - HISTORY_LIMIT), action.entry], future: [] };
+  }
+  if (action.type === 'undo' && past.length)
+    return { past: past.slice(0, -1), future: [past.at(-1), ...future] };
+  if (action.type === 'redo' && future.length)
+    return { past: [...past, future[0]], future: future.slice(1) };
+  // The diagram was replaced from outside (a new run, a playback step): its edits no longer apply.
+  if (action.type === 'forgetEdits') {
+    const layoutOnly = entries => entries.filter(entry => entry === 'layout');
+    return { past: layoutOnly(past), future: layoutOnly(future) };
+  }
+  return timeline;
 }

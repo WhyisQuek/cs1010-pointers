@@ -293,6 +293,7 @@ export const frameAllocations = (state, frameId) =>
 
 export function allocationDisplayName(state, allocation) {
   if (allocation.name) return allocation.name;
+  if (allocation.storage.kind === 'stack') return '(unnamed)';
   const heaps = heapAllocations(state);
   const i = heaps.findIndex(h => h.id === allocation.id);
   return i >= 0 ? `heap ${i + 1}` : 'heap';

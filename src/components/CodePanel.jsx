@@ -11,7 +11,8 @@ const LINE_HEIGHT = 20.8;
  * Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus.
  * Enter carries indentation forward (one level deeper after `{`), and `}` on a blank line outdents.
  */
-export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
+export function CodePanel({ code, onCode, readOnly, activeLine = null, activeError = false }) {
+  const activeClass = activeError ? ' error-line' : '';
   const lines = useMemo(() => highlightC(code), [code]);
   const wrap = useRef(null);
   useEffect(() => {
@@ -67,7 +68,7 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
     <div className="code-wrap" ref={wrap}>
       <div className="gutter" aria-hidden="true">
         {lines.map((_, i) => (
-          <div key={i} className={i + 1 === activeLine ? 'next-line-number' : ''}>
+          <div key={i} className={i + 1 === activeLine ? `next-line-number${activeClass}` : ''}>
             {i + 1}
           </div>
         ))}
@@ -75,7 +76,10 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
       <div className="code-body">
         <pre className="code-highlight" aria-hidden="true">
           {lines.map((tokens, i) => (
-            <div key={i} className={`code-line${i + 1 === activeLine ? ' next-line' : ''}`}>
+            <div
+              key={i}
+              className={`code-line${i + 1 === activeLine ? ` next-line${activeClass}` : ''}`}
+            >
               {tokens.length
                 ? tokens.map((t, j) => (
                     <span key={j} className={`syntax-${t.kind}`}>

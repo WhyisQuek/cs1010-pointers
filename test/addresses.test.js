@@ -145,6 +145,17 @@ test('null, uninitialized, malformed, dangling and one-past addresses remain dis
   assert.equal(describePointer(s, end).status, 'dangling');
   assert.equal(describePointer(s, end).value, null);
 });
+test('a freed heap block can be deleted; an expired local cannot', () => {
+  const s = makeState();
+  addFrame(s, { id: 'main', name: 'main' });
+  const h = object(s, null, int, { storage: { kind: 'heap' }, alive: false }),
+    p = object(s, 'p', pointer(int), { value: pointerValue(ref(h.id)) });
+  removeAllocation(s, h.id);
+  assert.equal(p.value.kind, 'uninit');
+  assert.ok(!s.allocations.some(a => a.id === h.id));
+  const local = object(s, 'gone', int, { alive: false });
+  assert.throws(() => removeAllocation(s, local.id), /read-only/);
+});
 test('addresses and identities never reuse deleted or expired allocations', () => {
   const s = makeState();
   addFrame(s, { id: 'main', name: 'main' });

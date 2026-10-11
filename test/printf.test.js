@@ -64,6 +64,11 @@ const cases = [
     'printf("%g %g %g %g %g %G", 100000.0, 1000000.0, 0.0001, 0.00001, 123456789.0, 1e-10);',
     '100000 1e+06 0.0001 1e-05 1.23457e+08 1E-10',
   ],
+  [
+    'general form keeps exponent zeros',
+    'printf("%g %g %.2g %g", 12345678901.0, 0.000000000123456, 1.2e10, 1e20);',
+    '1.23457e+10 1.23456e-10 1.2e+10 1e+20',
+  ],
   ['general form alternate keeps zeros', 'printf("%#g %g", 1.5, 1.5);', '1.50000 1.5'],
   ['large doubles print exactly', 'printf("%.0f", 1e22);', '10000000000000000000000'],
   ['floating width', 'printf("[%10.4f][%-10.1e]", -3.14159, 12345.0);', '[   -3.1416][1.2e+04   ]'],

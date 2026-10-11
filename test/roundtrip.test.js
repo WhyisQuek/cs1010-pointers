@@ -27,6 +27,8 @@ const programs = [
   'int main(void) { int i = 0; int sum = 0; while (i < 4) { sum += i; i++; } return 0; }',
   'int main(void) { int i = 0; int sum = 0; for (i = 0; i < 4; i++) { sum += i; } return 0; }',
   'int main(void) { bool b = true; bool c = false; bool *p = &b; size_t n = sizeof(int); size_t *q = &n; }',
+  // Freed in child-first order; generated frees must not read a freed parent.
+  'struct N { int v; struct N *next; }; int main(void) { struct N *head = malloc(sizeof(struct N)); head->v = 1; head->next = malloc(sizeof(struct N)); head->next->v = 2; head->next->next = NULL; free(head->next); free(head); return 0; }',
   'struct S { bool flag; size_t count; }; int main(void) { struct S s = {true, 3}; size_t *p = malloc(sizeof(size_t)); *p = 9; }',
 ];
 

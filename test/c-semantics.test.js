@@ -93,7 +93,9 @@ const errors = [
   ['sizeof validates call arguments', 'int x=sizeof(free());', /exactly one/],
   ['sizeof void expression rejected', 'int x=sizeof(free(NULL));', /sizeof unsupported/],
   ['unreachable break outside loop rejected', 'return 0;break;', /outside a loop/],
-  ['function name shadowing', 'int free=0;free(NULL);', /not a function/],
+  ['library function names cannot be declared', 'int free=0;', /reserved for the standard/],
+  ['malloc cannot name a pointer', 'int *malloc=NULL;', /reserved for the standard/],
+  ['printf cannot name a variable', 'int printf=1;', /reserved for the standard/],
   [
     'dangling pointer comparison rejected',
     'int *p=malloc(sizeof(int));free(p);int n=p==NULL;',
@@ -107,6 +109,14 @@ const errors = [
 ];
 for (const [name, body, pattern] of errors)
   test(name, () => assert.throws(() => run(body), pattern));
+
+for (const [name, source] of [
+  ['malloc', 'int *malloc(int n){return NULL;}int main(void){int *p=malloc(4);}'],
+  ['free', 'void free(int *p){}int main(void){return 0;}'],
+  ['library parameter', 'void f(int *free){}int main(void){return 0;}'],
+])
+  test(`standard library names cannot be redefined: ${name}`, () =>
+    assert.throws(() => interpret(source), /standard library/));
 
 for (const source of [
   '#define X 1\nint main(void){int x=X;}',

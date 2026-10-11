@@ -1,4 +1,113 @@
-import { test, expect, openApp } from './fixtures.js';
+import { test, expect, openApp, openTab } from './fixtures.js';
+
+const code = page => page.getByRole('textbox', { name: 'C source code' });
+
+test('a runtime error opens playback at the step where execution stopped', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill('int main(void) {\n    int a = 1;\n    int *p = NULL;\n    *p = 2;\n}');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByText(/^Stopped at step 4: cannot dereference null pointer/)).toBeVisible();
+  await expect(page.getByText('4/4', { exact: true })).toBeVisible();
+  await expect(page.getByText('Stopped by an error')).toBeVisible();
+  await expect(page.locator('.next-line-number.error-line')).toHaveText('4');
+  await expect(page.locator('.mem-cell')).toHaveCount(2);
+
+  // Earlier steps are still there.
+  await page.getByRole('button', { name: 'Previous', exact: true }).click();
+  await expect(page.getByText('3/4', { exact: true })).toBeVisible();
+  await expect(page.getByText('Stopped by an error')).toBeHidden();
+});
+
+test('a freed block can be moved, marked not freed, deleted, and undone with buttons', async ({
+  page,
+}) => {
+  await openApp(page);
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
+  const redo = page.getByRole('button', { name: 'Redo', exact: true });
+  const banner = page.locator('.lifetime-banner');
+  const cell = page.locator('.mem-cell');
+  await expect(undo).toBeDisabled();
+
+  await page.getByRole('button', { name: '+ Heap block' }).click();
+  await page.getByRole('button', { name: 'Mark as freed' }).click();
+  await expect(banner).toHaveText('freed');
+
+  // Freed blocks are still draggable.
+  const before = await cell.boundingBox();
+  await page.mouse.move(before.x + before.width / 2, before.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 120, before.y + 90, { steps: 8 });
+  await page.mouse.up();
+  const after = await cell.boundingBox();
+  expect(Math.round(after.x - before.x)).toBeGreaterThan(60);
+
+  await cell.locator('.name').click();
+  await page.getByRole('button', { name: 'Mark as not freed' }).click();
+  await expect(page.getByText(/^Diagram edit: this block is allocated again/)).toBeVisible();
+  await expect(banner).toHaveCount(0);
+
+  await undo.click();
+  await expect(banner).toHaveText('freed');
+  await redo.click();
+  await expect(banner).toHaveCount(0);
+  await undo.click();
+
+  await cell.locator('.name').click();
+  await page.getByRole('button', { name: 'Delete object' }).click();
+  await expect(cell).toHaveCount(0);
+  await undo.click();
+  await expect(banner).toHaveText('freed');
+});
+
+test('the sandbox keeps its work across tab switches', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill('int main(void) {\n    int kept = 5;\n}');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  const counter = page.locator('.stepper span');
+  const position = await counter.textContent();
+  expect(position).toMatch(/^2\/\d+$/);
+
+  await openTab(page, 'Challenges');
+  await expect(page.getByRole('heading', { name: 'Challenges' })).toBeVisible();
+  await openTab(page, 'Sandbox');
+
+  await expect(code(page)).toHaveValue(/int kept = 5;/);
+  await expect(counter).toHaveText(position);
+  await expect(page.locator('.mem-cell .name')).toHaveText('kept');
+});
+
+test('diagram edits, freeing and clearing can be undone and redone', async ({ page }) => {
+  await openApp(page);
+  const cells = page.locator('.mem-cell');
+
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  await page.getByRole('button', { name: 'Delete object' }).click();
+  await expect(page.getByText('Deleted a. Ctrl+Z undoes it.')).toBeVisible();
+  await expect(cells).toHaveCount(0);
+  await page.keyboard.press('Control+z');
+  await expect(cells).toHaveCount(1);
+  await page.keyboard.press('Control+Shift+z');
+  await expect(cells).toHaveCount(0);
+  await page.keyboard.press('Control+z');
+
+  await page.getByRole('button', { name: '+ Heap block' }).click();
+  await page.getByRole('button', { name: 'Mark as freed' }).click();
+  await expect(page.locator('.lifetime-banner')).toHaveText('freed');
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('.lifetime-banner')).toHaveCount(0);
+
+  // The top-right corner of the canvas is empty once the inspector is closed.
+  await page.keyboard.press('Escape');
+  const pane = page.locator('.react-flow__pane');
+  const { width } = await pane.boundingBox();
+  await pane.click({ button: 'right', position: { x: width - 30, y: 30 } });
+  await page.getByRole('menuitem', { name: 'Clear diagram' }).click();
+  await expect(cells).toHaveCount(0);
+  await page.keyboard.press('Control+z');
+  await expect(cells).toHaveCount(2);
+});
 
 test('parser loads under the Pages subpath and playback steps through a program', async ({
   page,
@@ -37,6 +146,17 @@ test('diagram edits are range-checked and generate matching C', async ({ page })
   await expect(page.getByText('Generated C from the memory shown.')).toBeVisible();
   const code = page.getByRole('textbox', { name: 'C source code' });
   await expect(code).toHaveValue(/int a;\n\s+a = 42;/);
+});
+
+test('reserved variable names are refused in the inspector', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  const name = page.getByRole('textbox', { name: 'Object name' });
+  await name.fill('NULL');
+  await name.press('Enter');
+  await expect(page.getByText("Name not changed: 'NULL' is reserved")).toBeVisible();
+  await expect(name).toHaveValue('a');
+  await expect(page.locator('.mem-cell .name')).toHaveText('a');
 });
 
 test('generate during playback uses the step on screen', async ({ page }) => {

@@ -24,6 +24,41 @@ int main(void) {
   return 0;
 }`;
 
+test('a runtime error keeps the steps that ran and a final step where it stopped', () => {
+  let error;
+  try {
+    interpret(`int main(void) {
+  int a = 1;
+  int *p = NULL;
+  a = 2;
+  *p = 3;
+  a = 4;
+  return 0;
+}`);
+  } catch (e) {
+    error = e;
+  }
+  assert.match(error.message, /cannot dereference null pointer/);
+  const { snapshots, state } = error.playback;
+  const last = snapshots.at(-1);
+  assert.equal(last.statement, 'RuntimeError');
+  assert.equal(last.error, error.message);
+  assert.equal(last.line, 5);
+  assert.equal(last.nextLine, 5);
+  assert.equal(snapshots.at(-2).nextLine, 5);
+  // Memory as it was when execution stopped: a = 2 ran, a = 4 did not.
+  const a = last.state.allocations.find(x => x.name === 'a');
+  assert.equal(a.value.value, 2);
+  assert.equal(state.allocations.find(x => x.name === 'a').value.value, 2);
+});
+
+test('errors found before execution have no playback', () => {
+  assert.throws(
+    () => interpret('int main(void) { int *p = 3; return 0; }'),
+    e => !e.playback,
+  );
+});
+
 test('struct pointer declarations work with anonymous, tagged and forward typedefs', () => {
   for (const definition of [
     'typedef struct { int value; } Node;',

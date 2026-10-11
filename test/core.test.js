@@ -60,6 +60,24 @@ test('C keywords are rejected as diagram variable names', () => {
   assert.throws(() => validate(s), /valid, non-keyword C identifier/);
 });
 
+test('library and typedef names are rejected as diagram variable names', () => {
+  // `int *free` pointing at a freed block would otherwise generate free(free);
+  const s = fresh();
+  const h = heap(s, INT, { kind: 'uninit' }, false);
+  stack(s, 'free', pointer(INT), pointerValue(ref(h.id)));
+  assert.throws(() => generate(s), /'free' is reserved for the standard library/);
+
+  const t = makeState({
+    Node: { kind: 'struct', name: 'Node', fields: [{ name: 'v', type: INT }], alias: 'Node' },
+  });
+  stack(t, 'Node', INT, { kind: 'scalar', value: 1 });
+  assert.throws(() => validate(t), /'Node' is already a type name/);
+
+  const u = fresh();
+  stack(u, '', INT, { kind: 'scalar', value: 1 });
+  assert.throws(() => validate(u), /needs a name/);
+});
+
 test('stack array subobject pointers generate address-of element', () => {
   const s = fresh();
   const arr = stack(s, 'arr', array(INT, 3), {
