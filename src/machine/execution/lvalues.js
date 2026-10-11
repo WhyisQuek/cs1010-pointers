@@ -1,5 +1,5 @@
 /** Object designation (lvalues), reads, writes and assignment conversions. */
-import { convertNumber, isFloatingType } from '../../language/numeric.js';
+import { convertNumber, isBoolType, isFloatingType } from '../../language/numeric.js';
 import {
   isArray,
   isPointer,
@@ -12,7 +12,7 @@ import {
 } from '../../language/types.js';
 import { getAllocation, pointerValue, ref, refType, resolveRef, setRefValue } from '../memory.js';
 import { evalExpression } from './expressions.js';
-import { checkUnsequenced, isNullLike } from './operators.js';
+import { checkUnsequenced, isNullLike, truthy } from './operators.js';
 import { addToPointer } from './pointerArithmetic.js';
 import {
   isIntegerRuntime,
@@ -134,6 +134,8 @@ export function assignToRef(targetRef, targetType, rv, ctx, node) {
 }
 
 export function coerceRValue(targetType, rv, node) {
+  if (isBoolType(targetType) && (isPointer(rv.type) || rv.value.kind === 'null'))
+    return { type: targetType, value: { kind: 'scalar', value: truthy(rv, node) ? 1 : 0 } };
   if (isPrimitive(targetType)) {
     if (!isPrimitive(rv.type) || rv.value.kind !== 'scalar')
       throw semanticError(

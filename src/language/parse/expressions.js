@@ -1,4 +1,5 @@
 /** Expressions -> Mini-C AST. */
+import { INT, primitive } from '../types.js';
 import { parseAbstractDeclarator, parseBaseType } from './declarations.js';
 import { parseNumberLiteral } from './numberLiterals.js';
 import {
@@ -29,6 +30,14 @@ export function parseExpression(node, structTypes) {
       return withLoc({ kind: 'Identifier', name: node.text }, node);
     case 'null':
       return withLoc({ kind: 'NullLiteral' }, node);
+    case 'true':
+    case 'false':
+      // <stdbool.h> (C11) defines these as the integer constants 1 and 0.
+      if (node.text !== node.type) throw unsupported(node);
+      return withLoc(
+        { kind: 'IntLiteral', type: INT, value: node.type === 'true' ? 1 : 0, raw: node.text },
+        node,
+      );
     case 'pointer_expression':
     case 'unary_expression': {
       const op = operatorOf(node);
@@ -157,6 +166,9 @@ export function parseExpression(node, structTypes) {
       if (!expr) throw unsupported(node);
       let name = expr;
       while (name.type === 'parenthesized_expression') name = semanticChildren(name)[0];
+      // Tree-sitter reads the `_Bool` keyword as an identifier inside sizeof(...).
+      if (name.type === 'identifier' && name.text === '_Bool')
+        return withLoc({ kind: 'SizeofType', type: primitive('bool') }, node);
       if (name.type === 'identifier' && structTypes.aliases?.has(name.text)) {
         if (name.startIndex < structTypes.aliasPositions.get(name.text))
           throw unsupported(name, `typedef '${name.text}' is not declared yet`);

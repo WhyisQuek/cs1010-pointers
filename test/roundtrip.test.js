@@ -26,6 +26,8 @@ const programs = [
   'int main(void) { int x = 0; if (2 < 3) { x = 7; } else { x = 9; } return 0; }',
   'int main(void) { int i = 0; int sum = 0; while (i < 4) { sum += i; i++; } return 0; }',
   'int main(void) { int i = 0; int sum = 0; for (i = 0; i < 4; i++) { sum += i; } return 0; }',
+  'int main(void) { bool b = true; bool c = false; bool *p = &b; size_t n = sizeof(int); size_t *q = &n; }',
+  'struct S { bool flag; size_t count; }; int main(void) { struct S s = {true, 3}; size_t *p = malloc(sizeof(size_t)); *p = 9; }',
 ];
 
 await initParser({
@@ -43,6 +45,27 @@ for (const source of programs) {
     assert.ok(result.equal, `${result.diffs.join('; ')}\n${generated}`);
   });
 }
+
+test('generated C keeps bool and size_t spellings and their headers', () => {
+  const state = interpret(
+    'int main(void) { bool b = 7; size_t n = sizeof(long); return 0; }',
+  ).state;
+  assert.equal(named(state, 'b').value.value, 1);
+  const generated = generate(state);
+  assert.match(generated, /^#include <stdbool.h>\n#include <stddef.h>\n/);
+  assert.match(generated, /bool b;/);
+  assert.match(generated, /size_t n;/);
+  assert.match(generated, /b = true;/);
+  assert.match(generated, /n = 8UL;/);
+});
+
+test('size_t and unsigned long are the same type for pointers', () => {
+  const state = interpret(
+    'int main(void) { unsigned long x = 4; size_t *p = &x; *p = 5; return 0; }',
+  ).state;
+  assert.equal(named(state, 'x').value.value, 5);
+  assert.throws(() => interpret('int main(void) { int x; size_t *p = &x; return 0; }'));
+});
 
 // Function integration is execution-only because a final call-stack trace does not
 // contain enough source information to synthesize the original function bodies.

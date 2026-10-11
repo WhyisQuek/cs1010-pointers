@@ -22,7 +22,7 @@ export function highlightC(code) {
                 ? 'keyword'
                 : /^[A-Za-z_]\w*$/.test(text) && /^\s*\(/.test(code.slice(offset + text.length))
                   ? 'function'
-                  : /^[A-Z][A-Za-z_0-9]*$/.test(text)
+                  : /^[A-Z][A-Za-z_0-9]*$/.test(text) || text === 'size_t'
                     ? 'type'
                     : 'plain';
     text.split('\n').forEach((part, i) => {

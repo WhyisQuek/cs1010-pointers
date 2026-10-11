@@ -143,6 +143,27 @@ export const values = [
   ['adjacent rows have equal boundary addresses', 'int a[2][3];int result=(a[0]+3)==a[1];', 1],
   ['pointer difference has ptrdiff_t width', 'int a[3];int result=sizeof((a+2)-a);', 8],
   ['logical operands are sequenced', 'int i=0;int result=(i++ || ++i);', 1],
+  ['size_t is unsigned long', 'size_t n=0;unsigned long *p=&n;*p=5;int result=n;', 5],
+  ['size_t division is integer division', 'size_t n=7;int result=n/2+sizeof(n/2);', 11],
+  ['size_t holds sizeof', 'size_t n=sizeof(int[3]);int result=n+sizeof(size_t);', 20],
+  [
+    'size_t loop counter',
+    'int a[3]={1,2,3};int result=0;for(size_t i=0;i<3;i++){result+=a[i];}',
+    6,
+  ],
+  ['bool stores one byte', 'bool b=true;int result=sizeof(b)+b;', 2],
+  ['_Bool spelling', '_Bool b=1;int result=sizeof(_Bool)+b;', 2],
+  ['bool conversion compares with zero', 'bool b=256;bool c=0.5;bool d=-1;int result=b+c+d;', 3],
+  ['bool from pointer', 'int x;int *p=&x;int *q=NULL;bool b=p;bool c=q;int result=b*10+c;', 10],
+  ['bool promotes to int', 'bool b=true;int result=sizeof(b+b)+b+b;', 6],
+  ['bool increment saturates', 'bool b=true;b++;int result=b;', 1],
+  ['bool decrement toggles false to true', 'bool b=false;b--;int result=b;', 1],
+  ['false is a null pointer constant', 'int *p=false;int result=p==NULL;', 1],
+  [
+    'bool conditions and logical results',
+    'bool done=false;int result=0;while(!done){result++;done=result==3;}',
+    3,
+  ],
 ];
 
 export const programs = [
@@ -235,5 +256,20 @@ export const programs = [
     'function bodies are indeterminately sequenced',
     'int f(int *p){(*p)++;return 1;}int main(void){int i=0;int n=f(&i)+f(&i);int result=i;}',
     2,
+  ],
+  [
+    'bool and size_t parameters and returns',
+    'bool odd(size_t n){return n%2;}size_t count(bool *a,size_t n){size_t c=0;for(size_t i=0;i<n;i++){if(a[i])c++;}return c;}int main(void){bool a[4]={odd(1),odd(2),odd(3),true};int result=count(a,4);}',
+    3,
+  ],
+  [
+    'bool struct field layout',
+    'struct S{bool a;int x;bool b;};int main(void){struct S s={true,5,false};int result=sizeof(struct S)+s.a+s.b;}',
+    13,
+  ],
+  [
+    'bool returned from pointer test',
+    'bool present(int *p){return p;}int main(void){int x;int result=present(&x)*10+present(NULL);}',
+    10,
   ],
 ];

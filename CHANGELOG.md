@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — `bool` and `size_t`
+
+### Added
+
+- `bool` / `_Bool` (1 byte) with `true` and `false`. Conversions to `bool`, including from pointers, follow C's "compares unequal to zero" rule. The diagram shows `true`/`false`, and the inspector edits a `bool` with a true/false menu.
+- `size_t`, the LP64 typedef of `unsigned long`. It is interchangeable with `unsigned long` but keeps its spelling in the diagram, inspector and generated C.
+- Generate C adds `#include <stdbool.h>` / `<stddef.h>` when the diagram uses these types.
+
 ## Unreleased — sandbox layout
 
 See [docs/SANDBOX_UI_PLAN.md](docs/SANDBOX_UI_PLAN.md).

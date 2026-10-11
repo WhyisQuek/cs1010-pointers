@@ -16,6 +16,7 @@ import {
   formatAddress,
   pointerAccessibleLabel,
   pointerCaption,
+  scalarText,
 } from './addressPresentation.js';
 import { allocationMetrics, handleId, memoryMetricsStyle, pathFromHandle } from './layout.js';
 
@@ -144,7 +145,7 @@ function Value({ state, value, type }) {
   }
   return (
     <span className={`val ${value.kind}`}>
-      {value.kind === 'scalar' ? String(value.value) : 'uninitialized'}
+      {value.kind === 'scalar' ? scalarText(type, value.value) : 'uninitialized'}
     </span>
   );
 }

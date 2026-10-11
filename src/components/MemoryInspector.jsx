@@ -120,7 +120,8 @@ export default function MemoryInspector({
     let type = primitive(next.base);
     for (let i = 0; i < next.stars; i++) type = pointer(type);
     if (next.shape === 'array') type = array(type, clampArrayLength(next.length));
-    if (typeEquals(a.type, type)) return;
+    // size_t and unsigned long are one type; only the displayed spelling changes.
+    if (typeEquals(a.type, type) && typeToString(a.type) === typeToString(type)) return;
     onEdit((obj, s) => {
       const moved = changeAllocationType(s, obj.id, type);
       return moved ? `${moved} pointer target location(s) changed with the object layout.` : null;
@@ -260,6 +261,29 @@ export default function MemoryInspector({
                     ))}
                   </optgroup>
                 ))}
+              </select>
+            </label>
+          ) : selected.type.name === 'bool' ? (
+            <label>
+              Value of {label}
+              <select
+                aria-label={`Value of ${label}`}
+                value={selected.value.kind === 'scalar' ? String(selected.value.value) : ''}
+                onChange={e =>
+                  onEdit((obj, s) =>
+                    setRefValue(
+                      s,
+                      selected.ref,
+                      e.target.value === ''
+                        ? { kind: 'uninit' }
+                        : { kind: 'scalar', value: Number(e.target.value) },
+                    ),
+                  )
+                }
+              >
+                <option value="">Uninitialized</option>
+                <option value="1">true</option>
+                <option value="0">false</option>
               </select>
             </label>
           ) : (

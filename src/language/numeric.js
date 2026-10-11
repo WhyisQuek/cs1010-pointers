@@ -1,19 +1,29 @@
 /** Explicit LP64 arithmetic; never silently round a 64-bit integer in JavaScript. */
 import { INT, primitive } from './types.js';
 
-const bits = { char: 8, short: 16, int: 32, long: 64, 'unsigned int': 32, 'unsigned long': 64 };
-export const SIZE_T = primitive('unsigned long');
+const bits = {
+  bool: 1,
+  char: 8,
+  short: 16,
+  int: 32,
+  long: 64,
+  'unsigned int': 32,
+  'unsigned long': 64,
+};
+export const SIZE_T = primitive('size_t');
 export const isIntegerType = type => type?.kind === 'primitive' && Object.hasOwn(bits, type.name);
+export const isBoolType = type => type?.kind === 'primitive' && type.name === 'bool';
 export const isFloatingType = type =>
   type?.kind === 'primitive' && ['float', 'double'].includes(type.name);
-export const promote = type => (['char', 'short'].includes(type.name) ? INT : type);
+export const promote = type => (['bool', 'char', 'short'].includes(type.name) ? INT : type);
+const isUnsigned = type => type.name.startsWith('unsigned') || type.name === 'bool';
 
 export function arithmeticType(a, b) {
   if (a.name === 'double' || b.name === 'double') return primitive('double');
   if (a.name === 'float' || b.name === 'float') return primitive('float');
   a = promote(a);
   b = promote(b);
-  if (a.name === 'unsigned long' || b.name === 'unsigned long') return SIZE_T;
+  if (a.name === 'unsigned long' || b.name === 'unsigned long') return primitive('unsigned long');
   if (a.name === 'long' || b.name === 'long') return primitive('long');
   if (a.name === 'unsigned int' || b.name === 'unsigned int') return primitive('unsigned int');
   return INT;
@@ -21,7 +31,7 @@ export function arithmeticType(a, b) {
 
 function integerRange(type) {
   const width = BigInt(bits[type.name]),
-    unsigned = type.name.startsWith('unsigned');
+    unsigned = isUnsigned(type);
   return {
     unsigned,
     width,
@@ -50,6 +60,8 @@ export function convertNumber(value, type, { arithmetic = false, fromFloat = fal
     return n;
   }
   if (!isIntegerType(type)) throw new Error(`unsupported numeric type ${type.name}`);
+  // C 6.3.1.2: any scalar converts to bool as "compares unequal to 0", never by truncation.
+  if (isBoolType(type)) return Number(value) === 0 ? 0 : 1;
   if (
     typeof value !== 'bigint' &&
     (!Number.isFinite(value) || !Number.isSafeInteger(Math.trunc(value)))
@@ -90,7 +102,7 @@ export function numericOperation(op, left, right) {
   }
   if (
     !floating &&
-    !type.name.startsWith('unsigned') &&
+    !isUnsigned(type) &&
     (op === '/' || op === '%') &&
     a === -(1n << BigInt(bits[type.name] - 1)) &&
     b === -1n

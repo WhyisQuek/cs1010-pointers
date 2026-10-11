@@ -7,7 +7,14 @@
  */
 import { MAX_ARRAY_LENGTH, MAX_OBJECT_SCALARS } from './limits.js';
 
-export const primitive = name => ({ kind: 'primitive', name });
+/**
+ * `size_t` is a typedef of `unsigned long` under LP64: the same type for every rule,
+ * but it keeps its spelling for display. `_Bool` is the C11 spelling of `bool`.
+ */
+export const primitive = name =>
+  name === 'size_t'
+    ? { kind: 'primitive', name: 'unsigned long', alias: 'size_t' }
+    : { kind: 'primitive', name: name === '_Bool' ? 'bool' : name };
 export const pointer = to => ({ kind: 'pointer', to: structuredClone(to) });
 export const array = (of, length) => {
   if (!Number.isSafeInteger(length) || length < 1 || length > MAX_ARRAY_LENGTH) {
@@ -28,10 +35,12 @@ export const INT = primitive('int');
 export const PRIMITIVE_NAMES = Object.freeze([
   'int',
   'char',
+  'bool',
   'short',
   'long',
   'unsigned int',
   'unsigned long',
+  'size_t',
   'float',
   'double',
 ]);
@@ -91,6 +100,7 @@ export function resolveStructType(type, structTypes = {}) {
 export function layoutOf(type, structTypes = {}, visiting = new Set()) {
   if (type.kind === 'primitive') {
     switch (type.name) {
+      case 'bool':
       case 'char':
         return { size: 1, alignment: 1 };
       case 'short':
@@ -138,7 +148,7 @@ export function sizeOf(type, structTypes = {}) {
 
 export function typeToString(type) {
   if (!type) return '<unknown>';
-  if (type.kind === 'primitive') return type.name;
+  if (type.kind === 'primitive') return type.alias ?? type.name;
   if (type.kind === 'pointer') return `${typeToString(type.to)} *`;
   if (type.kind === 'array') return `${typeToString(type.of)} [${type.length}]`;
   if (type.kind === 'struct') return type.alias ?? `struct ${type.name ?? '<anonymous>'}`;
@@ -148,7 +158,7 @@ export function typeToString(type) {
 
 /** Print a supported C declaration, including arrays and named structs. */
 export function declarationToC(type, name) {
-  if (type.kind === 'primitive') return `${type.name} ${name}`;
+  if (type.kind === 'primitive') return `${type.alias ?? type.name} ${name}`;
   if (type.kind === 'void') return `void ${name}`;
   if (type.kind === 'pointer') {
     return declarationToC(type.to, type.to.kind === 'array' ? `(*${name})` : `*${name}`);
@@ -170,11 +180,25 @@ export function pointerDepth(type) {
 export function basePrimitive(type) {
   while (type?.kind === 'pointer' || type?.kind === 'array')
     type = type.kind === 'pointer' ? type.to : type.of;
-  return type?.kind === 'primitive' ? type.name : null;
+  return type?.kind === 'primitive' ? (type.alias ?? type.name) : null;
 }
 
 export function isSupportedPrimitiveName(name) {
-  return PRIMITIVE_NAMES.includes(name);
+  return PRIMITIVE_NAMES.includes(name) || name === '_Bool';
+}
+
+/** Whether a type mentions a primitive, directly or through pointers, arrays and structs. */
+export function containsPrimitive(type, test, structTypes = {}, visiting = new Set()) {
+  if (type?.kind === 'primitive') return test(type);
+  if (type?.kind === 'pointer') return containsPrimitive(type.to, test, structTypes, visiting);
+  if (type?.kind === 'array') return containsPrimitive(type.of, test, structTypes, visiting);
+  if (type?.kind === 'struct' && !visiting.has(type.name)) {
+    const next = new Set([...visiting, type.name]);
+    return (resolveStructType(type, structTypes).fields ?? []).some(f =>
+      containsPrimitive(f.type, test, structTypes, next),
+    );
+  }
+  return false;
 }
 
 export const C_KEYWORDS = new Set([
@@ -240,5 +264,10 @@ export const C_KEYWORDS = new Set([
 ]);
 
 export function validIdentifier(name) {
-  return typeof name === 'string' && /^[A-Za-z_]\w*$/.test(name) && !C_KEYWORDS.has(name);
+  return (
+    typeof name === 'string' &&
+    /^[A-Za-z_]\w*$/.test(name) &&
+    !C_KEYWORDS.has(name) &&
+    name !== 'size_t'
+  );
 }

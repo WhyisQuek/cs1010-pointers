@@ -86,7 +86,7 @@ int main(void) {
           source.slice(end);
         writeFileSync(
           path.join(scratch, `case${i}.c`),
-          `#include <stdio.h>\n#include <stdlib.h>\n#include <limits.h>\n_Static_assert(sizeof(long)==8 && sizeof(void*)==8 && CHAR_MIN==-128, "requires LP64 signed-char model");\n#define main case${i}\n#define f helper${i}\n${observed}\n`,
+          `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <limits.h>\n_Static_assert(sizeof(long)==8 && sizeof(void*)==8 && CHAR_MIN==-128, "requires LP64 signed-char model");\n#define main case${i}\n#define f helper${i}\n${observed}\n`,
         );
         return relative(`case${i}.c`);
       });

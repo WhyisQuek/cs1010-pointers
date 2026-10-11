@@ -1,5 +1,6 @@
 /** MemoryState -> one canonical PointerViz Mini-C program. */
 import {
+  containsPrimitive,
   declarationToC,
   isArray,
   isPointer,
@@ -201,7 +202,19 @@ export function generate(state) {
   const cleaned = trimBlankLines(ctx.lines);
   const needsStdlib =
     heapAllocations(state).length > 0 || scalarValues(state).some(v => v.kind === 'null');
-  const header = needsStdlib ? '#include <stdlib.h>\n\n' : '';
+  const uses = test =>
+    state.allocations.some(a => containsPrimitive(a.type, test, state.structTypes)) ||
+    Object.values(state.structTypes ?? {}).some(def =>
+      containsPrimitive(def, test, state.structTypes),
+    );
+  const includes = [
+    uses(t => t.name === 'bool') && 'stdbool.h',
+    !needsStdlib && uses(t => t.alias === 'size_t') && 'stddef.h',
+    needsStdlib && 'stdlib.h',
+  ].filter(Boolean);
+  const header = includes.length
+    ? `${includes.map(name => `#include <${name}>`).join('\n')}\n\n`
+    : '';
   const structs = definitions ? `${definitions}\n\n` : '';
   const body = cleaned.map(line => (line ? `    ${line}` : '')).join('\n');
   return `${header}${structs}int main(void) {\n${body}${body ? '\n' : ''}    return 0;\n}\n`;
@@ -333,6 +346,7 @@ function pointerExprForHeapTarget(heap, path, anchor, state) {
   return `&${lvalueForHeapSubobject(heap, path, anchor, state)}`;
 }
 function numberToC(value, type) {
+  if (type.name === 'bool') return value ? 'true' : 'false';
   let text = String(value);
   if (type.name === 'float' || type.name === 'double') {
     if (!/[.eE]/.test(text)) text += '.0';

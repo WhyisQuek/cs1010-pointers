@@ -15,6 +15,7 @@ import {
   SIZE_T,
   arithmeticType,
   convertNumber,
+  isBoolType,
   isIntegerType,
   numericOperation,
   promote,
@@ -90,6 +91,7 @@ export function checkProgram(program) {
   function compatible(to, from, e, env) {
     from = decay(from);
     if (isPrimitive(to) && isPrimitive(from)) return;
+    if (isBoolType(to) && (isPointer(from) || from.kind === 'null-pointer-constant')) return;
     if (isStruct(to) && typeEquals(to, from)) return;
     if (isPointer(to)) {
       if (typeEquals(to, from) || from.kind === 'null-pointer-constant') return;

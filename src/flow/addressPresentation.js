@@ -42,6 +42,14 @@ export function pointerCaption(description) {
   if (status === 'one-past') return `one-past · ${label}`;
   return label;
 }
+/** Bool objects store 0/1 but read as the <stdbool.h> constants. */
+export function scalarText(type, value) {
+  return type?.kind === 'primitive' && type.name === 'bool'
+    ? value
+      ? 'true'
+      : 'false'
+    : String(value);
+}
 export function valueSummary(state, type, value) {
   if (isArray(type) || isStruct(type))
     return `${typeToString(type)} · ${sizeOf(type, state.structTypes)} bytes`;
@@ -50,7 +58,7 @@ export function valueSummary(state, type, value) {
     return `${formatAddress(d.address)} · ${pointerCaption(d)}`;
   }
   return value?.kind === 'scalar'
-    ? String(value.value)
+    ? scalarText(type, value.value)
     : value?.kind === 'null'
       ? 'NULL'
       : 'uninitialized';

@@ -7,6 +7,8 @@ PointerViz supports a bounded C11 subset for pointer-learning exercises. It uses
 Supported:
 
 - `char`, `short`, `int`, `long`, `unsigned int`, `unsigned long`, `float`, `double`;
+- `bool` (also spelled `_Bool`) with the constants `true` and `false`;
+- `size_t`;
 - pointers of arbitrary depth;
 - fixed-size arrays;
 - named `struct` types;
@@ -25,6 +27,8 @@ typedef struct Node {
 Node a;
 Node *p;
 ```
+
+`bool`, `true`, `false` and `size_t` are predefined, as if `<stdbool.h>` and `<stddef.h>` were included (`#include` lines are accepted and ignored). `size_t` is the LP64 typedef of `unsigned long`: the two are the same type, so a `size_t *` may point to an `unsigned long`, but declarations keep the `size_t` spelling in the diagram and generated C.
 
 `typedef struct { int value; } Node;` and a forward `typedef struct Node Node;` are also supported. A self-reference inside the typedef definition uses `struct Node *next`, because the alias is declared after the body. Existing `struct Node a;` declarations remain valid C.
 
@@ -137,7 +141,9 @@ Supported:
 - character and integer literals;
 - `NULL` and zero as null pointer constants in pointer context.
 
-`NULL` is predefined as integer constant `0`. A variable whose value happens to be zero is not a null pointer constant. `sizeof` returns an unsigned-long `size_t`; pointer subtraction returns signed-long `ptrdiff_t`. Character constants have type `int`.
+`NULL` is predefined as integer constant `0`. A variable whose value happens to be zero is not a null pointer constant. `sizeof` returns an unsigned-long `size_t`; pointer subtraction returns signed-long `ptrdiff_t`. Character constants have type `int`. As in C11 `<stdbool.h>`, `true` and `false` are the integer constants `1` and `0`.
+
+Converting any number or pointer to `bool` yields `1` if it compares unequal to zero and `0` otherwise (`bool b = 256;` and `bool b = p;` are both `true`); it never truncates. `bool` operands promote to `int`, so `b++` leaves `true` and `b--` toggles. The diagram shows stored `bool` values as `true`/`false`.
 
 Integer promotions and usual arithmetic conversions apply to the supported types. Integer division truncates toward zero; floating division retains fractions. Signed arithmetic overflow and invalid floating-to-integer conversions are diagnosed. Unsigned arithmetic wraps to its type width. The implementation chooses signed 8-bit `char` and two's-complement signed narrowing. Float storage and operations round to binary32; double uses binary64. Exact integer intermediates beyond JavaScript's safe integer range are rejected, even if a native 64-bit C implementation could represent them.
 
@@ -174,6 +180,7 @@ Memory views use simulated byte addresses following these sizes and natural stru
 
 | Type | Size |
 |---|---:|
+| `bool` | 1 |
 | `char` | 1 |
 | `short` | 2 |
 | `int` | 4 |
