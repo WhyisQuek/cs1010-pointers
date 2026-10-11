@@ -192,6 +192,28 @@ button {
   max-height: 110px;
   overflow-y: auto;
 }
+.program-output {
+  border-top: 1px solid var(--line);
+  background: #0d1013;
+}
+.program-output-head {
+  padding: 4px 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.program-output pre {
+  margin: 0;
+  padding: 4px 12px 8px;
+  min-height: 2.5em;
+  max-height: min(140px, 20vh);
+  overflow-y: auto;
+  color: var(--text);
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .pane-message:empty {
   display: none;
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — `printf`
+
+### Added
+
+- `printf` with a string-literal format: `%d %i %u %x %X %o %c %s %f %F %e %E %g %G %p %%`, the `hh`/`h`/`l`/`z` length modifiers, flags, widths, precisions and `*`. Output matches glibc, and `%p` prints the diagram's simulated addresses.
+- Argument types are checked against the format before running, as with `-Wformat`. `%s` reads are bounds- and initialization-checked.
+- An **Output** pane under the code shows what the program has printed up to the current playback step.
+
 ## Unreleased — `bool` and `size_t`
 
 ### Added

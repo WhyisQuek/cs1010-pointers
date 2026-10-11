@@ -39,7 +39,8 @@ src/
 │   ├── limits.js               browser-safety limits
 │   ├── types.js                type constructors, LP64 layout, printing
 │   ├── numeric.js              LP64 integer/floating arithmetic
-│   ├── literals.js             character constants
+│   ├── literals.js             character and string constants
+│   ├── format.js               printf format parsing, type rules, formatting
 │   ├── highlight.js            display tokenizer for the editor
 │   ├── checker.js              pre-execution constraint checks
 │   ├── parser.js               Tree-sitter → Mini-C AST (entry point)
@@ -57,6 +58,7 @@ src/
 │   ├── interpreter.js          Mini-C execution (entry point)
 │   └── execution/
 │       ├── calls.js            calls, call frames, malloc/free
+│       ├── output.js           printf and program output
 │       ├── statements.js       statements, declarations, initializers
 │       ├── expressions.js      expression evaluation
 │       ├── lvalues.js          lvalues, loads, stores, conversions

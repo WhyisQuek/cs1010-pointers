@@ -1,4 +1,5 @@
 /** Expressions -> Mini-C AST. */
+import { decodeStringLiteral } from '../literals.js';
 import { INT, primitive } from '../types.js';
 import { parseAbstractDeclarator, parseBaseType } from './declarations.js';
 import { parseNumberLiteral } from './numberLiterals.js';
@@ -26,6 +27,21 @@ export function parseExpression(node, structTypes) {
       );
     case 'char_literal':
       return withLoc({ kind: 'CharLiteral', raw: node.text }, node);
+    case 'string_literal':
+    case 'concatenated_string': {
+      // Adjacent literals concatenate (C 5.1.1.2 phase 6); macros such as PRId64 are not expanded.
+      const parts = node.type === 'string_literal' ? [node] : semanticChildren(node);
+      if (parts.some(p => p.type !== 'string_literal'))
+        throw unsupported(node, 'only adjacent string literals can be concatenated');
+      try {
+        return withLoc(
+          { kind: 'StringLiteral', value: parts.flatMap(p => decodeStringLiteral(p.text)) },
+          node,
+        );
+      } catch (e) {
+        throw unsupported(node, e.message);
+      }
+    }
     case 'identifier':
       return withLoc({ kind: 'Identifier', name: node.text }, node);
     case 'null':

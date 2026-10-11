@@ -1,4 +1,4 @@
-/** Function invocation with explicit call frames, and the malloc/free built-ins. */
+/** Function invocation with explicit call frames, and the malloc/free/printf built-ins. */
 import { MAX_CALL_DEPTH, MAX_HEAP_ELEMENTS } from '../../language/limits.js';
 import { INT, isArray, isPointer, sizeOf, typeToString } from '../../language/types.js';
 import {
@@ -15,6 +15,7 @@ import {
 import { evalExpression } from './expressions.js';
 import { assignToRef, coerceRValue } from './lvalues.js';
 import { checkUnsequenced, isNullLike } from './operators.js';
+import { evalPrintf } from './output.js';
 import {
   declareBinding,
   makeScope,
@@ -135,6 +136,8 @@ export function evalCall(expr, ctx, env, frame, expectedType) {
     });
     return { type: expectedType, value: pointerValue(target) };
   }
+
+  if (expr.name === 'printf') return evalPrintf(expr, ctx, env, frame);
 
   if (expr.name === 'free') {
     if (expr.arguments.length !== 1) throw semanticError(expr, 'free expects exactly one argument');

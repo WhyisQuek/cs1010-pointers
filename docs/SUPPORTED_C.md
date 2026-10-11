@@ -147,6 +147,35 @@ Converting any number or pointer to `bool` yields `1` if it compares unequal to 
 
 Integer promotions and usual arithmetic conversions apply to the supported types. Integer division truncates toward zero; floating division retains fractions. Signed arithmetic overflow and invalid floating-to-integer conversions are diagnosed. Unsigned arithmetic wraps to its type width. The implementation chooses signed 8-bit `char` and two's-complement signed narrowing. Float storage and operations round to binary32; double uses binary64. Exact integer intermediates beyond JavaScript's safe integer range are rejected, even if a native 64-bit C implementation could represent them.
 
+## Output with `printf`
+
+`printf` is predefined (`#include <stdio.h>` is optional and ignored) and prints to the **Output** pane under the code. During playback the pane shows what the program has printed up to the selected step. It returns the number of characters written.
+
+```c
+int a[3] = {4, 5, 6};
+for (size_t i = 0; i < 3; i++)
+    printf("a[%zu] = %d at %p\n", i, a[i], &a[i]);
+```
+
+The format must be a string literal (adjacent literals concatenate). Supported conversions:
+
+| Conversion | Argument |
+|---|---|
+| `%d` `%i` | `int` (`%ld`: `long`, `%zd`: signed `size_t`) |
+| `%u` `%x` `%X` `%o` | `unsigned int` (`%lu` etc.: `unsigned long`, `%zu`: `size_t`) |
+| `%hhd` `%hd` and other `hh`/`h` forms | `int`, printed after narrowing to `char`/`short` |
+| `%c` | `int` |
+| `%f` `%F` `%e` `%E` `%g` `%G` (also `%lf`) | `double` |
+| `%s` | `char *` (or a char array) ending in `'\0'`, or a string literal |
+| `%p` | any object pointer |
+| `%%` | none |
+
+Flags `-`, `+`, space, `0` and `#`, field widths, precisions and `*` are supported. Arguments get the default promotions (`char`, `short` and `bool` become `int`; `float` becomes `double`). A signed argument may be printed with the matching unsigned conversion, and the reverse, only when its value fits both types.
+
+Formatting matches glibc. Doubles print their exact decimal value, with ties rounded to even (`%.0f` of `2.5` is `2`). `%p` prints the simulated address shown in the diagram, and `(nil)` for `NULL`.
+
+Diagnosed before running: a non-literal format, too few arguments, an argument type that does not match its conversion (like GCC's `-Wformat`), and unsupported conversions (`%n`, `%a`, `ll`/`j`/`t`/`L` lengths, wide `%lc`/`%ls`). Extra arguments are evaluated and ignored, as in C. At run time, `%s` is rejected if it would read past the array without finding `'\0'`, read an uninitialized char, or receive `NULL`. Output is limited to 10,000 characters. String literals are not supported anywhere else.
+
 ## Safety limits
 
 PointerViz executes in the browser, so the semantic layer enforces limits even when source is entered directly:
@@ -160,6 +189,7 @@ PointerViz executes in the browser, so the semantic layer enforces limits even w
 | Iterations per loop | 256 |
 | Visualized statements | 500 |
 | Total scalar subobjects per allocation | 4096 |
+| Program output characters | 10000 |
 
 A loop that exceeds 256 iterations is stopped with an error. This prevents accidental infinite loops from freezing the page.
 
@@ -168,8 +198,8 @@ A loop that exceeds 256 iterations is stopped with an error. This prevents accid
 - casts and general `void *` conversions;
 - `calloc`, `realloc`;
 - macros and real preprocessing;
-- arbitrary standard-library calls;
-- complete C string semantics;
+- standard-library calls other than `malloc`, `free` and `printf`;
+- string literals outside `printf` and other C string semantics;
 - VLAs;
 - `long long`, unsigned char/short, long double, wide/multicharacter constants and hexadecimal floating literals;
 - complete undefined-behavior analysis, implementation-defined behavior across other ABIs, floating environments, infinities and NaNs.

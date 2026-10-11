@@ -6,6 +6,7 @@ export const MAX_CALL_DEPTH = 32;
 export const MAX_LOOP_ITERATIONS = 256;
 export const MAX_TRACE_STEPS = 500;
 export const MAX_OBJECT_SCALARS = 4096;
+export const MAX_OUTPUT_CHARS = 10000;
 
 export function clampArrayLength(value) {
   const n = Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 1;

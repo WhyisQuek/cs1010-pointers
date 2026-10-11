@@ -55,6 +55,7 @@ export function inferExpressionType(expr, ctx, env, frame) {
   if (expr.kind === 'Call') {
     if (expr.name === 'free') return { kind: 'void' };
     if (expr.name === 'malloc') return pointer({ kind: 'void' });
+    if (expr.name === 'printf') return INT;
     const fn = ctx.functions.get(expr.name);
     if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`);
     return fn.returnType;

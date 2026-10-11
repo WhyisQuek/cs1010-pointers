@@ -122,6 +122,12 @@ export default function Sandbox() {
             </div>
           </div>
           <CodePanel code={code} onCode={onCode} activeLine={nextLine} />
+          {snapshots?.at(-1)?.output && (
+            <section className="program-output" aria-label="Program output">
+              <div className="program-output-head">Output</div>
+              <pre>{shownSnapshot?.output ?? ''}</pre>
+            </section>
+          )}
           <div
             className={`pane-message${notice ? ` ${notice.kind}` : ''}`}
             role="status"

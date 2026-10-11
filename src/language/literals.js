@@ -32,3 +32,16 @@ export function decodeCharLiteral(raw) {
     throw new Error(`unsupported character escape '${raw}'`);
   return n >= 128 ? n - 256 : n;
 }
+
+/** A narrow string literal's characters as char values, without the terminating '\0'. */
+export function decodeStringLiteral(raw) {
+  if (!raw.startsWith('"') || !raw.endsWith('"') || raw.length < 2)
+    throw new Error('only narrow "..." string literals are supported');
+  const body = raw.slice(1, -1);
+  const codes = [];
+  for (const [part] of body.matchAll(/\\(?:x[0-9a-fA-F]+|[0-7]{1,3}|.)|[^\\]/gs)) {
+    if (part === '\n') throw new Error('string literal contains a newline');
+    codes.push(decodeCharLiteral(`'${part}'`));
+  }
+  return codes;
+}

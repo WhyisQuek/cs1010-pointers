@@ -63,6 +63,7 @@ export function snapshot(ctx, stmt, frame) {
     frameId: frame.id,
     statement: stmt.kind,
     events: ctx.trace.slice(ctx.snapshotTraceIndex),
+    output: ctx.output,
     state: cloneState(ctx.state),
   });
   ctx.snapshotTraceIndex = ctx.trace.length;

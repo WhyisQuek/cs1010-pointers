@@ -8,6 +8,7 @@
  *
  * The implementation lives in ./execution/, one module per concern:
  *   calls.js             function calls, call frames, malloc/free
+ *   output.js            printf and the program's standard output
  *   statements.js        statements, declarations and initializers
  *   expressions.js       expression evaluation
  *   lvalues.js           object designation, loads, stores and conversions
@@ -37,10 +38,17 @@ export function executeProgram(program) {
     steps: 0,
     snapshotTraceIndex: 0,
     accesses: [],
+    output: '',
   };
   if (!ctx.functions.has('main')) throw new Error('no main() function found');
   callFunction(ctx, ctx.functions.get('main'), [], null, true);
-  return { state, snapshots: ctx.snapshots, trace: ctx.trace, ast: normalized };
+  return {
+    state,
+    snapshots: ctx.snapshots,
+    trace: ctx.trace,
+    output: ctx.output,
+    ast: normalized,
+  };
 }
 
 function normalizeProgram(program) {

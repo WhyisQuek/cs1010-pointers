@@ -21,6 +21,7 @@ import {
   promote,
 } from './numeric.js';
 import { decodeCharLiteral } from './literals.js';
+import { STRING_LITERAL, argumentTypeError, formatArguments, parseFormat } from './format.js';
 import { MAX_ARRAY_LENGTH } from './limits.js';
 
 export function checkProgram(program) {
@@ -28,6 +29,8 @@ export function checkProgram(program) {
   const functions = new Map(program.functions.map(f => [f.name, f]));
   const visibleFunctions = new Set();
   if (functions.size !== program.functions.length) throw new Error('duplicate function definition');
+  if (functions.has('printf'))
+    throw new Error("cannot define 'printf': it is the standard library function");
   const decay = t => (isArray(t) ? pointer(t.of) : t);
   const scalar = t => isPrimitive(t) || isPointer(t) || t.kind === 'null-pointer-constant';
   const fail = (e, message) => {
@@ -223,9 +226,13 @@ export function checkProgram(program) {
         sizeOf(type, structs);
         return SIZE_T;
       }
+      case 'StringLiteral':
+        fail(e, 'string literals are only supported as printf arguments');
+        break;
       case 'Call': {
         for (let s = env; s; s = s.parent)
           if (s.names.has(e.name)) fail(e, `called object '${e.name}' is not a function`);
+        if (e.name === 'printf') return printf(e, env);
         const args = e.arguments.map(a => expression(a, env));
         if (e.name === 'malloc' || e.name === 'free') {
           if (args.length !== 1) fail(e, `${e.name} expects exactly one argument`);
@@ -253,6 +260,25 @@ export function checkProgram(program) {
       default:
         fail(e, `unsupported expression ${e.kind}`);
     }
+  }
+  function printf(e, env) {
+    const [format, ...rest] = e.arguments;
+    if (format?.kind !== 'StringLiteral')
+      fail(e, 'printf requires a string literal as its format argument');
+    let needed;
+    try {
+      needed = formatArguments(parseFormat(format.value));
+    } catch (error) {
+      fail(format, `printf format: ${error.message}`);
+    }
+    const types = rest.map(a => (a.kind === 'StringLiteral' ? STRING_LITERAL : expression(a, env)));
+    if (types.length < needed.length)
+      fail(e, `printf format needs ${needed.length} argument(s), got ${types.length}`);
+    needed.forEach((n, i) => {
+      const message = argumentTypeError(n, decay(types[i]));
+      if (message) fail(rest[i], message);
+    });
+    return INT;
   }
   function initializer(type, e, env) {
     if (e.kind !== 'InitializerList') {
