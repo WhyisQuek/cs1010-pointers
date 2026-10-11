@@ -6,6 +6,7 @@ import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../machine/memory.js';
+import { loadDraft, saveDraft } from '../data/drafts.js';
 
 const STARTER = `int main(void) {
     int a = 10;
@@ -15,12 +16,19 @@ const STARTER = `int main(void) {
 const NOTICE_MS = 5000;
 
 export default function Sandbox() {
-  const [code, setCode] = useState(STARTER);
-  const [state, setState] = useState(makeState);
+  const [draft] = useState(loadDraft);
+  const [code, setCode] = useState(draft?.code ?? STARTER);
+  const [state, setState] = useState(() => draft?.diagram ?? makeState());
   const [snapshots, setSnapshots] = useState(null);
   const [step, setStep] = useState(0);
   // One current message about the code: errors stay until the next edit or run.
-  const [notice, setNotice] = useState(null);
+  const [notice, setNotice] = useState(() =>
+    draft && (draft.code !== STARTER || draft.diagram?.allocations.length)
+      ? { kind: 'ok', text: 'Restored your code and diagram from your last visit.' }
+      : null,
+  );
+  // Playback is not saved (Run reproduces it), so only an editable diagram goes in the draft.
+  useEffect(() => saveDraft(code, snapshots ? null : state), [code, state, snapshots]);
   const [canvasSession, setCanvasSession] = useState(0);
   const [savedPlayback, setSavedPlayback] = useState(null);
   const reportError = e =>

@@ -129,7 +129,8 @@ export function layoutHistory(history, action) {
 /**
  * The order of Ctrl+Z steps across both kinds of change. Each entry is either 'layout'
  * (replayed by layoutHistory, which holds the layouts) or a diagram edit
- * { before, after } holding the MemoryState on each side of the edit.
+ * { before, after, merge? } holding the MemoryState on each side of the edit; edits
+ * sharing a `merge` key back to back combine into one step.
  */
 export const emptyTimeline = () => ({ past: [], future: [] });
 export function editTimeline(timeline, action) {
@@ -137,11 +138,17 @@ export function editTimeline(timeline, action) {
   if (action.type === 'record') {
     // Edits computed from the same state in one event (deleting a node also deletes its
     // edges) are one step; the last one is the state that was applied.
-    const top = past.at(-1);
-    const sameEvent =
-      action.entry !== 'layout' && top && top !== 'layout' && top.before === action.entry.before;
+    const top = past.at(-1),
+      entry = action.entry;
+    const edits = entry !== 'layout' && top && top !== 'layout';
+    const sameEvent = edits && top.before === entry.before;
+    // Consecutive edits of one field (typing 1, 2, 3 into a value) are one step back to before them.
+    const sameField =
+      edits && entry.merge && top.merge === entry.merge && top.after === entry.before;
+    if (sameField)
+      return { past: [...past.slice(0, -1), { ...entry, before: top.before }], future: [] };
     const kept = sameEvent ? past.slice(0, -1) : past;
-    return { past: [...kept.slice(1 - HISTORY_LIMIT), action.entry], future: [] };
+    return { past: [...kept.slice(1 - HISTORY_LIMIT), entry], future: [] };
   }
   if (action.type === 'undo' && past.length)
     return { past: past.slice(0, -1), future: [past.at(-1), ...future] };

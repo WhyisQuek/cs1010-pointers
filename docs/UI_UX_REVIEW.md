@@ -1,6 +1,6 @@
 # PointerViz UI/UX review
 
-> **Superseded in part (11 October 2026):** layout, toolbar and inspector recommendations were reworked and implemented in [SANDBOX_UI_PLAN.md](SANDBOX_UI_PLAN.md). The Generate-from-snapshot fix (section 6) is done. Semantic undo (one timeline with layout, including a recoverable Clear) is done, and the sandbox keeps its draft across sections within a session; drafts are not yet saved across reloads. The other non-layout findings remain open.
+> **Superseded in part (11 October 2026):** layout, toolbar and inspector recommendations were reworked and implemented in [SANDBOX_UI_PLAN.md](SANDBOX_UI_PLAN.md). The Generate-from-snapshot fix (section 6) is done. Semantic undo (one timeline with layout, including a recoverable Clear) is done, and the sandbox keeps its draft across sections and reloads (code and edited diagram; not playback or layout). The other non-layout findings remain open.
 
 Reviewed 25 September 2026 against the current working tree, including the new memory-address interface.
 

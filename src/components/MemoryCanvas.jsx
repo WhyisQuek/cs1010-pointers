@@ -187,13 +187,14 @@ export default function MemoryCanvas({
       setStatus(null);
     }
   };
+  // `merge` names the field being edited; back-to-back edits of it are one undo step.
   const mutate = useCallback(
-    fn => {
+    (fn, merge = null) => {
       if (!editable) return false;
       try {
         const next = structuredClone(state),
           message = fn(next);
-        record({ before: state, after: next });
+        record({ before: state, after: next, merge });
         emit(next);
         if (typeof message === 'string') notify({ kind: 'ok', text: message });
         else setStatus(null);
@@ -613,7 +614,7 @@ export default function MemoryCanvas({
             state={state}
             path={inspection?.allocationId === selected.id ? inspection.path : []}
             editable={!!selectedNode?.data.editable}
-            onEdit={fn => mutate(s => fn(getAllocation(s, selected.id), s))}
+            onEdit={(fn, merge) => mutate(s => fn(getAllocation(s, selected.id), s), merge)}
             onDelete={() => {
               const label = allocationDisplayName(state, selected);
               const deleted = mutate(s => {

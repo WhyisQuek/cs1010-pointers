@@ -1,6 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBraceOutdent, newlineWithIndent } from '../src/components/autoIndent.js';
+import {
+  closeBraceOutdent,
+  indentLines,
+  newlineWithIndent,
+  outdentLines,
+} from '../src/components/autoIndent.js';
+
+/** Apply an edit to text whose selection is marked with [ and ]; show the result the same way. */
+const onSelection = (edit, marked) => {
+  const start = marked.indexOf('['),
+    end = marked.indexOf(']') - 1;
+  const result = edit(marked.replace('[', '').replace(']', ''), start, end);
+  if (!result) return null;
+  const { text, selectionStart: s, selectionEnd: e } = result;
+  return `${text.slice(0, s)}[${text.slice(s, e)}]${text.slice(e)}`;
+};
+
+test('Tab indents every selected line and keeps them selected', () => {
+  assert.equal(onSelection(indentLines, 'a;\nb[c;\nd]e;\nf;'), 'a;\n    b[c;\n    d]e;\nf;');
+  // From column 0, the new indentation is inside the selection.
+  assert.equal(onSelection(indentLines, '[x;\ny;]'), '[    x;\n    y;]');
+  // A selection ending at column 0 leaves that line alone; blank lines stay blank.
+  assert.equal(onSelection(indentLines, '[x;\n\ny;\n]z;'), '[    x;\n\n    y;\n]z;');
+});
+
+test('Tab within one line is left to the single-line insert', () => {
+  assert.equal(onSelection(indentLines, 'int [abc] = 1;'), null);
+});
+
+test('Shift+Tab outdents every selected line by up to one level', () => {
+  assert.equal(onSelection(outdentLines, '        a[;\n  b;\nc]d;'), '    a[;\nb;\nc]d;');
+  // A selection start inside removed spaces moves to the line start, not the previous line.
+  assert.equal(onSelection(outdentLines, '  [  x;\n    y;]'), '[x;\ny;]');
+  assert.equal(onSelection(outdentLines, '[x;\ny;]'), null);
+});
 
 const enterAt = (text, marker = '|') => {
   const pos = text.indexOf(marker);

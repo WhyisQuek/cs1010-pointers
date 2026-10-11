@@ -28,6 +28,7 @@ src/
 │   ├── LevelEditor.jsx         instructor level authoring
 │   └── ErrorBoundary.jsx       per-page render-failure fallback
 ├── data/
+│   ├── drafts.js               sandbox draft (code, edited diagram) saved across reloads
 │   └── levels.js               seed levels, custom-level validation, storage
 ├── flow/
 │   ├── layout.js               MemoryState → nodes/edges (pure)

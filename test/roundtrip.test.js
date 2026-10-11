@@ -29,6 +29,10 @@ const programs = [
   'int main(void) { bool b = true; bool c = false; bool *p = &b; size_t n = sizeof(int); size_t *q = &n; }',
   // Freed in child-first order; generated frees must not read a freed parent.
   'struct N { int v; struct N *next; }; int main(void) { struct N *head = malloc(sizeof(struct N)); head->v = 1; head->next = malloc(sizeof(struct N)); head->next->v = 2; head->next->next = NULL; free(head->next); free(head); return 0; }',
+  // An interior pointer declared before the base pointer that allocates its block.
+  'struct S { int x; int y; }; int main(void) { int *q; struct S *s = malloc(sizeof(struct S)); s->x = 1; s->y = 2; q = &s->y; return 0; }',
+  // The same inside a heap block: the interior field comes before the base field.
+  'struct P { int v; }; struct H { int *in; struct P *base; }; int main(void) { struct H *h = malloc(sizeof(struct H)); h->base = malloc(sizeof(struct P)); h->base->v = 3; h->in = &h->base->v; return 0; }',
   'struct S { bool flag; size_t count; }; int main(void) { struct S s = {true, 3}; size_t *p = malloc(sizeof(size_t)); *p = 9; }',
 ];
 
@@ -47,6 +51,15 @@ for (const source of programs) {
     assert.ok(result.equal, `${result.diffs.join('; ')}\n${generated}`);
   });
 }
+
+test('a heap block reachable only through an interior pointer cannot be generated', () => {
+  const state = interpret(`struct S { int x; int y; };
+int main(void) { struct S *s = malloc(sizeof(struct S)); int *q = &s->y; s = NULL; return 0; }`).state;
+  assert.throws(
+    () => generate(state),
+    /q has type int \* but heap 1 needs a struct S \* pointer to allocate it/,
+  );
+});
 
 test('generated C keeps bool and size_t spellings and their headers', () => {
   const state = interpret(

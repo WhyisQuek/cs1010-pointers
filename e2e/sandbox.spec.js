@@ -59,6 +59,55 @@ test('a freed block can be moved, marked not freed, deleted, and undone with but
   await expect(banner).toHaveText('freed');
 });
 
+test('Tab and Shift+Tab indent and outdent every selected line', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill('a;\nb;\nc;');
+  await code(page).evaluate(el => el.setSelectionRange(0, 4));
+  await code(page).press('Tab');
+  await expect(code(page)).toHaveValue('    a;\n    b;\nc;');
+  await code(page).press('Shift+Tab');
+  await expect(code(page)).toHaveValue('a;\nb;\nc;');
+});
+
+test('typing a value is one undo step', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  await page.getByRole('spinbutton', { name: 'Value of a' }).pressSequentially('123');
+  await expect(page.locator('.mem-cell .val')).toHaveText('123');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.locator('.mem-cell .val')).toHaveText('uninitialized');
+  await expect(page.locator('.mem-cell')).toHaveCount(1);
+});
+
+test('the sandbox draft survives a reload', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill('int main(void) {\n    int saved = 1;\n}');
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  await page.getByRole('spinbutton', { name: 'Value of a' }).fill('42');
+  await expect(page.locator('.mem-cell .val')).toHaveText('42');
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
+  await expect(code(page)).toHaveValue(/int saved = 1;/);
+  await expect(page.locator('.mem-cell .val')).toHaveText('42');
+  await expect(
+    page.getByText('Restored your code and diagram from your last visit.'),
+  ).toBeVisible();
+});
+
+test('a corrupt stored draft is ignored', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() =>
+    localStorage.setItem(
+      'pointerviz.sandbox.v1',
+      JSON.stringify({ code: 'int main(void) {}', diagram: { allocations: [{}], frames: [] } }),
+    ),
+  );
+  await page.reload();
+  await expect(code(page)).toHaveValue('int main(void) {}');
+  await expect(page.locator('.mem-cell')).toHaveCount(0);
+});
+
 test('the sandbox keeps its work across tab switches', async ({ page }) => {
   await openApp(page);
   await code(page).fill('int main(void) {\n    int kept = 5;\n}');

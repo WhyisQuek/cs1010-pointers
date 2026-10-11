@@ -1,14 +1,21 @@
 /** Syntax-highlighted C editor shared by the sandbox, challenges and level editor. */
 import { useEffect, useMemo, useRef } from 'react';
 import { highlightC } from '../language/highlight.js';
-import { INDENT, closeBraceOutdent, newlineWithIndent } from './autoIndent.js';
+import {
+  INDENT,
+  closeBraceOutdent,
+  indentLines,
+  newlineWithIndent,
+  outdentLines,
+} from './autoIndent.js';
 
 // Keep in sync with .code-highlight padding and line-height (13px × 1.6) in styles.css.
 const PADDING_TOP = 12;
 const LINE_HEIGHT = 20.8;
 
 /**
- * Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus.
+ * Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus; with a
+ * selection across lines, both act on every selected line and keep the lines selected.
  * Enter carries indentation forward (one level deeper after `{`), and `}` on a blank line outdents.
  */
 export function CodePanel({ code, onCode, readOnly, activeLine = null, activeError = false }) {
@@ -34,7 +41,8 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null, activeErr
       e.preventDefault();
       onCode(edit.text);
       requestAnimationFrame(() => {
-        el.selectionStart = el.selectionEnd = edit.cursor;
+        el.selectionStart = edit.selectionStart ?? edit.cursor;
+        el.selectionEnd = edit.selectionEnd ?? edit.cursor;
       });
     };
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -48,14 +56,12 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null, activeErr
     if (e.key !== 'Tab') return;
     e.preventDefault();
     if (e.shiftKey) {
-      const lineStart = code.lastIndexOf('\n', start - 1) + 1;
-      const remove = code.slice(lineStart, lineStart + INDENT.length).match(/^ +/)?.[0].length ?? 0;
-      if (!remove) return;
-      onCode(code.slice(0, lineStart) + code.slice(lineStart + remove));
-      requestAnimationFrame(() => {
-        el.selectionStart = Math.max(lineStart, start - remove);
-        el.selectionEnd = Math.max(lineStart, end - remove);
-      });
+      apply(outdentLines(code, start, end));
+      return;
+    }
+    const block = indentLines(code, start, end);
+    if (block) {
+      apply(block);
       return;
     }
     onCode(code.slice(0, start) + INDENT + code.slice(end));

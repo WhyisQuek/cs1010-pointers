@@ -383,6 +383,20 @@ test('one undo timeline orders layout steps and diagram edits', () => {
   t = record(t, { before: s1, after: s2 });
   assert.equal(t.past.length, 3);
   assert.equal(t.past.at(-1).after, s2);
+  // Back-to-back edits of one field are one step back to the state before the first.
+  const [k0, k1, k2, k3] = [{}, {}, {}, {}];
+  let typed = record(emptyTimeline(), { before: k0, after: k1, merge: 'value:a' });
+  typed = record(typed, { before: k1, after: k2, merge: 'value:a' });
+  assert.equal(typed.past.length, 1);
+  assert.equal(typed.past[0].before, k0);
+  assert.equal(typed.past[0].after, k2);
+  // Another field, or an unrelated step in between, starts a new step.
+  typed = record(typed, { before: k2, after: k3, merge: 'value:b' });
+  assert.equal(typed.past.length, 2);
+  typed = record(typed, 'layout');
+  typed = record(typed, { before: k3, after: {}, merge: 'value:b' });
+  assert.equal(typed.past.length, 4);
+
   // A diagram replaced from outside keeps layout steps only.
   t = editTimeline(t, { type: 'forgetEdits' });
   assert.deepEqual(t.past, ['layout']);

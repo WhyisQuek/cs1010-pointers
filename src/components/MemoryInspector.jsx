@@ -298,17 +298,20 @@ export default function MemoryInspector({
                   value={selected.value.kind === 'scalar' ? selected.value.value : ''}
                   placeholder="uninitialized"
                   onChange={e =>
-                    onEdit((obj, s) =>
-                      setRefValue(
-                        s,
-                        selected.ref,
-                        e.target.value === ''
-                          ? { kind: 'uninit' }
-                          : {
-                              kind: 'scalar',
-                              value: scalarFromInput(e.target.value, selected.type),
-                            },
-                      ),
+                    onEdit(
+                      (obj, s) =>
+                        setRefValue(
+                          s,
+                          selected.ref,
+                          e.target.value === ''
+                            ? { kind: 'uninit' }
+                            : {
+                                kind: 'scalar',
+                                value: scalarFromInput(e.target.value, selected.type),
+                              },
+                        ),
+                      // Typing a number is one undo step, not one per keystroke.
+                      `value:${a.id}:${JSON.stringify(selected.ref.path)}`,
                     )
                   }
                 />

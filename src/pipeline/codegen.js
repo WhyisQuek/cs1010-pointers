@@ -171,12 +171,15 @@ export function generate(state) {
     anchorOwner: new Map(),
     heapInitialized: new Set(),
     initializing: new Set(),
+    // Interior pointers into heap blocks that no base pointer has allocated yet.
+    deferred: [],
   };
   const stack = stackAllocations(state);
   for (const a of stack) ctx.lines.push(`${declarationToC(a.type, a.name)};`);
   if (stack.length) ctx.lines.push('');
   for (const a of stack) emitNonPointerStorage(a, ctx);
   for (const a of stack) emitPointerStorage(a, ctx);
+  emitDeferredPointers(ctx);
 
   for (const heap of heapAllocations(state)) {
     if (ctx.heapAnchor.has(heap.id)) continue;
@@ -262,11 +265,32 @@ function emitPointerStorage(a, ctx) {
   }
 }
 
+/**
+ * Only a pointer of the block's base type can receive malloc's result, so an interior
+ * pointer (int *q = &s->y) waits until a base pointer anywhere in the diagram has
+ * allocated its block, whatever order the variables were declared in.
+ */
+function emitDeferredPointers(ctx) {
+  while (ctx.deferred.length) {
+    const pending = ctx.deferred;
+    ctx.deferred = [];
+    const emitted = pending.map(p => emitPointerAssignment(p.lhs, p.type, p.value, ctx, p.owner));
+    if (!emitted.some(Boolean)) {
+      const { lhs, type, value } = pending[0];
+      const heap = getAllocation(ctx.state, value.target.allocationId);
+      throw new ValidationError([
+        `${lhs} has type ${typeToString(type)} but ${allocationDisplayName(ctx.state, heap)} needs a ${typeToString(heapBasePointerType(heap))} pointer to allocate it`,
+      ]);
+    }
+  }
+}
+
+/** Returns false when the assignment was deferred (see emitDeferredPointers). */
 function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
-  if (value.kind === 'uninit') return;
+  if (value.kind === 'uninit') return true;
   if (value.kind === 'null') {
     ctx.lines.push(`${lhs} = NULL;`);
-    return;
+    return true;
   }
   const target = getAllocation(ctx.state, value.target.allocationId);
   if (target.storage.kind === 'stack') {
@@ -275,9 +299,13 @@ function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
     ctx.lines.push(
       `${lhs} = &${lvalueForStackSubobject(target, singletonPast ? path.slice(0, -1) : path)}${singletonPast ? ' + 1' : ''};`,
     );
-    return;
+    return true;
   }
-  ensureHeapAllocated(target, lhs, pointerType, value.target.path, ctx, owner);
+  if (!ctx.heapAnchor.has(target.id) && !typeEquals(pointerType, heapBasePointerType(target))) {
+    ctx.deferred.push({ lhs, type: pointerType, value, owner });
+    return false;
+  }
+  ensureHeapAllocated(target, lhs, value.target.path, ctx, owner);
   const rhs = pointerExprForHeapTarget(
     target,
     value.target.path,
@@ -286,16 +314,13 @@ function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
   );
   if (rhs !== lhs) ctx.lines.push(`${lhs} = ${rhs};`);
   initializeHeap(target, ctx);
+  return true;
 }
 
-function ensureHeapAllocated(heap, lhs, pointerType, targetPath, ctx, owner) {
+/** Allocate through `lhs`, which emitPointerAssignment has checked has the base pointer type. */
+function ensureHeapAllocated(heap, lhs, targetPath, ctx, owner) {
   if (ctx.heapAnchor.has(heap.id)) return;
   ctx.anchorOwner.set(heap.id, owner);
-  const expected = heapBasePointerType(heap);
-  if (!typeEquals(pointerType, expected))
-    throw new ValidationError([
-      `${lhs} has type ${typeToString(pointerType)} but ${allocationDisplayName(ctx.state, heap)} needs ${typeToString(expected)}`,
-    ]);
   ctx.lines.push(`${lhs} = ${mallocExpr(heap)};`);
   if (targetPath.length === 1 && targetPath[0] === '$onePast') {
     ctx.lines.push(`${lhs} = ${lhs} + 1;`);
