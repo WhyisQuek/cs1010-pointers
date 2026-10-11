@@ -8,7 +8,7 @@ import {
   SIZE_T,
 } from '../../language/numeric.js';
 import { INT, isArray, isPointer, pointer, sizeOf } from '../../language/types.js';
-import { decayRef, getAllocation, pointerValue, ref, sameRef } from '../memory.js';
+import { pointerValue, sameRef } from '../memory.js';
 import { evalCall } from './calls.js';
 import {
   assignToRef,
@@ -51,19 +51,10 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
       return { type: INT, value: { kind: 'scalar', value: decodeCharLiteral(expr.raw) } };
     case 'NullLiteral':
       return intResult(0);
-    case 'Identifier': {
+    case 'Identifier':
       if (expr.name === 'NULL') return intResult(0);
-      const lv = evalLValue(expr, ctx, env, frame);
-      if (isArray(lv.type)) {
-        const allocation = getAllocation(ctx.state, lv.ref.allocationId);
-        // Array subobjects decay to their first element rather than always the allocation root.
-        const target = lv.ref.path.length
-          ? ref(lv.ref.allocationId, [...lv.ref.path, 0])
-          : decayRef(allocation);
-        return { type: pointer(lv.type.of), value: pointerValue(target) };
-      }
-      return loadLValue(lv, ctx, expr);
-    }
+      // loadLValue decays an array to a pointer to its first element.
+      return loadLValue(evalLValue(expr, ctx, env, frame), ctx, expr);
     case 'AddressOf': {
       // C 6.5.3.2: &*E cancels the dereference; &a[n] permits a one-past address.
       if (expr.expression.kind === 'Dereference') {

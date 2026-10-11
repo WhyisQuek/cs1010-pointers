@@ -30,6 +30,8 @@ export function checkProgram(program) {
   const functions = new Map(program.functions.map(f => [f.name, f]));
   const visibleFunctions = new Set();
   if (functions.size !== program.functions.length) throw new Error('duplicate function definition');
+  if (!functions.has('main'))
+    throw new Error('no main() function found — wrap your entry code in int main() { ... }');
   // C11 7.1.3 reserves these; a definition would also be silently bypassed by the built-ins.
   for (const name of LIBRARY_NAMES)
     if (name !== 'NULL' && functions.has(name))

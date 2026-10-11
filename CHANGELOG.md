@@ -2,6 +2,11 @@
 
 ## Unreleased — fixes
 
+### Internal
+
+- `setRefValue` writes through the location `resolveRef` already found instead of walking the path a second time.
+- Duplicate-function and missing-`main()` checks moved from the parser to the checker (the parser now only handles syntax), and duplicated runtime checks and unreachable branches were removed from the interpreter. No behaviour change.
+
 ### Changed
 
 - A runtime error (NULL dereference, use after free, out-of-bounds access, step or loop limit) no longer discards the run. Playback opens at the step where execution stopped, with the failing line in red and "Stopped by an error" in the code header; earlier steps remain available.

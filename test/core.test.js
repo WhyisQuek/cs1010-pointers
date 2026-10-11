@@ -78,6 +78,17 @@ test('library and typedef names are rejected as diagram variable names', () => {
   assert.throws(() => validate(u), /needs a name/);
 });
 
+test('a program without main() is rejected without the parser', () => {
+  const program = {
+    kind: 'Program',
+    structs: [],
+    functions: [
+      { kind: 'FunctionDefinition', name: 'f', returnType: INT, params: [], statements: [] },
+    ],
+  };
+  assert.throws(() => executeProgram(program), /no main\(\) function found/);
+});
+
 test('stack array subobject pointers generate address-of element', () => {
   const s = fresh();
   const arr = stack(s, 'arr', array(INT, 3), {

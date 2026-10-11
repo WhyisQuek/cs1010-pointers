@@ -40,7 +40,6 @@ export function executeProgram(program) {
     accesses: [],
     output: '',
   };
-  if (!ctx.functions.has('main')) throw new Error('no main() function found');
   try {
     callFunction(ctx, ctx.functions.get('main'), [], null, true);
   } catch (error) {

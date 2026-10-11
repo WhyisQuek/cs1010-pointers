@@ -81,7 +81,7 @@ export function parseMiniC(source) {
       ) {
         const type = node.childForFieldName('type');
         const declarators = node.namedChildren.filter(isDeclaratorLike);
-        // Prototypes are checked against definitions below, not executed.
+        // Only a standalone struct declaration may sit beside function definitions.
         if (
           node.type !== 'declaration' ||
           declarators.length ||
@@ -91,11 +91,7 @@ export function parseMiniC(source) {
         }
       }
     }
-    if (new Set(functions.map(f => f.name)).size !== functions.length)
-      throw new Error('duplicate function definition');
-    if (!functions.some(f => f.name === 'main')) {
-      throw new Error('no main() function found — wrap your entry code in int main() { ... }');
-    }
+    // Duplicate functions and a missing main() are semantic rules, checked by the checker.
     return {
       kind: 'Program',
       structs: Object.values(structTypes),

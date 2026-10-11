@@ -110,6 +110,19 @@ const errors = [
 for (const [name, body, pattern] of errors)
   test(name, () => assert.throws(() => run(body), pattern));
 
+test('program-level rules are reported by the checker, with or without the parser', () => {
+  assert.throws(() => interpret('int f(void){return 1;}'), /no main\(\) function found — wrap/);
+  assert.throws(
+    () => interpret('int f(void){return 1;} int f(void){return 2;} int main(void){}'),
+    /duplicate function definition/,
+  );
+  assert.throws(
+    () => interpret('int f(int a){return a;} int main(void){int x=f(1,2);}'),
+    /f expects 1 argument\(s\), got 2/,
+  );
+  assert.throws(() => run('int a=1;int a=2;'), /redeclaration of 'a'/);
+});
+
 for (const [name, source] of [
   ['malloc', 'int *malloc(int n){return NULL;}int main(void){int *p=malloc(4);}'],
   ['free', 'void free(int *p){}int main(void){return 0;}'],

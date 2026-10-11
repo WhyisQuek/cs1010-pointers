@@ -21,14 +21,11 @@ export function lookupBinding(scope, name) {
   return null;
 }
 
+/** A scope owns only stack objects declared in it, which all belong to `frame`. */
 export function closeScope(ctx, scope, frame) {
   for (const id of scope.ownedAllocations) {
     const allocation = getAllocation(ctx.state, id);
-    if (
-      allocation.storage.kind === 'stack' &&
-      allocation.storage.frameId === frame.id &&
-      allocation.alive
-    ) {
+    if (allocation.alive) {
       allocation.alive = false;
       pushTrace(ctx, { kind: 'EndLifetime', allocationId: id, frameId: frame.id });
     }

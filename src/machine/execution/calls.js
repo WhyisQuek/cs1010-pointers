@@ -4,6 +4,7 @@ import { INT, isArray, isPointer, sizeOf, typeToString } from '../../language/ty
 import {
   addAllocation,
   addFrame,
+  decayRef,
   endFrame,
   freshFrameId,
   getAllocation,
@@ -86,8 +87,7 @@ export function callFunction(ctx, fn, args, callerFrame, entry = false) {
 
   if (fn.returnType?.kind === 'void') return { type: { kind: 'void' }, value: { kind: 'void' } };
   if (!returnValue) {
-    if (entry && fn.name === 'main')
-      return { type: fn.returnType, value: { kind: 'scalar', value: 0 } };
+    if (entry) return { type: fn.returnType, value: { kind: 'scalar', value: 0 } };
     throw new Error(
       `function '${fn.name}' reached the end without returning ${typeToString(fn.returnType)}`,
     );
@@ -126,7 +126,7 @@ export function evalCall(expr, ctx, env, frame, expectedType) {
       storage: { kind: 'heap' },
       alive: true,
     });
-    const target = isArray(allocation.type) ? ref(allocation.id, [0]) : ref(allocation.id, []);
+    const target = decayRef(allocation);
     pushTrace(ctx, {
       kind: 'Allocate',
       allocationId: allocation.id,
@@ -173,11 +173,7 @@ export function evalCall(expr, ctx, env, frame, expectedType) {
 
   const fn = ctx.functions.get(expr.name);
   if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`);
-  if (expr.arguments.length !== fn.params.length)
-    throw semanticError(
-      expr,
-      `${expr.name} expects ${fn.params.length} argument(s), got ${expr.arguments.length}`,
-    );
+  // The checker rejects a wrong argument count; callFunction re-asserts it for every call.
   const argumentAccesses = [];
   const args = expr.arguments.map((arg, i) => {
     const start = ctx.accesses.length;

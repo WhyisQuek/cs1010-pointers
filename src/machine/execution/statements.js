@@ -216,7 +216,6 @@ export function execEmbeddedStatement(stmt, ctx, env, frame, fn, loopDepth) {
 }
 
 function execDeclaration(decl, ctx, env, frame) {
-  if (env.bindings.has(decl.name)) throw semanticError(decl, `redeclaration of '${decl.name}'`);
   const allocation = addAllocation(ctx.state, {
     name: decl.name,
     type: decl.type,

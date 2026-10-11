@@ -156,6 +156,9 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
   let type = allocation.type;
   let value = allocation.value;
   let label = allocationDisplayName(state, allocation);
+  // Where `value` is stored (container[key]), so setRefValue can write without another walk.
+  let container = null,
+    key = null;
 
   const path = targetRef.path ?? [];
   for (let i = 0; i < path.length; i++) {
@@ -183,7 +186,8 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
           label: `${label}[${part}]`,
         };
       }
-      value = value.elements[part];
+      [container, key] = [value.elements, part];
+      value = container[key];
       type = type.of;
       label += `[${part}]`;
       continue;
@@ -192,43 +196,34 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
       const def = resolveStructType(type, state.structTypes);
       const field = def.fields?.find(f => f.name === part);
       if (!field) throw new Error(`struct ${type.name} has no field '${part}'`);
-      value = value.fields[part];
+      [container, key] = [value.fields, part];
+      value = container[key];
       type = field.type;
       label += `.${part}`;
       continue;
     }
     throw new Error(`cannot select subobject '${part}' from ${typeToString(type)}`);
   }
-  return { allocation, type, value, ref: targetRef, onePast: false, invalid: false, label };
+  return {
+    allocation,
+    type,
+    value,
+    ref: targetRef,
+    onePast: false,
+    invalid: false,
+    label,
+    container,
+    key,
+  };
 }
 
 export function setRefValue(state, targetRef, nextValue) {
-  const { allocation, invalid, onePast } = resolveRef(state, targetRef, { allowDead: false });
+  const { allocation, invalid, onePast, container, key } = resolveRef(state, targetRef, {
+    allowDead: false,
+  });
   if (invalid || onePast) throw new Error('write outside object bounds');
-  const path = targetRef.path ?? [];
-  if (!path.length) {
-    allocation.value = structuredClone(nextValue);
-    return;
-  }
-
-  let type = allocation.type,
-    value = allocation.value;
-  for (let i = 0; i < path.length - 1; i++) {
-    const part = path[i];
-    if (isArray(type)) {
-      value = value.elements[part];
-      type = type.of;
-    } else if (isStruct(type)) {
-      const def = resolveStructType(type, state.structTypes);
-      const field = def.fields.find(f => f.name === part);
-      value = value.fields[part];
-      type = field.type;
-    } else throw new Error(`invalid subobject path ${path.join('.')}`);
-  }
-  const last = path.at(-1);
-  if (isArray(type)) value.elements[last] = structuredClone(nextValue);
-  else if (isStruct(type)) value.fields[last] = structuredClone(nextValue);
-  else throw new Error(`invalid subobject path ${path.join('.')}`);
+  if (container) container[key] = structuredClone(nextValue);
+  else allocation.value = structuredClone(nextValue);
 }
 
 export const decayRef = allocation =>

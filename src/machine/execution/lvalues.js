@@ -162,11 +162,6 @@ export function coerceRValue(targetType, rv, node) {
         node,
         `cannot assign ${typeToString(rv.type)} to ${typeToString(targetType)}`,
       );
-    if (!typeEquals(targetType, rv.type))
-      throw semanticError(
-        node,
-        `incompatible pointer types: ${typeToString(targetType)} and ${typeToString(rv.type)}`,
-      );
     return { type: targetType, value: structuredClone(rv.value) };
   }
   if (isStruct(targetType)) {
