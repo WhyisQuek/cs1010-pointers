@@ -2,9 +2,17 @@
 
 ## Simulated addresses
 
-There is a single memory view: each object shows its own address and size, pointer values show the target's address, and arrows show the relationship. (The earlier Arrows / Both / Addresses modes were retired in October 2026; see [SANDBOX_UI_PLAN.md](SANDBOX_UI_PLAN.md).)
+By default each object shows its own address and size, pointer values show the target's address, and arrows show the relationship. The **View** menu at the top left of the canvas switches between three presets:
 
-Select an object name or member label to inspect it, including during playback. The inspector floats over the top-right of the canvas, so opening it never resizes the diagram; if it would cover the selected object, the canvas pans just enough to keep the object visible, without changing zoom. It lists **Located at (&p)**, **Stores (p)**, **Points to** and **Value (*p)**, using the same 8-digit addresses as the cards; **Copy** copies the full 64-bit address. **Show** next to the target selects the exact member, revealing out-of-scope storage when needed; for a one-past pointer it identifies the boundary without reading it. Narrow memory panes show the inspector as a bottom sheet over the canvas.
+| View | Addresses on cards | Pointer value | Arrows |
+| --- | --- | --- | --- |
+| Both (default) | Shown | Target's address | All |
+| Arrows | Hidden (still in the inspector) | A dot where the arrow starts; `→ x` beneath | All |
+| Addresses | Shown | Target's address | Only the selected box's |
+
+Boxes keep the same size and position in every view, so switching never overlaps or moves them. In Arrows, a hidden slot is left empty rather than given another meaning, and the aggregate Address column is dropped. The choice applies to every canvas (sandbox, challenges, level editor), is remembered in the browser (`pointerviz.view.v1`), and is never part of the diagram, grading or undo history. These modes were retired in October 2026 because the old Arrows view replaced addresses with unrelated text; they returned in this form on 12 October 2026.
+
+Select an object name or member label to inspect it, including during playback. The inspector floats over the top-right of the canvas, so opening it never resizes the diagram; if it would cover the selected object, the canvas pans just enough to keep the object visible, without changing zoom. The heading line gives the object's own address (`&p`), size and frame. The **Memory** block shows `p` (the address it stores, in a blue slot) with `→ target` beneath it, and `*p` (the target's value), using the same 8-digit addresses and slot colours as the cards; the copy buttons copy the full 64-bit address. The target name is a link that selects it in the diagram. The ⓘ next to Memory notes that addresses are simulated. Clicking the target name selects the exact member, revealing out-of-scope storage when needed; for a one-past pointer it identifies the boundary without reading it. Narrow memory panes show the inspector as a bottom sheet over the canvas.
 
 Editable pointers have a typed **Target** picker, including NULL and uninitialized choices. Addresses are read-only. Type/array edits preserve a root's base address and reset its value, and are rejected atomically if an incoming pointer would become invalid or historical pointer facts would change. Valid changes to subobject addresses/status are highlighted. Deletion clears live incoming pointers but is rejected when an expired source still records the target.
 

@@ -408,6 +408,64 @@ button:disabled {
 .canvas-chip {
   color: var(--muted);
 }
+.view-menu {
+  position: relative;
+  pointer-events: auto;
+}
+.view-menu-list {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 100%;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px #0008;
+}
+.canvas-overlay .view-menu-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  box-shadow: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.view-menu-list button:hover,
+.view-menu-list button[aria-checked='true'] {
+  background: var(--panel-2);
+}
+.view-menu-check {
+  width: 12px;
+  color: var(--ptr);
+}
+.view-menu-heading {
+  padding: 6px 8px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.view-menu-heading:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.view-menu-example {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
 .canvas-chip[aria-pressed='true'] {
   color: var(--text);
   border-color: var(--ptr);
@@ -436,10 +494,21 @@ button:disabled {
   color: #ff9b92;
   border-color: #f8514988;
 }
+/* The frame shows the storage kind once, so the cards inside can stay neutral. */
 .frame-group {
   background: #161b22;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-top: 2px solid var(--stack);
+  border-radius: 6px;
+}
+.frame-group-label strong {
+  color: var(--stack);
+}
+.frame-group.returned {
+  border-top-color: var(--line-strong);
+}
+.frame-group.returned .frame-group-label strong {
+  color: var(--muted);
 }
 .frame-group.returned {
   border-style: dashed;
@@ -452,7 +521,6 @@ button:disabled {
   justify-content: space-between;
   gap: 12px;
   padding: 0 10px;
-  border-bottom: 1px solid var(--line);
   color: var(--text);
   font-size: 12px;
   cursor: grab;
@@ -475,14 +543,17 @@ button:disabled {
   color: var(--muted);
 }
 
+/* Stack cards are neutral: their frame carries the stack colour. Heap cards keep an amber edge. */
 .mem-cell {
   width: 100%;
   height: 100%;
   background: var(--panel-2);
-  border: 1px solid var(--line-strong);
-  box-shadow: inset 3px 0 var(--stack);
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
   font-family: var(--mono);
+}
+.mem-cell.static {
+  box-shadow: inset 3px 0 var(--muted);
 }
 .mem-cell.heap {
   box-shadow: inset 3px 0 var(--heap);
@@ -499,13 +570,34 @@ button:disabled {
 .mem-cell .head {
   position: relative;
   height: var(--memory-header);
+  padding: 6px 10px 0;
+}
+.head-line {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--line);
+}
+/* Quiet "address · size" line: identity is metadata, values are what the eye should find. */
+.mem-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mem-meta code {
+  font: inherit;
+}
+.mem-meta code.targeted,
+.targeted .sub-address {
+  color: var(--ptr);
+}
+.mem-meta code.targeted::after,
+.targeted .sub-address::after {
+  content: ' ◂';
 }
 .mem-cell .name {
+  font-size: 13px;
   font-weight: 600;
   min-width: 0;
   overflow: hidden;
@@ -523,45 +615,66 @@ button:disabled {
 }
 .lifetime-banner {
   height: var(--memory-lifetime);
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 4px 10px;
   color: var(--err);
   font: 11px var(--ui);
 }
 .subobject-row {
   position: relative;
-  border-bottom: 1px solid #262c33;
-}
-.subobject-row:last-child {
-  border-bottom: 0;
 }
 .sub-label {
-  min-width: 0;
+  flex: none;
+  min-width: 28px;
+  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: 11px;
 }
+.sub-address {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+}
+/* Each value sits in its own slot, like a memory cell; one size for every value. */
 .val {
+  flex: none;
+  min-width: 9ch;
   margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #161b22;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: right;
+  white-space: nowrap;
 }
 .val.ptr {
+  border-color: #58a6ff66;
   color: var(--ptr);
 }
-.pointer-value {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
 .val.dangling {
+  border-color: #f8514966;
   color: var(--err);
 }
 .val.uninit {
+  border-style: dashed;
   color: var(--muted);
-  font-style: italic;
-  font-size: 11px;
+}
+/* NULL points nowhere, so it is not drawn in the arrow colour. */
+.val.null {
+  color: var(--muted);
+}
+.val.dot {
+  text-align: center;
+}
+/* Arrows view has no addresses to tint, so the pointed-at slot is outlined instead. */
+.no-addresses .targeted .val {
+  border-color: var(--ptr);
 }
 .mem-handle {
   width: 9px !important;
@@ -613,41 +726,43 @@ button:disabled {
   box-shadow: 0 8px 24px #000a;
 }
 .inspector h4 {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0;
+  font: 600 14px var(--mono);
+  overflow-wrap: anywhere;
 }
 .inspector-type {
   color: var(--muted);
   font-weight: 400;
-  font-family: var(--mono);
 }
-.inspector-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-.inspector label {
-  display: block;
-  margin: 9px 0 4px;
-  color: var(--muted);
-  font-size: 11px;
+/* One label column and one control height for the whole panel, so everything lines up. */
+.inspector {
+  --label-col: 52px;
+  --label-gap: 10px;
+  --control-h: 30px;
 }
 .inspector input,
 .inspector select {
-  width: 100%;
+  height: var(--control-h);
   min-width: 0;
-  padding: 6px 7px;
+  padding: 0 8px;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--panel-2);
   color: var(--text);
   font-family: var(--mono);
+  font-size: 12px;
 }
-.type-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(96px, 1fr);
-  gap: 6px;
+/* The panel scrolls, so rings drawn outside a control get clipped or touch nearby text. */
+.inspector :focus-visible {
+  outline-offset: -2px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .stepper {
@@ -1046,53 +1161,18 @@ button:disabled {
   min-width: 0;
   height: auto;
 }
-.memory-address-strip {
-  height: var(--memory-metadata);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-  color: #a8b2bf;
-}
-.memory-address-strip code,
+.mem-meta code,
 .sub-address {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.memory-address-strip code {
-  color: var(--text);
-}
-.memory-columns {
-  height: var(--memory-columns);
-  color: #a8b2bf;
-  font-size: 11px;
-  border-bottom: 1px solid var(--line);
-}
 .memory-value-line {
   height: var(--memory-row);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 0 10px;
-}
-.memory-columns,
-.aggregate-line {
-  display: grid;
-  align-items: center;
-  grid-template-columns: minmax(36px, 1fr) 10ch minmax(10ch, auto);
-  gap: 8px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-.memory-columns > :last-child {
-  text-align: right;
-}
-.sub-address {
-  color: #a8b2bf;
 }
 .inspect-label {
   border: 0;
@@ -1112,13 +1192,10 @@ button:disabled {
   height: var(--memory-pointerStatus);
   padding: 0 10px;
   font-size: 11px;
-  color: #a8b2bf;
+  color: var(--muted);
   overflow: hidden;
+  text-align: right;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pointer-value {
-  font-size: 12px;
   white-space: nowrap;
 }
 .warning {
@@ -1131,65 +1208,363 @@ button:disabled {
 .inspector-heading {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  margin-bottom: 10px;
 }
-.inspector-heading h4 {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.inspector-summary,
-.inspector-help,
+.inspector-context,
+.inspector-hint,
 .inspector-notice {
-  color: #a8b2bf;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.inspector-summary {
-  margin: 10px 0;
-}
-.address-facts {
-  margin: 10px 0;
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-}
-/* One fact per line: label column, then value. */
-.address-facts > div {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
+.inspector-context {
+  margin-top: 2px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  column-gap: 6px;
 }
-.address-facts dt {
+.context-dot {
+  margin-right: 6px;
+}
+.inspector-notice:empty {
+  display: none;
+}
+.inspector-notice {
+  margin-top: 8px;
   color: #a8b2bf;
-  overflow-wrap: anywhere;
 }
-.address-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
+.icon-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
 }
-.address-fact dd {
+.icon-btn:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.icon-btn:disabled {
+  background: none;
+  opacity: 0.35;
+  cursor: default;
+}
+/* Always one line, so resizing an array never shifts the sections below. */
+.member-picker {
+  display: grid;
+  grid-template-columns: var(--label-col) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--label-gap);
+  margin-top: 12px;
+}
+.member-picker-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+.member-picker-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--control-h) var(--control-h);
+  gap: 4px;
+}
+.nav-btn {
+  height: var(--control-h);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.nav-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+/* Dimmed but still outlined, so it reads as a button that is unavailable here. */
+.nav-btn:disabled {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: default;
+}
+/* Section label with a hairline running to the right edge. */
+.inspector-section {
   display: flex;
   align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.inspector-section::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
+/* Read-only facts sit on a tinted block so they never read as form fields. */
+/* Rows share one grid so values line up; long expressions in the label column end in "…". */
+/* The tint bleeds 8px past the panel's content edge so its labels share the panel's label column. */
+.facts {
+  margin: 0 -8px;
+  padding: 4px 8px;
+  display: grid;
+  grid-template-columns: var(--label-col) minmax(0, 1fr);
+  grid-auto-rows: minmax(var(--control-h), auto);
+  align-items: center;
+  gap: 4px var(--label-gap);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 12px;
+}
+.fact {
+  display: contents;
+}
+.fact dt {
+  align-self: start;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  /* Centred on the 26px slot beside it, also when a "→ target" line follows the slot. */
+  line-height: var(--control-h);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Top-aligned with 2px padding, so the 26px slot is centred on its 30px label line. */
+.fact dd {
+  align-self: start;
+  margin: 0;
+  padding-top: 2px;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  flex-wrap: wrap;
   gap: 6px;
 }
-.address-fact code {
+.fact dd .muted-note {
+  line-height: 26px;
+}
+.fact code {
   font: 12px var(--mono);
   white-space: nowrap;
   user-select: text;
 }
-.object-editor {
-  margin-top: 8px;
+/* Aggregate values such as { 1, 2, 3 } may wrap; addresses never do. */
+.fact dd > code:only-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.inspector .inspector-help {
-  margin: 10px 0 0;
+/* Value slots match the canvas cards: bright values, blue stored addresses, dashed "?". */
+/* 26px tall (18px line, 3px padding, 1px borders), centred in a 30px row. */
+.slot {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  line-height: 18px;
+  background: #161b22;
+  color: var(--text);
+  font: 12px var(--mono);
+  overflow-wrap: anywhere;
+}
+.slot.ptr {
+  border-color: #58a6ff66;
+  color: var(--ptr);
+}
+.slot.dangling {
+  border-color: #f8514966;
+  color: var(--err);
+}
+.slot.uninit {
+  border-style: dashed;
+  color: var(--muted);
+}
+.slot.null {
+  color: var(--muted);
+}
+/* The slot and its "→ target" line read as one unit: what is stored, and what that is. */
+.slot-stack {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  min-width: 0;
+}
+.target-line {
+  max-width: 100%;
+  overflow: hidden;
+  padding-left: 4px;
+  color: var(--muted);
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.target-arrow {
+  margin-right: 4px;
+}
+.target-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ptr);
+  font: inherit;
+  cursor: pointer;
+}
+.target-line.warning .target-link,
+.target-line.warning {
+  color: #ff9b92;
+}
+.target-link:hover,
+.target-link:focus-visible {
+  text-decoration: underline;
+}
+.muted-note {
   color: var(--muted);
   font-size: 11px;
+}
+.fact dd .icon-btn {
+  align-self: flex-start;
+}
+.info-dot {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: help;
+}
+.inspector-context code {
+  font: inherit;
+  font-family: var(--mono);
+}
+.icon-btn.inline {
+  width: 20px;
+  height: 18px;
+  vertical-align: middle;
+  font-size: 11px;
+}
+/* Edit fields: short label on the left, control on the right. */
+.edit-grid {
+  display: grid;
+  grid-template-columns: var(--label-col) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px var(--label-gap);
+}
+.edit-grid .field {
+  display: contents;
+}
+.edit-grid .field > span:first-child {
+  color: var(--muted);
+  font-size: 11px;
+}
+.value-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.value-control code {
+  flex: none;
+}
+.inspector .field select,
+.inspector .field input {
+  width: 100%;
+}
+.inspector .field code {
+  color: var(--text);
+  font: 12px var(--mono);
+}
+.type-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 6px;
+}
+.shape-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.segmented {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: var(--control-h);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.segmented button {
+  padding: 0 11px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.segmented button + button {
+  border-left: 1px solid var(--line);
+}
+.segmented button[aria-pressed='true'] {
+  background: #58a6ff1f;
+  color: var(--text);
+}
+/* "[ 3 ]" is one bordered field: the brackets sit inside it, so they centre with the number. */
+.length-group {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: var(--control-h);
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: 12px var(--mono);
+}
+.length-group:focus-within {
+  outline: 2px solid var(--ptr);
+  outline-offset: -2px;
+}
+.inspector .length-group input {
+  width: 4ch;
+  height: calc(var(--control-h) - 2px);
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.inspector .length-group input:focus-visible {
+  outline: none;
+}
+.length-group input::-webkit-inner-spin-button,
+.length-group input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.inspector-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.text-btn {
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.text-btn:hover {
+  background: #f851491a;
 }
 /* Narrow canvas: the inspector becomes a bottom sheet, still overlaid. */
 @container memory (max-width: 760px) {

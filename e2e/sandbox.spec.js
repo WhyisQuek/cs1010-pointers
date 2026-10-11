@@ -75,7 +75,7 @@ test('typing a value is one undo step', async ({ page }) => {
   await page.getByRole('spinbutton', { name: 'Value of a' }).pressSequentially('123');
   await expect(page.locator('.mem-cell .val')).toHaveText('123');
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(page.locator('.mem-cell .val')).toHaveText('uninitialized');
+  await expect(page.locator('.mem-cell .val')).toHaveText('?');
   await expect(page.locator('.mem-cell')).toHaveCount(1);
 });
 
@@ -175,7 +175,7 @@ test('parser loads under the Pages subpath and playback steps through a program'
   const cell = page.locator('.mem-cell').filter({ hasText: 'int' });
   await expect(cell).toHaveCount(1);
   await expect(cell.locator('.val')).toHaveText('10');
-  await expect(cell.locator('.memory-address-strip')).toContainText('0x10000000');
+  await expect(cell.locator('.mem-meta')).toContainText('0x10000000');
 });
 
 test('diagram edits are range-checked and generate matching C', async ({ page }) => {
@@ -216,6 +216,45 @@ test('generate during playback uses the step on screen', async ({ page }) => {
   await page.getByRole('button', { name: 'Generate C' }).click();
   const code = page.getByRole('textbox', { name: 'C source code' });
   await expect(code).not.toHaveValue(/int a/);
+});
+
+test('View switches between addresses, arrows and both, and is remembered', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  await page.getByRole('combobox', { name: 'Pointer depth' }).selectOption('1');
+  // Options: Uninitialized, NULL, then a's targets.
+  await page.getByRole('combobox', { name: 'Target of b' }).selectOption({ index: 2 });
+  const edges = page.locator('.react-flow__edge');
+  const cardB = page.locator('.mem-cell').filter({ hasText: 'int *' });
+  const chooseView = async label => {
+    await page.getByRole('button', { name: /^View:/ }).click();
+    await page.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }).click();
+  };
+  await expect(edges).toHaveCount(1);
+  await expect(cardB.locator('.pointer-value')).toHaveText('0x10000000');
+  const box = await cardB.boundingBox();
+
+  await chooseView('Arrows');
+  await expect(cardB.locator('.pointer-value')).toHaveText('●');
+  await expect(cardB.locator('.pointer-caption')).toHaveText('→ a');
+  await expect(page.locator('.mem-meta code')).toHaveCount(0);
+  await expect(edges).toHaveCount(1);
+  expect(await cardB.boundingBox()).toEqual(box);
+
+  await chooseView('Addresses');
+  await expect(cardB.locator('.pointer-value')).toHaveText('0x10000000');
+  // The selected pointer keeps its arrow; deselecting hides it.
+  await expect(edges).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(edges).toHaveCount(0);
+  await cardB.locator('.name').click();
+  await expect(edges).toHaveCount(1);
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'View: Addresses ▾' })).toBeVisible();
+  await chooseView('Both');
+  await expect(edges).toHaveCount(1);
 });
 
 test('the inspector overlays the canvas without resizing it', async ({ page }) => {

@@ -10,11 +10,13 @@ import {
   allocationDisplayName,
   getAllocation,
   heapAllocations,
+  pointerEdges,
   pointerStatus,
   resolveRef,
   samePath,
   scalarSubobjects,
   stackAllocations,
+  staticAllocations,
 } from '../machine/memory.js';
 import { validate, ValidationError } from './codegen.js';
 
@@ -89,6 +91,21 @@ export function equivalent(expected, actual, options = {}) {
     for (let i = 0; i < aStack.length; i++) initial.set(aStack[i].id, bStack[i].id);
   }
 
+  // A string literal is identified by its contents. One no pointer reaches is not part of
+  // the answer: its pointer may have moved on, and diagrams cannot draw literals.
+  let ignored = 0;
+  for (const a of staticAllocations(expected)) {
+    const b = staticAllocations(actual).find(b => b.name === a.name);
+    if (b) initial.set(a.id, b.id);
+    else if (pointerEdges(expected).some(e => e.target.allocationId === a.id))
+      return {
+        equal: false,
+        diffs: [`missing string literal ${a.name}`],
+        badIds: new Set(),
+      };
+    else ignored++;
+  }
+
   const aHeap = heapAllocations(expected),
     bHeap = heapAllocations(actual);
   if (aHeap.length !== bHeap.length) {
@@ -99,7 +116,15 @@ export function equivalent(expected, actual, options = {}) {
     };
   }
 
-  const result = bestHeapMapping(expected, actual, initial, aHeap, bHeap, config);
+  const result = bestHeapMapping(
+    expected,
+    actual,
+    initial,
+    aHeap,
+    bHeap,
+    config,
+    expected.allocations.length - ignored,
+  );
   if (!result)
     return {
       equal: false,
@@ -110,14 +135,14 @@ export function equivalent(expected, actual, options = {}) {
   return collectDiffs(expected, actual, result.map, config);
 }
 
-function bestHeapMapping(A, B, initial, aHeap, bHeap, config) {
+function bestHeapMapping(A, B, initial, aHeap, bHeap, config, mappedCount) {
   let best = null;
   const used = new Set();
   const map = new Map(initial);
 
   function search(i) {
     if (i === aHeap.length) {
-      const score = scoreMapping(A, B, map, config);
+      const score = scoreMapping(A, B, map, config, mappedCount);
       if (!best || score < best.score) best = { score, map: new Map(map) };
       return;
     }
@@ -143,8 +168,8 @@ function bestHeapMapping(A, B, initial, aHeap, bHeap, config) {
   return best;
 }
 
-function scoreMapping(A, B, map, config) {
-  if (map.size !== A.allocations.length) return Number.POSITIVE_INFINITY;
+function scoreMapping(A, B, map, config, mappedCount) {
+  if (map.size !== mappedCount) return Number.POSITIVE_INFINITY;
   return scoreMappedAllocations(A, B, map, config, false);
 }
 

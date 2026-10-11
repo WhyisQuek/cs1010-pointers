@@ -30,6 +30,7 @@ export const structType = (name, fields) => ({
 });
 
 export const INT = primitive('int');
+export const CHAR = primitive('char');
 
 /** Arithmetic types supported by the Mini-C subset, in editor display order. */
 export const PRIMITIVE_NAMES = Object.freeze([

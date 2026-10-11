@@ -4,6 +4,8 @@ import { isArray, isStruct, layoutOf, sizeOf, validateObjectType } from '../lang
 export const ADDRESS_PROFILE = 'pointerviz-lp64-sparse-v1';
 export const RESERVATION_BYTES = 0x10000;
 export const ADDRESS_REGIONS = Object.freeze({
+  // Read-only string literals, low in the address space like an executable's .rodata.
+  static: Object.freeze({ start: 0x00400000, end: 0x10000000, cursor: 'nextStaticSlot' }),
   stack: Object.freeze({ start: 0x10000000, end: 0x70000000, cursor: 'nextStackSlot' }),
   heap: Object.freeze({ start: 0x80000000, end: 0xe0000000, cursor: 'nextHeapSlot' }),
 });
@@ -12,13 +14,16 @@ export const makeAddressSpace = () => ({
   profile: ADDRESS_PROFILE,
   nextStackSlot: 0,
   nextHeapSlot: 0,
+  nextStaticSlot: 0,
 });
+// Saved diagrams predate the static region; they hold no static objects yet.
+const cursorOf = (space, region) => space[region.cursor] ?? 0;
 
 function checkProfile(space) {
   if (space?.version !== 1 || space.profile !== ADDRESS_PROFILE)
     throw new Error('unsupported or missing simulated address profile');
   for (const region of Object.values(ADDRESS_REGIONS)) {
-    const slot = space[region.cursor];
+    const slot = cursorOf(space, region);
     if (
       !Number.isSafeInteger(slot) ||
       slot < 0 ||
@@ -42,10 +47,11 @@ export function nextAddress(space, storage, type, structs = {}) {
   checkAddressCapacity(type, structs);
   const region = ADDRESS_REGIONS[storage?.kind];
   if (!region) throw new Error('invalid allocation storage');
-  const baseAddress = region.start + space[region.cursor] * RESERVATION_BYTES;
+  const slot = cursorOf(space, region);
+  const baseAddress = region.start + slot * RESERVATION_BYTES;
   if (baseAddress >= region.end)
     throw new Error(`simulated ${storage.kind} address space exhausted`);
-  return { baseAddress, addressSpace: { ...space, [region.cursor]: space[region.cursor] + 1 } };
+  return { baseAddress, addressSpace: { ...space, [region.cursor]: slot + 1 } };
 }
 
 export function validateAddressSpace(state) {
@@ -65,7 +71,7 @@ export function validateAddressSpace(state) {
       throw new Error(`invalid base address for allocation ${a.id}`);
     if (bases.has(base)) throw new Error('duplicate simulated address reservation');
     bases.add(base);
-    if ((base - region.start) / RESERVATION_BYTES >= state.addressSpace[region.cursor])
+    if ((base - region.start) / RESERVATION_BYTES >= cursorOf(state.addressSpace, region))
       throw new Error('simulated address cursor precedes an allocation');
   }
   return state;

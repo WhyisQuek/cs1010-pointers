@@ -116,7 +116,7 @@ const rejected = [
   ['uninitialized string', 'char s[3]; s[0] = \'a\'; printf("%s", s);', /uninitialized/],
   ['null string', 'char *s = NULL; printf("%s", s);', /null pointer/],
   ['unsequenced arguments', 'int i = 0; printf("%d %d", i++, i);', /unsequenced/],
-  ['string literal outside printf', 'char *s = "x";', /only supported as printf arguments/],
+  ['unterminated char array', 'char s[3] = "abc"; printf("%s", s);', /terminating/],
 ];
 
 for (const [name, body, pattern] of rejected) {

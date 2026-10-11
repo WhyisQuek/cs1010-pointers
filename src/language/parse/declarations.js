@@ -31,7 +31,9 @@ export function parseDeclaration(node, structTypes) {
       initializer = child.childForFieldName('value');
     }
     const info = parseDeclarator(declarator, base, structTypes, {
-      inferArrayLength: initializer?.type === 'initializer_list',
+      inferArrayLength: ['initializer_list', 'string_literal', 'concatenated_string'].includes(
+        initializer?.type,
+      ),
     });
     requireCompleteAt(info.type, declarator, structTypes);
     declarations.push({
@@ -71,7 +73,7 @@ export function parseDeclarator(
   node,
   baseType,
   structTypes,
-  { field = false, inferArrayLength = false } = {},
+  { field = false, inferArrayLength = false, parameter = false } = {},
 ) {
   if (!node) throw new Error('missing declarator');
   if (node.type === 'identifier' || node.type === 'field_identifier')
@@ -81,6 +83,7 @@ export function parseDeclarator(
     return parseDeclarator(inner, pointer(referenceSafeType(baseType)), structTypes, {
       field,
       inferArrayLength,
+      parameter,
     });
   }
   if (node.type === 'array_declarator') {
@@ -89,19 +92,22 @@ export function parseDeclarator(
     if (!sizeNode) {
       let name = inner;
       while (name.type === 'parenthesized_declarator') name = semanticChildren(name)[0];
-      if (!inferArrayLength || name.type !== 'identifier') {
+      if (!(inferArrayLength || parameter) || name.type !== 'identifier') {
         throw unsupported(
           node,
-          'only the outermost array size may be omitted, and it requires an initializer list',
+          parameter
+            ? 'only the outermost array size may be omitted in a parameter'
+            : 'only the outermost array size may be omitted, and it requires an initializer list',
         );
       }
-      // The checker completes this type while consuming the initializer, so
-      // nested braces, brace elision and struct-valued expressions count correctly.
+      // Parameters adjust this to a pointer; otherwise the checker completes it
+      // while consuming the initializer, so nested braces, brace elision and
+      // struct-valued expressions count correctly.
       return parseDeclarator(
         inner,
         { kind: 'array', of: structuredClone(baseType), length: null },
         structTypes,
-        { field, inferArrayLength },
+        { field, inferArrayLength, parameter },
       );
     }
     if (sizeNode.type !== 'number_literal')
@@ -111,12 +117,14 @@ export function parseDeclarator(
     return parseDeclarator(inner, array(baseType, length), structTypes, {
       field,
       inferArrayLength,
+      parameter,
     });
   }
   if (node.type === 'parenthesized_declarator') {
     return parseDeclarator(semanticChildren(node)[0], baseType, structTypes, {
       field,
       inferArrayLength,
+      parameter,
     });
   }
   throw unsupported(node, `unsupported declarator '${node.type}'`);

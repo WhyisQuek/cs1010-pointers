@@ -45,3 +45,53 @@ export function decodeStringLiteral(raw) {
   }
   return codes;
 }
+
+/** The literal in a char array's string initializer: "abc" or { "abc" }; otherwise null. */
+export function stringInitializerLiteral(e) {
+  if (e.kind === 'StringLiteral') return e;
+  if (
+    e.kind === 'InitializerList' &&
+    e.elements.length === 1 &&
+    e.elements[0].kind === 'StringLiteral'
+  )
+    return e.elements[0];
+  return null;
+}
+
+const ESCAPES = {
+  0: '\\0',
+  7: '\\a',
+  8: '\\b',
+  9: '\\t',
+  10: '\\n',
+  11: '\\v',
+  12: '\\f',
+  13: '\\r',
+};
+
+/** The C spelling of char values as one "..." literal; decodeStringLiteral reverses it. */
+export function encodeStringLiteral(codes) {
+  let out = '"';
+  codes.forEach((code, i) => {
+    const c = code & 0xff;
+    if (Object.hasOwn(ESCAPES, c) && !(c === 0 && /^[0-7]$/.test(nextChar(codes, i))))
+      out += ESCAPES[c];
+    else if (c === 34 || c === 92) out += `\\${String.fromCharCode(c)}`;
+    else if (c >= 32 && c < 127) out += String.fromCharCode(c);
+    // Three octal digits always end the escape, unlike \x, which absorbs following hex digits.
+    else out += `\\${c.toString(8).padStart(3, '0')}`;
+  });
+  return `${out}"`;
+}
+
+/** The C spelling of one char value, such as 'a', '\0' or '\xff'; decodeCharLiteral reverses it. */
+export function encodeCharLiteral(code) {
+  const c = code & 0xff;
+  if (Object.hasOwn(ESCAPES, c)) return `'${ESCAPES[c]}'`;
+  if (c === 39 || c === 92) return `'\\${String.fromCharCode(c)}'`;
+  if (c >= 32 && c < 127) return `'${String.fromCharCode(c)}'`;
+  return `'\\x${c.toString(16).padStart(2, '0')}'`;
+}
+
+const nextChar = (codes, i) =>
+  i + 1 < codes.length ? String.fromCharCode(codes[i + 1] & 0xff) : '';

@@ -124,28 +124,51 @@ function TargetHandles({ path = [], state, allocation, sourceType, editable }) {
   ));
 }
 
-function Value({ state, value, type }) {
+/** Spoken/tooltip text for a value slot, which itself may show only "?" or "●". */
+function valueText(state, value, type, chars) {
   if (isPointer(type)) {
     const d = describePointer(state, value);
-    const text =
+    if (d.status === 'null') return 'NULL';
+    if (d.status === 'uninitialized') return 'uninitialized';
+    if (d.status === 'invalid') return 'invalid reference';
+    return formatAddress(d.address);
+  }
+  return value.kind === 'scalar' ? scalarText(type, value.value, chars) : 'uninitialized';
+}
+
+/** The value drawn inside its own slot, like a memory cell in a textbook diagram. */
+function Value({ state, value, type, showAddresses, chars }) {
+  const full = valueText(state, value, type, chars);
+  if (isPointer(type)) {
+    const d = describePointer(state, value);
+    const shown =
       d.status === 'null'
         ? 'NULL'
         : d.status === 'uninitialized'
-          ? 'uninitialized'
+          ? '?'
           : d.status === 'invalid'
-            ? 'invalid reference'
-            : formatAddress(d.address);
+            ? 'invalid'
+            : showAddresses
+              ? full
+              : // Without numbers a pointer is the dot its arrow starts from.
+                '●';
+    const kind =
+      d.status === 'uninitialized'
+        ? 'uninit'
+        : d.status === 'null'
+          ? 'null'
+          : ['dangling', 'invalid'].includes(d.status)
+            ? 'dangling'
+            : 'ptr';
     return (
-      <span
-        className={`val pointer-value ${['dangling', 'invalid'].includes(d.status) ? 'dangling' : 'ptr'}`}
-      >
-        {text}
+      <span className={`val pointer-value ${kind}${shown === '●' ? ' dot' : ''}`} title={full}>
+        {shown}
       </span>
     );
   }
   return (
-    <span className={`val ${value.kind}`}>
-      {value.kind === 'scalar' ? scalarText(type, value.value) : 'uninitialized'}
+    <span className={`val ${value.kind}`} title={full}>
+      {value.kind === 'scalar' ? full : '?'}
     </span>
   );
 }
@@ -160,7 +183,14 @@ function MemoryAllocationNode({ id, data, selected }) {
     changedPaths,
     sourceSides,
     inspectedPath,
+    targetPaths,
+    view = 'both',
+    chars = 'number',
   } = data;
+  // Rows (or the whole object, "[]") that some pointer stores the address of.
+  const targeted = path => targetPaths?.has(JSON.stringify(path));
+  // Arrows hides numeric addresses; the boxes keep their size so changing view never overlaps them.
+  const showAddresses = view !== 'arrows';
   const fromHandle = useConnection(connection => connection.fromHandle);
   const sourceType =
     fromHandle?.type === 'source'
@@ -190,40 +220,40 @@ function MemoryAllocationNode({ id, data, selected }) {
   return (
     <div
       style={memoryMetricsStyle}
-      className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}
+      className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}${showAddresses ? '' : ' no-addresses'}`}
     >
       <div className="head">
         {(isArray(a.type) || isStruct(a.type)) && <TargetHandles {...targetProps} />}
-        <button
-          className="name inspect-label nodrag"
-          title={allocationDisplayName(state, a)}
-          onClick={e => {
-            e.stopPropagation();
-            data.onInspect?.([]);
-          }}
-        >
-          {allocationDisplayName(state, a)}
-        </button>
-        <span className="type" title={typeToString(a.type)}>
-          {typeToString(a.type)}
-        </span>
-      </div>
-      <div className="memory-address-strip">
-        <span>
-          Address <code>{formatAddress(a.baseAddress)}</code>
-        </span>
-        <span>{sizeOf(a.type, state.structTypes)} bytes</span>
+        <div className="head-line">
+          <button
+            className="name inspect-label nodrag"
+            title={allocationDisplayName(state, a)}
+            onClick={e => {
+              e.stopPropagation();
+              data.onInspect?.([]);
+            }}
+          >
+            {allocationDisplayName(state, a)}
+          </button>
+          <span className="type" title={typeToString(a.type)}>
+            {typeToString(a.type)}
+          </span>
+        </div>
+        <div className="mem-meta">
+          {showAddresses && (
+            <>
+              <code className={targeted([]) ? 'targeted' : ''} title="Address of this object">
+                {formatAddress(a.baseAddress)}
+              </code>
+              {' · '}
+            </>
+          )}
+          {sizeOf(a.type, state.structTypes)} bytes
+        </div>
       </div>
       {!a.alive && (
         <div className="lifetime-banner">
           {a.storage.kind === 'heap' ? 'freed' : 'out of scope'}
-        </div>
-      )}
-      {aggregate && (
-        <div className="memory-columns">
-          <span>Member</span>
-          <span>Address</span>
-          <span>Value</span>
         </div>
       )}
       <div className="subobject-list">
@@ -233,37 +263,53 @@ function MemoryAllocationNode({ id, data, selected }) {
           return (
             <div
               style={{ height: s.height }}
-              className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}${JSON.stringify(inspectedPath) === JSON.stringify(s.ref.path) ? ' inspected-row' : ''}`}
+              className={`subobject-row${changedPaths?.has(JSON.stringify(s.ref.path)) ? ' value-changed' : ''}${JSON.stringify(inspectedPath) === JSON.stringify(s.ref.path) ? ' inspected-row' : ''}${targeted(s.ref.path) ? ' targeted' : ''}`}
               key={s.ref.path.join('.') || 'root'}
               aria-label={
                 pointerInfo
                   ? pointerAccessibleLabel(state, s)
-                  : `${allocationDisplayName(state, a)}${formatPath(s.ref.path)}, address ${address}`
+                  : `${allocationDisplayName(state, a)}${formatPath(s.ref.path)}, address ${address}, value ${valueText(state, s.value, s.type, chars)}`
               }
             >
               {rowTargets[i].map(path => (
                 <TargetHandles key={path.join('.')} path={path} {...targetProps} />
               ))}
-              <div className={`memory-value-line${aggregate ? ' aggregate-line' : ''}`}>
-                <button
-                  className="sub-label inspect-label nodrag"
-                  title={`Inspect ${allocationDisplayName(state, a)}${formatPath(s.ref.path)}`}
-                  onClick={e => {
-                    e.stopPropagation();
-                    data.onInspect?.(s.ref.path);
-                  }}
-                >
-                  {s.ref.path.length ? formatPath(s.ref.path) : 'Value'}
-                </button>
-                {aggregate && <code className="sub-address">{address}</code>}
-                <Value state={state} type={s.type} value={s.value} />
+              <div className="memory-value-line">
+                {/* A single value needs no label: the card's name already says what it is. */}
+                {s.ref.path.length > 0 && (
+                  <button
+                    className="sub-label inspect-label nodrag"
+                    title={`Inspect ${allocationDisplayName(state, a)}${formatPath(s.ref.path)}`}
+                    onClick={e => {
+                      e.stopPropagation();
+                      data.onInspect?.(s.ref.path);
+                    }}
+                  >
+                    {formatPath(s.ref.path)}
+                  </button>
+                )}
+                {aggregate && showAddresses && (
+                  <code
+                    className="sub-address"
+                    title={targeted(s.ref.path) ? 'A pointer stores this address' : undefined}
+                  >
+                    {address}
+                  </code>
+                )}
+                <Value
+                  state={state}
+                  type={s.type}
+                  value={s.value}
+                  showAddresses={showAddresses}
+                  chars={chars}
+                />
               </div>
               {pointerInfo && (
                 <div
                   className={`pointer-caption ${['dangling', 'invalid', 'one-past'].includes(pointerInfo.status) ? 'warning' : ''}`}
                   title={pointerCaption(pointerInfo)}
                 >
-                  {s.value.kind === 'null' ? '0x00000000 · no target' : pointerCaption(pointerInfo)}
+                  {pointerCaption(pointerInfo)}
                 </div>
               )}
               {pointerInfo &&

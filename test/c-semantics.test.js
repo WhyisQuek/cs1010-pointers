@@ -5,6 +5,9 @@ import { initParser, interpret } from '../src/pipeline/interpreter.js';
 import { generate, validate, ValidationError } from '../src/pipeline/codegen.js';
 import { equivalent } from '../src/pipeline/equivalence.js';
 import { pointerStatus, resolveRef, setRefValue } from '../src/machine/memory.js';
+import { decodeCharLiteral, encodeCharLiteral } from '../src/language/literals.js';
+import { primitive } from '../src/language/types.js';
+import { scalarText } from '../src/flow/addressPresentation.js';
 
 await initParser({
   runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm',
@@ -106,6 +109,27 @@ const errors = [
   ['character escape must fit byte', "int x='\\x100';", /character escape/],
   ['nonconstant zero to free is invalid', 'int x=0;free(x);', /pointer or NULL/],
   ['NULL macro cannot be declared', 'int NULL=1;', /predefined macro/],
+  ['string literal write', 'char *p="abc";p[0]=\'x\';', /cannot modify a string literal/],
+  ['string literal write via deref', 'char *p="abc";*(p+1)=0;', /cannot modify a string literal/],
+  ['string initializer too long', 'char s[2]="abc";', /too long/],
+  ['string initializer for int array', 'int a[3]="ab";', /cannot assign/],
+  ['string literal bounds', 'char *p="ab";char c=p[3];', /bounds/],
+  ['string literal to int pointer', 'int *p="ab";', /incompatible/],
+  [
+    'brace list for a char pointer suggests an array or literal',
+    "char *p={'a','b','c','\\0'};",
+    /'p' is a pointer \(char \*\): it holds one address, not a list of 4 values.*char p\[\] = \{ \.\.\. \}.*char \*p = "\.\.\."/,
+  ],
+  [
+    'brace list for a pointer suggests an array',
+    'int *q={1,2};',
+    /int q\[\] = \{ \.\.\. \}; \(line/,
+  ],
+  [
+    'brace list for a scalar',
+    'int x={1,2};',
+    /'x' is a single int, but the \{ \.\.\. \} list has 2/,
+  ],
 ];
 for (const [name, body, pattern] of errors)
   test(name, () => assert.throws(() => run(body), pattern));
@@ -154,6 +178,9 @@ for (const body of [
   'int a[3];int (*p)[3]=&a+1;',
   'double d=3.5;float f=0.1f;unsigned int u=4294967295U;long l=2147483648L;',
   'int *p=malloc(sizeof(int));*p=7;p++;',
+  'char *t="abc";char *u=t+2;char s[]="hi";',
+  'char *t="a\\"b\\\\c\\n\\0001";',
+  'char *t="abc";t=NULL;',
 ])
   test(`canonical C round-trip: ${body}`, () => {
     const before = run(body).state;
@@ -192,6 +219,37 @@ test('NULL uses the documented integer-zero macro definition', () => {
   assert.equal(scalar(state, 'n'), 0);
   assert.equal(scalar(state, 'result'), 4);
   assert.equal(state.allocations.find(a => a.name === 'p').value.kind, 'null');
+});
+
+test('string literals are shared read-only static char arrays', () => {
+  const { state } = run(
+    'char *t="abc";char *u="abc";char s[]="abc";char r[3]="abc";char pad[5]="ab";',
+  );
+  const literals = state.allocations.filter(a => a.storage.kind === 'static');
+  assert.deepEqual(
+    literals.map(a => [a.name, a.type.length]),
+    [['"abc"', 4]],
+  );
+  const chars = name =>
+    state.allocations.find(a => a.name === name).value.elements.map(e => e.value);
+  assert.deepEqual(chars('s'), [97, 98, 99, 0]);
+  assert.deepEqual(chars('r'), [97, 98, 99]);
+  assert.deepEqual(chars('pad'), [97, 98, 0, 0, 0]);
+  const t = state.allocations.find(a => a.name === 't').value.target;
+  assert.deepEqual(t, { allocationId: literals[0].id, path: [0] });
+  assert.ok(literals[0].baseAddress < state.allocations.find(a => a.name === 't').baseAddress);
+});
+
+test('char values can be shown as character constants', () => {
+  const char = primitive('char');
+  assert.equal(scalarText(char, 97), '97');
+  assert.equal(scalarText(char, 97, 'character'), "'a'");
+  assert.equal(scalarText(primitive('int'), 97, 'character'), '97');
+  for (const code of [0, 10, 39, 92, 32, 126, 127, -1, -128]) {
+    const text = encodeCharLiteral(code);
+    assert.equal(decodeCharLiteral(text), code, text);
+  }
+  assert.deepEqual([0, 10, 39, -1].map(encodeCharLiteral), ["'\\0'", "'\\n'", "'\\''", "'\\xff'"]);
 });
 
 test('comments act as whitespace in expressions, calls, return and initializers', () => {

@@ -120,6 +120,8 @@ export function loadLValue(lvalue, ctx, node) {
 }
 
 export function assignToRef(targetRef, targetType, rv, ctx, node) {
+  if (getAllocation(ctx.state, targetRef.allocationId).storage.kind === 'static')
+    throw semanticError(node, 'cannot modify a string literal (undefined behavior)');
   const value = coerceRValue(targetType, rv, node).value;
   setRefValue(ctx.state, targetRef, value);
   ctx.accesses.push({ ref: targetRef, write: true, depth: ctx.callDepth });

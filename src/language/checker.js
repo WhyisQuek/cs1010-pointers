@@ -1,7 +1,10 @@
 /** Constraint checks run before execution, including branches that will be skipped. */
 import {
+  CHAR,
   INT,
   LIBRARY_NAMES,
+  array,
+  declarationToC,
   isArray,
   isPointer,
   isPrimitive,
@@ -21,7 +24,7 @@ import {
   numericOperation,
   promote,
 } from './numeric.js';
-import { decodeCharLiteral } from './literals.js';
+import { decodeCharLiteral, stringInitializerLiteral } from './literals.js';
 import { STRING_LITERAL, argumentTypeError, formatArguments, parseFormat } from './format.js';
 import { MAX_ARRAY_LENGTH } from './limits.js';
 
@@ -233,8 +236,7 @@ export function checkProgram(program) {
         return SIZE_T;
       }
       case 'StringLiteral':
-        fail(e, 'string literals are only supported as printf arguments');
-        break;
+        return stringLiteralType(e);
       case 'Call': {
         for (let s = env; s; s = s.parent)
           if (s.names.has(e.name)) fail(e, `called object '${e.name}' is not a function`);
@@ -286,12 +288,50 @@ export function checkProgram(program) {
     });
     return INT;
   }
-  function initializer(type, e, env) {
+  function stringLiteralType(e) {
+    if (e.value.length + 1 > MAX_ARRAY_LENGTH)
+      fail(e, `string literal must be shorter than ${MAX_ARRAY_LENGTH} characters`);
+    return array(CHAR, e.value.length + 1);
+  }
+  /** C 6.7.9p14: a char array may be initialized by a string literal, optionally in braces. */
+  function stringInitializer(type, e) {
+    if (!isArray(type) || !typeEquals(type.of, CHAR)) return null;
+    const literal = stringInitializerLiteral(e);
+    if (!literal) return null;
+    stringLiteralType(literal);
+    // The terminating '\0' is dropped when the array has room for exactly the characters.
+    if (type.length === null) type.length = literal.value.length + 1;
+    else if (literal.value.length > type.length)
+      fail(e, `initializer-string is too long for ${typeToString(type)}`);
+    return literal;
+  }
+  function initializer(type, e, env, name) {
+    if (stringInitializer(type, e)) return;
     if (e.kind !== 'InitializerList') {
       compatible(type, expression(e, env), e, env);
       return;
     }
     if (!e.elements.length) fail(e, 'empty initializer lists are not supported in the C11 subset');
+    if (!isArray(type) && !isStruct(type) && e.elements.length > 1) {
+      // A scalar takes one value; a list of several usually means an array was intended.
+      const count = e.elements.length;
+      // Nested members have no declared name of their own.
+      const who = name ? `'${name}'` : 'This member';
+      if (!isPointer(type))
+        fail(
+          e,
+          `${who} is a single ${typeToString(type)}, but the { ... } list has ${count} values`,
+        );
+      const declared = name ?? 'name';
+      fail(
+        e,
+        `${who} is a pointer (${typeToString(type)}): it holds one address, not a list of ${count} values. ` +
+          `To store the values, declare an array: ${declarationToC(type.to, `${declared}[]`)} = { ... };` +
+          (typeEquals(type.to, CHAR)
+            ? ` or point at a string literal: ${declarationToC(type, declared)} = "...";`
+            : ''),
+      );
+    }
     function consume(t, elements, cursor) {
       const inferLength = isArray(t) && t.length === null;
       const members = isArray(t)
@@ -304,7 +344,7 @@ export function checkProgram(program) {
         if (cursor.i >= elements.length) break;
         count++;
         const child = elements[cursor.i];
-        if (child.kind === 'InitializerList') {
+        if (child.kind === 'InitializerList' || stringInitializer(member, child)) {
           cursor.i++;
           initializer(member, child, env);
         } else if (
@@ -334,7 +374,7 @@ export function checkProgram(program) {
       case 'Declaration':
         for (const d of s.declarations) {
           declare(env, d.name, d.type, d);
-          if (d.initializer) initializer(d.type, d.initializer, env);
+          if (d.initializer) initializer(d.type, d.initializer, env, d.name);
         }
         return;
       case 'ExpressionStatement':

@@ -291,7 +291,7 @@ test('the memory view preserves state, geometry, routing and exact typed targets
   assert.deepEqual(s, before);
   const metrics = allocationMetrics(p, s);
   assert.equal(metrics.rows[0].height, GEOMETRY.row + GEOMETRY.pointerStatus);
-  assert.equal(metrics.rows[0].top, GEOMETRY.header + GEOMETRY.metadata);
+  assert.equal(metrics.rows[0].top, GEOMETRY.header);
   const targets = addressableSubobjects(a, s);
   assert.deepEqual(
     targets.map(t => t.ref.path),

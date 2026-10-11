@@ -1,12 +1,14 @@
 /** Side panel for inspecting one object or member and editing it in editable diagrams. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   PRIMITIVE_NAMES,
   array,
   basePrimitive,
+  declarationToC,
   isArray,
   isPointer,
   isPrimitive,
+  isStruct,
   pointer,
   pointerDepth,
   primitive,
@@ -16,6 +18,7 @@ import {
   variableNameError,
 } from '../language/types.js';
 import { MAX_ARRAY_LENGTH, clampArrayLength } from '../language/limits.js';
+import { encodeCharLiteral } from '../language/literals.js';
 import { scalarFromInput } from '../language/numeric.js';
 import {
   addressableSubobjects,
@@ -30,15 +33,25 @@ import { changeAllocationType } from '../machine/editing.js';
 import {
   describePointer,
   formatAddress,
+  frameLabel,
+  lifetimeNote,
   qualifiedLabel,
   valueSummary,
 } from '../flow/addressPresentation.js';
+
+/** Short picker text for a member path: `[2].x`, or "whole array" for the object itself. */
+function memberSuffix(path, type) {
+  if (!path.length)
+    return isArray(type) ? 'whole array' : isStruct(type) ? 'whole struct' : 'whole';
+  return path.map(part => (typeof part === 'number' ? `[${part}]` : `.${part}`)).join('');
+}
 
 export default function MemoryInspector({
   allocation: a,
   state,
   path = [],
-  editable,
+  chars = 'number',
+  editable: editableDiagram,
   onEdit,
   onDelete,
   onRestore,
@@ -46,12 +59,27 @@ export default function MemoryInspector({
   onShowTarget,
   onClose,
 }) {
+  // String literals are read-only in C, so their objects stay read-only in diagrams too.
+  const editable = editableDiagram && a.storage.kind !== 'static';
   const [name, setName] = useState(a.name ?? '');
   const [notice, setNotice] = useState('');
+  const typeKey = typeToString(a.type);
+  const [lengthText, setLengthText] = useState(isArray(a.type) ? String(a.type.length) : '');
   useEffect(() => {
     setName(a.name ?? '');
     setNotice('');
   }, [a.name, a.id]);
+  // Switching Single → Array restores the length the object last had.
+  const lastLength = useRef(isArray(a.type) ? a.type.length : 3);
+  const lengthOwner = useRef(a.id);
+  useEffect(() => {
+    if (isArray(a.type)) lastLength.current = a.type.length;
+    else if (lengthOwner.current !== a.id) lastLength.current = 3;
+    lengthOwner.current = a.id;
+    setLengthText(isArray(a.type) ? String(a.type.length) : '');
+    // typeKey stands in for a.type, which is a new object after every edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeKey, a.id]);
   const subobjects = useMemo(() => addressableSubobjects(a, state), [a, state]);
   let selected;
   try {
@@ -62,6 +90,7 @@ export default function MemoryInspector({
   }
   const location = referenceLocation(state, selected.ref),
     label = selected.label;
+  const isRoot = !selected.ref.path?.length;
   const writable = editable && a.alive && !selected.onePast;
   const d =
     isPointer(selected.type) && !selected.onePast ? describePointer(state, selected.value) : null;
@@ -82,28 +111,24 @@ export default function MemoryInspector({
       }))
       .filter(group => group.targets.length);
   }, [state, selected.type, writable]);
-  const copy = async (value, name) => {
+  const copy = async (value, what) => {
     try {
       await navigator.clipboard.writeText(formatAddress(value, true));
-      setNotice(`Copied ${name}.`);
+      setNotice(`Copied ${what}.`);
     } catch {
       setNotice('Copy unavailable. Select the address text to copy it.');
     }
   };
-  const addressFact = (title, address) => (
-    <div className="address-fact">
-      <dt>{title}</dt>
+  // `term` is the C expression (&p, p, *p); `meaning` spells it out for tooltips and screen readers.
+  const fact = (term, meaning, content, { action = null } = {}) => (
+    <div className="fact">
+      <dt title={meaning}>
+        <span aria-hidden="true">{term}</span>
+        <span className="sr-only">{meaning}</span>
+      </dt>
       <dd>
-        <code title={formatAddress(address, true)}>{formatAddress(address)}</code>
-        {Number.isSafeInteger(address) && (
-          <button
-            className="mini-btn"
-            aria-label={`Copy ${title}`}
-            onClick={() => copy(address, title)}
-          >
-            Copy
-          </button>
-        )}
+        {content}
+        {action}
       </dd>
     </div>
   );
@@ -115,7 +140,7 @@ export default function MemoryInspector({
     shape: isArray(a.type) ? 'array' : 'scalar',
     base: basePrimitive(scalarType),
     stars: pointerDepth(scalarType),
-    length: isArray(a.type) ? a.type.length : 3,
+    length: isArray(a.type) ? a.type.length : lastLength.current,
   };
   const setType = patch => {
     const next = { ...editor, ...patch };
@@ -129,6 +154,35 @@ export default function MemoryInspector({
       return moved ? `${moved} pointer target location(s) changed with the object layout.` : null;
     });
   };
+  const setLength = text => {
+    setLengthText(text);
+    // An empty or partly typed length waits for a valid value; blur restores the current one.
+    if (Number(text) >= 1) setType({ length: text });
+  };
+  const commitName = () => {
+    if (name === a.name) return;
+    // Reject before storing so a bad name never reaches the diagram.
+    const error =
+      variableNameError(name, state.structTypes) ??
+      (state.allocations.some(
+        o =>
+          o.id !== a.id &&
+          o.alive &&
+          o.storage.kind === 'stack' &&
+          o.storage.frameId === a.storage.frameId &&
+          o.name === name,
+      )
+        ? `'${name}' is already used in this frame`
+        : null);
+    if (error) {
+      setNotice(`Name not changed: ${error}.`);
+      setName(a.name ?? '');
+      return;
+    }
+    onEdit(obj => {
+      obj.name = name;
+    });
+  };
   const targetValue =
     selected.value?.kind === 'pointer'
       ? `ref:${JSON.stringify(selected.value.target)}`
@@ -137,326 +191,479 @@ export default function MemoryInspector({
     group.targets.some(item => `ref:${JSON.stringify(item.ref)}` === targetValue),
   );
   const lifetime = a.alive ? null : a.storage.kind === 'heap' ? 'freed' : 'out of scope';
-  const pointsTo = !d
-    ? null
-    : d.status === 'null'
-      ? 'NULL · no target'
-      : d.status === 'uninitialized'
-        ? 'Uninitialized · no stored address'
-        : d.status === 'valid'
-          ? (d.qualifiedLabel ?? d.label)
-          : `${d.status === 'dangling' ? 'Dangling · former target' : d.status} ${d.qualifiedLabel ?? d.label}`;
-  return (
-    <aside className="inspector" aria-label={`Inspect ${allocationDisplayName(state, a)}`}>
-      <div className="inspector-heading">
-        <h4>
-          {label} <span className="inspector-type">· {typeToString(selected.type)}</span>
-        </h4>
-        <button className="mini-btn" onClick={onClose} aria-label="Close inspector" title="Close">
-          ✕
+  // A target in the pointer's own frame needs no frame prefix.
+  const targetAllocation = d?.target
+    ? state.allocations.find(o => o.id === d.target.allocationId)
+    : null;
+  const sameFrame =
+    targetAllocation?.storage.kind === 'stack' &&
+    a.storage.kind === 'stack' &&
+    targetAllocation.storage.frameId === a.storage.frameId;
+  const targetName = sameFrame ? d.label : (d?.qualifiedLabel ?? d?.label);
+  // Heading: the C declaration for a named variable, otherwise the label and its type.
+  const declared = isRoot && a.storage.kind === 'stack' && a.name;
+  // After the address: size, member offset, then where the object lives.
+  const context = [
+    selected.onePast
+      ? 'one-past · no storage'
+      : `${sizeOf(selected.type, state.structTypes)} bytes`,
+    !isRoot && !selected.onePast && `+${location.offset}`,
+    a.storage.kind === 'stack'
+      ? frameLabel(state, a.storage.frameId)
+      : a.storage.kind === 'static'
+        ? 'string literal · read-only'
+        : a.storage.kind,
+  ].filter(Boolean);
+
+  // The stored address (or NULL / ?) in a slot, coloured like the pointer on the canvas.
+  const pointerSlot = d && (
+    <span
+      className={`slot ${
+        d.status === 'uninitialized'
+          ? 'uninit'
+          : d.status === 'null'
+            ? 'null'
+            : ['dangling', 'invalid'].includes(d.status)
+              ? 'dangling'
+              : 'ptr'
+      }`}
+      title={d.status === 'uninitialized' ? 'uninitialized' : formatAddress(d.address, true)}
+    >
+      {d.status === 'null'
+        ? 'NULL'
+        : d.status === 'uninitialized'
+          ? '?'
+          : d.status === 'invalid'
+            ? 'invalid'
+            : formatAddress(d.address)}
+    </span>
+  );
+  // "→ target" under the slot; the target name itself is the link that shows it in the diagram.
+  const warnTarget = d && ['dangling', 'invalid'].includes(d.status);
+  const targetLine =
+    d &&
+    (d.target && d.status !== 'invalid' ? (
+      <span className={`target-line${warnTarget ? ' warning' : ''}`}>
+        <span className="target-arrow" aria-hidden="true">
+          →
+        </span>
+        <button
+          className="target-link"
+          title={d.status === 'dangling' ? 'Show former target in diagram' : 'Show in diagram'}
+          aria-label={`Show ${targetName} in diagram`}
+          onClick={() => onShowTarget(d.target)}
+        >
+          {targetName}
         </button>
-      </div>
-      {subobjects.length > 1 && (
-        <label>
-          Object or member
+        {d.status === 'dangling' && <span> ({lifetimeNote(d)})</span>}
+      </span>
+    ) : (
+      <span className={`target-line${warnTarget ? ' warning' : ''}`}>
+        <span className="target-arrow" aria-hidden="true">
+          →
+        </span>{' '}
+        {d.status === 'null'
+          ? 'no target'
+          : d.status === 'uninitialized'
+            ? 'none yet'
+            : 'invalid reference'}
+      </span>
+    ));
+  // A value in a slot; uninitialized scalars show a dashed "?".
+  const valueSlot = (type, value) =>
+    isPrimitive(type) && value?.kind !== 'scalar' ? (
+      <span className="slot uninit" title="uninitialized">
+        ?
+      </span>
+    ) : (
+      <span className="slot value">{valueSummary(state, type, value, chars)}</span>
+    );
+
+  // One line whatever the member count, so resizing an array never moves the controls below.
+  const selectedKey = JSON.stringify(selected.ref.path);
+  const position = subobjects.findIndex(item => JSON.stringify(item.ref.path) === selectedKey);
+  const step = delta => {
+    const next = subobjects[position + delta];
+    if (next) onSelectPath(next.ref.path);
+  };
+  const memberPicker =
+    subobjects.length <= 1 ? null : (
+      <div className="member-picker">
+        <span className="member-picker-label" aria-hidden="true">
+          Inspect
+        </span>
+        <span className="member-picker-controls">
           <select
             aria-label="Inspect object or member"
-            value={JSON.stringify(selected.ref.path)}
+            value={selectedKey}
             onChange={e => onSelectPath(JSON.parse(e.target.value))}
           >
-            {selected.onePast && (
-              <option value={JSON.stringify(selected.ref.path)}>{selected.label} · one-past</option>
-            )}
+            {selected.onePast && <option value={selectedKey}>one-past boundary</option>}
             {subobjects.map(item => (
               <option key={JSON.stringify(item.ref.path)} value={JSON.stringify(item.ref.path)}>
-                {resolveRef(state, item.ref).label} · {typeToString(item.type)}
+                {memberSuffix(item.ref.path, a.type)}
               </option>
             ))}
           </select>
-        </label>
-      )}
-      <div className="inspector-summary">
-        {qualifiedLabel(state, selected.ref)} ·{' '}
-        {selected.onePast
-          ? 'one-past · no storage'
-          : `${sizeOf(selected.type, state.structTypes)} bytes`}{' '}
-        · +{location.offset}
-        {lifetime && <span className="warning"> · {lifetime}</span>}
+          <button
+            className="nav-btn"
+            aria-label="Previous member"
+            title="Previous member"
+            disabled={position <= 0}
+            onClick={() => step(-1)}
+          >
+            ‹
+          </button>
+          <button
+            className="nav-btn"
+            aria-label="Next member"
+            title="Next member"
+            disabled={position < 0 || position >= subobjects.length - 1}
+            onClick={() => step(1)}
+          >
+            ›
+          </button>
+        </span>
       </div>
-      <dl className="address-facts">
-        {addressFact(selected.onePast ? 'Boundary at' : `Located at (&${label})`, location.address)}
-        {d ? (
+    );
+
+  let valueEditor = null;
+  if (writable && isPointer(selected.type)) {
+    valueEditor = (
+      <label className="field">
+        <span>Target</span>
+        <select
+          aria-label={`Target of ${label}`}
+          value={targetValue}
+          onChange={e => {
+            const v = e.target.value;
+            onEdit((obj, s) =>
+              setRefValue(
+                s,
+                selected.ref,
+                v.startsWith('ref:')
+                  ? { kind: 'pointer', target: JSON.parse(v.slice(4)) }
+                  : { kind: v },
+              ),
+            );
+          }}
+        >
+          <option value="uninit">Uninitialized</option>
+          <option value="null">NULL</option>
+          {selected.value.kind === 'pointer' && !targetListed && (
+            <option value={targetValue} disabled>
+              {d?.qualifiedLabel ?? 'Invalid reference'} · {d?.status}
+            </option>
+          )}
+          {candidates.map(group => (
+            <optgroup
+              key={group.allocation.id}
+              label={qualifiedLabel(state, ref(group.allocation.id))}
+            >
+              {group.targets.map(item => (
+                <option key={JSON.stringify(item.ref)} value={`ref:${JSON.stringify(item.ref)}`}>
+                  {/* The pointer's type already fixes the target type, so only name and address. */}
+                  {resolveRef(state, item.ref).label} ·{' '}
+                  {formatAddress(referenceLocation(state, item.ref).address)}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+    );
+  } else if (writable && selected.type.name === 'bool') {
+    valueEditor = (
+      <label className="field">
+        <span>Value</span>
+        <select
+          aria-label={`Value of ${label}`}
+          value={selected.value.kind === 'scalar' ? String(selected.value.value) : ''}
+          onChange={e =>
+            onEdit((obj, s) =>
+              setRefValue(
+                s,
+                selected.ref,
+                e.target.value === ''
+                  ? { kind: 'uninit' }
+                  : { kind: 'scalar', value: Number(e.target.value) },
+              ),
+            )
+          }
+        >
+          <option value="">Uninitialized</option>
+          <option value="1">true</option>
+          <option value="0">false</option>
+        </select>
+      </label>
+    );
+  } else if (writable && isPrimitive(selected.type)) {
+    // Chars are edited as numbers; in Character mode the label names the character too.
+    const asCharacter =
+      chars === 'character' && selected.type.name === 'char' && selected.value.kind === 'scalar';
+    valueEditor = (
+      <label className="field">
+        <span>Value</span>
+        <span className="value-control">
+          <input
+            type="number"
+            aria-label={`Value of ${label}`}
+            value={selected.value.kind === 'scalar' ? selected.value.value : ''}
+            placeholder="uninitialized"
+            onChange={e =>
+              onEdit(
+                (obj, s) =>
+                  setRefValue(
+                    s,
+                    selected.ref,
+                    e.target.value === ''
+                      ? { kind: 'uninit' }
+                      : { kind: 'scalar', value: scalarFromInput(e.target.value, selected.type) },
+                  ),
+                // Typing a number is one undo step, not one per keystroke.
+                `value:${a.id}:${JSON.stringify(selected.ref.path)}`,
+              )
+            }
+          />
+          {asCharacter && <code>= {encodeCharLiteral(selected.value.value)}</code>}
+        </span>
+      </label>
+    );
+  }
+
+  const declaration =
+    editable && a.alive && (a.storage.kind === 'stack' || canEditType) ? (
+      <>
+        {a.storage.kind === 'stack' && (
+          <label className="field">
+            <span>Name</span>
+            <input
+              aria-label="Object name"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={e => {
+                if (e.key === 'Enter') e.currentTarget.blur();
+              }}
+            />
+          </label>
+        )}
+        {canEditType ? (
           <>
-            {addressFact(`Stores (${label})`, d.address)}
-            <div className="address-fact">
-              <dt>Points to</dt>
-              <dd
-                className={['dangling', 'invalid', 'one-past'].includes(d.status) ? 'warning' : ''}
-              >
-                <span>{pointsTo}</span>
-                {d.target && (
-                  <button className="mini-btn" onClick={() => onShowTarget(d.target)}>
-                    Show
-                  </button>
-                )}
-              </dd>
+            <div className="field">
+              <span>Type</span>
+              <div className="type-controls">
+                <select
+                  aria-label="Object base type"
+                  value={editor.base}
+                  onChange={e => setType({ base: e.target.value })}
+                >
+                  {PRIMITIVE_NAMES.map(t => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Pointer depth"
+                  title="Pointer depth"
+                  value={editor.stars}
+                  onChange={e => setType({ stars: Number(e.target.value) })}
+                >
+                  {Array.from({ length: Math.max(3, editor.stars) + 1 }, (_, n) => (
+                    <option key={n} value={n}>
+                      {'*'.repeat(n) || '–'}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <dt>Value (*{label})</dt>
-              <dd>
-                {d.status === 'valid' ? valueSummary(state, d.type, d.value) : 'Cannot dereference'}
-              </dd>
+            <div className="field">
+              <span>Shape</span>
+              <div className="shape-controls">
+                <div className="segmented" role="group" aria-label="Object shape">
+                  <button
+                    aria-pressed={editor.shape === 'scalar'}
+                    onClick={() => setType({ shape: 'scalar' })}
+                  >
+                    Single
+                  </button>
+                  <button
+                    aria-pressed={editor.shape === 'array'}
+                    onClick={() => setType({ shape: 'array' })}
+                  >
+                    Array
+                  </button>
+                </div>
+                {editor.shape === 'array' && (
+                  <span className="length-group">
+                    <span aria-hidden="true">[</span>
+                    <input
+                      type="number"
+                      aria-label="Array length"
+                      title={`1 to ${MAX_ARRAY_LENGTH}`}
+                      min="1"
+                      max={MAX_ARRAY_LENGTH}
+                      value={lengthText}
+                      onChange={e => setLength(e.target.value)}
+                      onBlur={() => setLengthText(String(a.type.length))}
+                    />
+                    <span aria-hidden="true">]</span>
+                  </span>
+                )}
+              </div>
             </div>
           </>
         ) : (
-          <div>
-            <dt>Value</dt>
-            <dd>
-              {selected.onePast
-                ? 'Cannot dereference'
-                : valueSummary(state, selected.type, selected.value)}
-            </dd>
+          <div className="field">
+            <span>Type</span>
+            <code>{typeToString(a.type)}</code>
           </div>
         )}
-      </dl>
-      {writable && (
-        <>
-          {isPointer(selected.type) ? (
-            <label>
-              Target
-              <select
-                aria-label={`Target of ${label}`}
-                value={targetValue}
-                onChange={e => {
-                  const v = e.target.value;
-                  onEdit((obj, s) =>
-                    setRefValue(
-                      s,
-                      selected.ref,
-                      v.startsWith('ref:')
-                        ? { kind: 'pointer', target: JSON.parse(v.slice(4)) }
-                        : { kind: v },
-                    ),
-                  );
-                }}
-              >
-                <option value="uninit">Uninitialized</option>
-                <option value="null">NULL</option>
-                {selected.value.kind === 'pointer' && !targetListed && (
-                  <option value={targetValue} disabled>
-                    {d?.qualifiedLabel ?? 'Invalid reference'} · {d?.status}
-                  </option>
-                )}
-                {candidates.map(group => (
-                  <optgroup
-                    key={group.allocation.id}
-                    label={qualifiedLabel(state, ref(group.allocation.id))}
-                  >
-                    {group.targets.map(item => (
-                      <option
-                        key={JSON.stringify(item.ref)}
-                        value={`ref:${JSON.stringify(item.ref)}`}
-                      >
-                        {resolveRef(state, item.ref).label} · {typeToString(item.type)} ·{' '}
-                        {formatAddress(referenceLocation(state, item.ref).address)}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-          ) : selected.type.name === 'bool' ? (
-            <label>
-              Value of {label}
-              <select
-                aria-label={`Value of ${label}`}
-                value={selected.value.kind === 'scalar' ? String(selected.value.value) : ''}
-                onChange={e =>
-                  onEdit((obj, s) =>
-                    setRefValue(
-                      s,
-                      selected.ref,
-                      e.target.value === ''
-                        ? { kind: 'uninit' }
-                        : { kind: 'scalar', value: Number(e.target.value) },
-                    ),
-                  )
-                }
-              >
-                <option value="">Uninitialized</option>
-                <option value="1">true</option>
-                <option value="0">false</option>
-              </select>
-            </label>
-          ) : (
-            isPrimitive(selected.type) && (
-              <label>
-                Value of {label}
-                <input
-                  type="number"
-                  aria-label={`Value of ${label}`}
-                  value={selected.value.kind === 'scalar' ? selected.value.value : ''}
-                  placeholder="uninitialized"
-                  onChange={e =>
-                    onEdit(
-                      (obj, s) =>
-                        setRefValue(
-                          s,
-                          selected.ref,
-                          e.target.value === ''
-                            ? { kind: 'uninit' }
-                            : {
-                                kind: 'scalar',
-                                value: scalarFromInput(e.target.value, selected.type),
-                              },
-                        ),
-                      // Typing a number is one undo step, not one per keystroke.
-                      `value:${a.id}:${JSON.stringify(selected.ref.path)}`,
-                    )
-                  }
-                />
-              </label>
-            )
-          )}
-        </>
-      )}
-      {editable && a.alive && (
-        <div className="object-editor">
-          {(a.storage.kind === 'stack' || canEditType) && (
-            <div className="type-row">
-              {a.storage.kind === 'stack' && (
-                <label>
-                  Name
-                  <input
-                    aria-label="Object name"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    onBlur={() => {
-                      if (name === a.name) return;
-                      // Reject before storing so a bad name never reaches the diagram.
-                      const error =
-                        variableNameError(name, state.structTypes) ??
-                        (state.allocations.some(
-                          o =>
-                            o.id !== a.id &&
-                            o.alive &&
-                            o.storage.kind === 'stack' &&
-                            o.storage.frameId === a.storage.frameId &&
-                            o.name === name,
-                        )
-                          ? `'${name}' is already used in this frame`
-                          : null);
-                      if (error) {
-                        setNotice(`Name not changed: ${error}.`);
-                        setName(a.name ?? '');
-                        return;
-                      }
-                      onEdit(obj => {
-                        obj.name = name;
-                      });
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') e.currentTarget.blur();
-                    }}
-                  />
-                </label>
+      </>
+    ) : null;
+
+  const actions = [];
+  if (editable && a.alive && a.storage.kind === 'heap')
+    actions.push(
+      <button
+        key="free"
+        className="plain-btn"
+        onClick={() =>
+          onEdit(obj => {
+            obj.alive = false;
+            return 'Marked as freed. Ctrl+Z undoes it.';
+          })
+        }
+      >
+        Mark as freed
+      </button>,
+    );
+  // Only for freed heap blocks in an editable diagram: C has no "unfree"; this is a drawing edit.
+  if (onRestore)
+    actions.push(
+      <button key="restore" className="plain-btn" onClick={onRestore}>
+        Mark as not freed
+      </button>,
+    );
+
+  return (
+    <aside className="inspector" aria-label={`Inspect ${allocationDisplayName(state, a)}`}>
+      <div className="inspector-heading">
+        <div>
+          <h4>
+            {declared ? (
+              declarationToC(a.type, a.name)
+            ) : (
+              <>
+                {label} <span className="inspector-type">{typeToString(selected.type)}</span>
+              </>
+            )}
+          </h4>
+          <div className="inspector-context">
+            <span>
+              <code title={formatAddress(location.address, true)}>
+                {selected.onePast && 'boundary '}
+                {formatAddress(location.address)}
+              </code>
+              {Number.isSafeInteger(location.address) && (
+                <button
+                  className="icon-btn inline"
+                  aria-label={`Copy address of ${label}`}
+                  title="Copy full address"
+                  onClick={() => copy(location.address, `address of ${label}`)}
+                >
+                  ⧉
+                </button>
               )}
-              {canEditType && (
-                <label>
-                  Shape
-                  <select
-                    aria-label="Object shape"
-                    value={editor.shape}
-                    onChange={e => setType({ shape: e.target.value })}
-                  >
-                    <option value="scalar">scalar</option>
-                    <option value="array">array</option>
-                  </select>
-                </label>
-              )}
-            </div>
-          )}
-          {canEditType && (
+            </span>
+            {[...context, lifetime].filter(Boolean).map(item => (
+              <span key={item} className={item === lifetime ? 'warning' : undefined}>
+                <span className="context-dot" aria-hidden="true">
+                  ·
+                </span>
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+        <button className="icon-btn" onClick={onClose} aria-label="Close inspector" title="Close">
+          ✕
+        </button>
+      </div>
+      {memberPicker}
+
+      <section aria-label="Memory">
+        <h5 className="inspector-section">
+          Memory
+          <span
+            className="info-dot"
+            tabIndex={0}
+            role="img"
+            aria-label="Simulated addresses; real programs may differ."
+            title="Simulated addresses; real programs may differ."
+          >
+            ⓘ
+          </span>
+        </h5>
+        <dl className="facts">
+          {d ? (
             <>
-              <div className="type-row">
-                <label>
-                  Type
-                  <select
-                    aria-label="Object base type"
-                    value={editor.base}
-                    onChange={e => setType({ base: e.target.value })}
-                  >
-                    {PRIMITIVE_NAMES.map(t => (
-                      <option key={t}>{t}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Pointer depth
-                  <select
-                    aria-label="Pointer depth"
-                    value={editor.stars}
-                    onChange={e => setType({ stars: Number(e.target.value) })}
-                  >
-                    {Array.from({ length: Math.max(3, editor.stars) + 1 }, (_, n) => (
-                      <option key={n} value={n}>
-                        {'*'.repeat(n) || '(value)'}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {editor.shape === 'array' && (
-                <label>
-                  Array length (max {MAX_ARRAY_LENGTH})
-                  <input
-                    type="number"
-                    aria-label="Array length"
-                    min="1"
-                    max={MAX_ARRAY_LENGTH}
-                    value={editor.length}
-                    onChange={e => setType({ length: clampArrayLength(e.target.value) })}
-                  />
-                </label>
+              {fact(
+                label,
+                `Address stored in ${label}`,
+                <span className="slot-stack">
+                  {pointerSlot}
+                  {targetLine}
+                </span>,
+                {
+                  action: Number.isSafeInteger(d.address) && (
+                    <button
+                      className="icon-btn"
+                      aria-label={`Copy address stored in ${label}`}
+                      title="Copy full address"
+                      onClick={() => copy(d.address, `address stored in ${label}`)}
+                    >
+                      ⧉
+                    </button>
+                  ),
+                },
+              )}
+              {fact(
+                `*${label}`,
+                `Value of *${label}`,
+                d.status === 'valid' ? (
+                  valueSlot(d.type, d.value)
+                ) : (
+                  <span className="muted-note">cannot dereference</span>
+                ),
               )}
             </>
+          ) : selected.onePast ? (
+            fact('Value', 'Value', <span className="muted-note">cannot dereference</span>)
+          ) : (
+            // The heading already names the object; only pointers need t vs *t to teach dereferencing.
+            fact('Value', `Value of ${label}`, valueSlot(selected.type, selected.value))
           )}
-          <div className="inspector-actions">
-            {a.storage.kind === 'heap' && (
-              <button
-                className="plain-btn"
-                onClick={() =>
-                  onEdit(obj => {
-                    obj.alive = false;
-                    return 'Marked as freed. Ctrl+Z undoes it.';
-                  })
-                }
-              >
-                Mark as freed
-              </button>
-            )}
-            <button className="plain-btn danger" onClick={onDelete}>
-              Delete object
-            </button>
+        </dl>
+      </section>
+
+      {(valueEditor || declaration) && (
+        <section aria-label="Edit">
+          <h5 className="inspector-section">Edit</h5>
+          <div className="edit-grid">
+            {valueEditor}
+            {declaration}
           </div>
+        </section>
+      )}
+
+      {((editable && a.alive) || onRestore) && (
+        <div className="inspector-footer">
+          {actions}
+          <button className="text-btn danger" onClick={onDelete} aria-label="Delete object">
+            Delete
+          </button>
         </div>
       )}
-      {onRestore && (
-        // Only for freed heap blocks in an editable diagram: C has no "unfree"; this is a drawing edit.
-        <div className="object-editor">
-          <div className="inspector-actions">
-            <button className="plain-btn" onClick={onRestore}>
-              Mark as not freed
-            </button>
-            <button className="plain-btn danger" onClick={onDelete}>
-              Delete object
-            </button>
-          </div>
-        </div>
-      )}
-      <p className="inspector-help">
-        Simulated addresses; real programs may place objects differently.
-      </p>
       <div className="inspector-notice" role="status" aria-live="polite">
         {notice}
       </div>

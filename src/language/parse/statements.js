@@ -55,7 +55,7 @@ export function parseFunction(node, structTypes) {
     }
     const base = parseBaseType(pTypeNode, structTypes);
     if (!pDecl) throw unsupported(p, 'function parameters need names in PointerViz');
-    const info = parseDeclarator(pDecl, base, structTypes);
+    const info = parseDeclarator(pDecl, base, structTypes, { parameter: true });
     // C adjusts array parameters to pointers.
     const type = info.type.kind === 'array' ? pointer(info.type.of) : info.type;
     params.push({ name: info.name, type, loc: locOf(p) });

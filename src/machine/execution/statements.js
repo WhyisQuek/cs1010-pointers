@@ -3,7 +3,9 @@
  * control signal ({ control: 'return' | 'break' | 'continue' }) that loops and
  * function calls consume.
  */
+import { stringInitializerLiteral } from '../../language/literals.js';
 import {
+  CHAR,
   isArray,
   isPointer,
   isPrimitive,
@@ -241,6 +243,7 @@ function execDeclaration(decl, ctx, env, frame) {
 }
 
 function initializeAggregate(targetRef, type, initializer, ctx, env, frame, node) {
+  if (initializeFromString(targetRef, type, initializer, ctx, node)) return;
   if (initializer.kind !== 'InitializerList') {
     // Struct copy initialization is useful for function/local code.
     if (isStruct(type)) {
@@ -268,7 +271,8 @@ function initializeMembers(targetRef, type, elements, cursor, ctx, env, frame, n
     }
     const child = elements[cursor.index];
     if (isArray(member.type) || isStruct(member.type)) {
-      if (child.kind === 'InitializerList') {
+      if (initializeFromString(childRef, member.type, child, ctx, node)) cursor.index++;
+      else if (child.kind === 'InitializerList') {
         cursor.index++;
         initializeAggregate(childRef, member.type, child, ctx, env, frame, node);
       } else if (
@@ -295,6 +299,19 @@ function initializeMembers(targetRef, type, elements, cursor, ctx, env, frame, n
       );
     }
   }
+}
+
+/** char a[N] = "..." copies the characters, then pads with '\0' (C 6.7.9p14, p21). */
+function initializeFromString(targetRef, type, initializer, ctx, node) {
+  const literal = stringInitializerLiteral(initializer);
+  if (!literal || !isArray(type) || !typeEquals(type.of, CHAR)) return false;
+  if (literal.value.length > type.length)
+    throw semanticError(node, `initializer-string is too long for ${typeToString(type)}`);
+  for (let i = 0; i < type.length; i++) {
+    const rv = { type: CHAR, value: { kind: 'scalar', value: literal.value[i] ?? 0 } };
+    assignToRef(ref(targetRef.allocationId, [...targetRef.path, i]), CHAR, rv, ctx, node);
+  }
+  return true;
 }
 
 function zeroInitialize(targetRef, type, ctx) {

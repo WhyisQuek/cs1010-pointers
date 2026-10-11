@@ -1,5 +1,5 @@
 /** Expression evaluation to runtime values: { type, value }. */
-import { decodeCharLiteral } from '../../language/literals.js';
+import { decodeCharLiteral, encodeStringLiteral } from '../../language/literals.js';
 import {
   convertNumber,
   isIntegerType,
@@ -7,8 +7,8 @@ import {
   promote,
   SIZE_T,
 } from '../../language/numeric.js';
-import { INT, isArray, isPointer, pointer, sizeOf } from '../../language/types.js';
-import { pointerValue, sameRef } from '../memory.js';
+import { CHAR, INT, array, isArray, isPointer, pointer, sizeOf } from '../../language/types.js';
+import { addAllocation, pointerValue, ref, sameRef, staticAllocations } from '../memory.js';
 import { evalCall } from './calls.js';
 import {
   assignToRef,
@@ -51,6 +51,12 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
       return { type: INT, value: { kind: 'scalar', value: decodeCharLiteral(expr.raw) } };
     case 'NullLiteral':
       return intResult(0);
+    case 'StringLiteral':
+      // Like any array, the literal decays to a pointer to its first char.
+      return {
+        type: pointer(CHAR),
+        value: pointerValue(ref(stringLiteralObject(expr.value, ctx).id, [0])),
+      };
     case 'Identifier':
       if (expr.name === 'NULL') return intResult(0);
       // loadLValue decays an array to a pointer to its first element.
@@ -173,6 +179,26 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
     default:
       throw semanticError(expr, `unsupported expression ${expr.kind}`);
   }
+}
+
+/**
+ * The static char array holding a literal, created on first evaluation. Equal literals
+ * share one object, which C permits (6.4.5p7) and every common compiler does.
+ */
+export function stringLiteralObject(codes, ctx) {
+  const name = encodeStringLiteral(codes);
+  return (
+    staticAllocations(ctx.state).find(a => a.name === name) ??
+    addAllocation(ctx.state, {
+      name,
+      type: array(CHAR, codes.length + 1),
+      storage: { kind: 'static' },
+      value: {
+        kind: 'aggregate',
+        elements: [...codes, 0].map(value => ({ kind: 'scalar', value })),
+      },
+    })
+  );
 }
 
 export function evalCondition(expr, ctx, env, frame) {

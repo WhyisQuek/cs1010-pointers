@@ -1,5 +1,7 @@
 /** MemoryState -> one canonical PointerViz Mini-C program. */
+import { encodeStringLiteral } from '../language/literals.js';
 import {
+  CHAR,
   containsPrimitive,
   declarationToC,
   isArray,
@@ -52,6 +54,10 @@ export function validate(state) {
       namesByFrame.set(frameId, names);
     } else if (a.storage?.kind === 'heap') {
       if (a.name) errors.push(`heap allocations must not have source-level variable names`);
+    } else if (a.storage?.kind === 'static') {
+      const literal = literalCodes(a);
+      if (!literal || encodeStringLiteral(literal) !== a.name)
+        errors.push(`string literal ${a.name} does not hold its characters and a final '\\0'`);
     } else errors.push(`allocation ${a.id} has invalid storage kind`);
     try {
       validateObjectType(a.type, state.structTypes ?? {});
@@ -293,6 +299,12 @@ function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
     return true;
   }
   const target = getAllocation(ctx.state, value.target.allocationId);
+  if (target.storage.kind === 'static') {
+    // A literal decays to &literal[0]; any other element is an offset from it.
+    const [index] = value.target.path;
+    ctx.lines.push(`${lhs} = ${target.name}${index ? ` + ${index}` : ''};`);
+    return true;
+  }
   if (target.storage.kind === 'stack') {
     const path = value.target.path,
       singletonPast = path.at(-1) === '$onePast';
@@ -408,6 +420,14 @@ function mallocExpr(heap) {
 }
 function parenIfNeeded(expr) {
   return /^[A-Za-z_]\w*$/.test(expr) ? expr : `(${expr})`;
+}
+/** A static char array's characters before its one, final '\0', or null if it is not one. */
+function literalCodes(a) {
+  if (!isArray(a.type) || !typeEquals(a.type.of, CHAR) || a.value?.kind !== 'aggregate')
+    return null;
+  const codes = a.value.elements.map(e => (e?.kind === 'scalar' ? e.value : null));
+  if (codes.at(-1) !== 0 || codes.includes(null)) return null;
+  return codes.slice(0, -1);
 }
 function hasMeaningfulValue(type, value, state) {
   if (isPrimitive(type) || isPointer(type)) return value.kind !== 'uninit';

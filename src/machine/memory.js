@@ -222,6 +222,8 @@ export function setRefValue(state, targetRef, nextValue) {
     allowDead: false,
   });
   if (invalid || onePast) throw new Error('write outside object bounds');
+  if (allocation.storage.kind === 'static')
+    throw new Error('cannot modify a string literal (undefined behavior)');
   if (container) container[key] = structuredClone(nextValue);
   else allocation.value = structuredClone(nextValue);
 }
@@ -283,6 +285,9 @@ export function pointerEdges(state) {
 
 export const stackAllocations = state => state.allocations.filter(a => a.storage.kind === 'stack');
 export const heapAllocations = state => state.allocations.filter(a => a.storage.kind === 'heap');
+/** String literal objects: named by their C spelling, never written, alive for the whole run. */
+export const staticAllocations = state =>
+  state.allocations.filter(a => a.storage.kind === 'static');
 export const frameAllocations = (state, frameId) =>
   stackAllocations(state).filter(a => a.storage.frameId === frameId);
 

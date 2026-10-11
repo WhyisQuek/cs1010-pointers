@@ -8,17 +8,19 @@ import {
   pointerEdges,
   resolveRef,
   scalarSubobjects,
+  staticAllocations,
 } from '../machine/memory.js';
 import { describePointer } from './addressPresentation.js';
 import { curvePointer } from './routing.js';
 
 /** Row/box metrics; memoryMetricsStyle mirrors them into CSS custom properties. */
 export const GEOMETRY = {
-  header: 34,
-  metadata: 24,
-  columns: 24,
+  // Name and type, then a quiet "address · size" line.
+  header: 44,
   row: 32,
   pointerStatus: 20,
+  // Bottom padding under the last row, including the 1px borders.
+  footer: 8,
   lifetime: 24,
   padding: 24,
   top: 52,
@@ -35,18 +37,14 @@ export const memoryMetricsStyle = Object.fromEntries(
 );
 export function allocationMetrics(a, state) {
   const aggregate = isArray(a.type) || isStruct(a.type);
-  let top =
-    GEOMETRY.header +
-    GEOMETRY.metadata +
-    (aggregate ? GEOMETRY.columns : 0) +
-    (a.alive ? 0 : GEOMETRY.lifetime);
+  let top = GEOMETRY.header + (a.alive ? 0 : GEOMETRY.lifetime);
   const rows = scalarSubobjects(a, state).map(s => {
     const height = GEOMETRY.row + (isPointer(s.type) ? GEOMETRY.pointerStatus : 0);
     const row = { ...s, top, height };
     top += height;
     return row;
   });
-  return { aggregate, rows, height: top + 2 };
+  return { aggregate, rows, height: top + GEOMETRY.footer };
 }
 const locationKey = (state, scalar) => {
   try {
@@ -209,11 +207,13 @@ export function stateToFlow(
     rightEdge = Math.max(rightEdge, position.x + width);
   }
   let heapY = 124;
-  const heap = heapAllocations(state);
+  // String literals share the free-standing column below the heap and are never editable.
+  const heap = [...heapAllocations(state), ...staticAllocations(state)];
   const occupiedHeap = heap.flatMap(a =>
     positions[a.id] ? [{ ...positions[a.id], ...allocationSize(a, state) }] : [],
   );
   for (const a of heap) {
+    const readOnly = a.storage.kind === 'static';
     const size = allocationSize(a, state);
     let position = positions[a.id];
     if (!position) {
@@ -240,12 +240,12 @@ export function stateToFlow(
       draggable: true,
       selectable: true,
       // A freed block can still be deleted from an editable diagram.
-      deletable: editable,
+      deletable: editable && !readOnly,
       data: {
         allocation: a,
         state,
         ...changes(a),
-        editable: editable && a.alive,
+        editable: editable && a.alive && !readOnly,
         bad: badIds.has(a.id),
       },
     });

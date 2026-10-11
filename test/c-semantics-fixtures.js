@@ -213,6 +213,21 @@ export const programs = [
     8,
   ],
   [
+    'string literal through a pointer parameter',
+    'int len(char *s){int n=0;while(s[n])n++;return n;} int main(void){char *t="hello";char buf[]="hi";char rows[2][4]={"ab",{"cde"}};int result=len(t)*100+len(buf)*10+len(rows[1])+sizeof("abc")*1000+"xyz"[2]*0+(t=="hello");}',
+    4524,
+  ],
+  [
+    'unsized array parameters adjust to pointers',
+    'int sum(int arr[], int len){int s=0;for(int i=0;i<len;i++)s+=arr[i];return s+sizeof(arr);} int main(void){int a[]={1,2,3};int result=sum(a,3);}',
+    14,
+  ],
+  [
+    'unsized outer dimension of 2D array parameter',
+    'int f(int m[][2]){return m[1][1]+sizeof(m);} int main(void){int a[2][2]={{1,2},{3,4}};int result=f(a);}',
+    12,
+  ],
+  [
     'struct field array decays',
     'struct S { int a[3]; }; int main(void){struct S s={{1,2,3}};int *p=s.a;int result=p[2];}',
     3,

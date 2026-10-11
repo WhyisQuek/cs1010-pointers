@@ -38,6 +38,12 @@ import { upgradeMemoryState } from '../machine/addresses.js';
 import { removeAllocation } from '../machine/editing.js';
 import { describePointer, formatAddress } from '../flow/addressPresentation.js';
 import MemoryInspector from './MemoryInspector.jsx';
+import {
+  CHAR_MODES,
+  VIEW_MODES,
+  useCharPreference,
+  useViewPreference,
+} from '../data/viewPreference.js';
 
 const FIT = { padding: 0.15, maxZoom: 1 };
 const TOAST_MS = 4000;
@@ -118,6 +124,9 @@ export default function MemoryCanvas({
   const [measurements, setMeasurements] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [view, setView] = useViewPreference();
+  const [chars, setChars] = useCharPreference();
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const { nodes, edges } = useMemo(() => {
     const result = stateToFlow(state, {
       ...history.present,
@@ -138,6 +147,8 @@ export default function MemoryCanvas({
     }));
     result.edges = result.edges.map(e => ({
       ...e,
+      // The Addresses view keeps only the selected box's arrows, so a pointer can still be traced.
+      hidden: view === 'addresses' && e.source !== selectedId,
       selected: e.selectable && e.id === selectedEdgeId,
     }));
     return result;
@@ -152,6 +163,7 @@ export default function MemoryCanvas({
     selectedId,
     selectedEdgeId,
     editedPreviousState,
+    view,
   ]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -417,6 +429,8 @@ export default function MemoryCanvas({
     className: `${n.className ?? ''}${n.id === selectedFrame?.id ? ' frame-owner-active' : ''}`,
     data: {
       ...n.data,
+      view,
+      chars,
       onInspect: path => inspect(n.id, path),
       inspectedPath:
         inspection?.allocationId === n.id && selectedId === n.id ? inspection.path : undefined,
@@ -477,6 +491,11 @@ export default function MemoryCanvas({
           undoOrRedo(event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo');
         }
         if (event.key === 'Escape') {
+          // Escape closes the innermost thing first: the View menu, then menus and the inspector.
+          if (viewMenuOpen) {
+            setViewMenuOpen(false);
+            return;
+          }
           setMenu(null);
           closeInspector();
         }
@@ -508,6 +527,7 @@ export default function MemoryCanvas({
           }}
           onPaneClick={() => {
             setMenu(null);
+            setViewMenuOpen(false);
             closeInspector();
             setSelectedEdgeId(null);
           }}
@@ -548,29 +568,41 @@ export default function MemoryCanvas({
             </ControlButton>
           </Controls>
         </ReactFlow>
-        {(editable || hiddenCount > 0) && (
-          <div className="canvas-overlay">
-            {editable && (
-              <>
-                <button className="plain-btn" onClick={() => addBox('stack', addFrameId)}>
-                  + Variable
-                </button>
-                <button className="plain-btn" onClick={() => addBox('heap')}>
-                  + Heap block
-                </button>
-              </>
-            )}
-            {hiddenCount > 0 && (
-              <button
-                className="plain-btn canvas-chip"
-                aria-pressed={showExpired}
-                onClick={() => setShowExpired(v => !v)}
-              >
-                {showExpired ? 'Hide out-of-scope memory' : `Show out-of-scope (${hiddenCount})`}
+        <div className="canvas-overlay">
+          <ViewMenu
+            view={view}
+            chars={chars}
+            open={viewMenuOpen}
+            onOpenChange={setViewMenuOpen}
+            onChange={next => {
+              setView(next);
+              setViewMenuOpen(false);
+            }}
+            onCharsChange={next => {
+              setChars(next);
+              setViewMenuOpen(false);
+            }}
+          />
+          {editable && (
+            <>
+              <button className="plain-btn" onClick={() => addBox('stack', addFrameId)}>
+                + Variable
               </button>
-            )}
-          </div>
-        )}
+              <button className="plain-btn" onClick={() => addBox('heap')}>
+                + Heap block
+              </button>
+            </>
+          )}
+          {hiddenCount > 0 && (
+            <button
+              className="plain-btn canvas-chip"
+              aria-pressed={showExpired}
+              onClick={() => setShowExpired(v => !v)}
+            >
+              {showExpired ? 'Hide out-of-scope memory' : `Show out-of-scope (${hiddenCount})`}
+            </button>
+          )}
+        </div>
         {menu && (
           <div className="canvas-context-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
             {menu.frameId ? (
@@ -613,6 +645,7 @@ export default function MemoryCanvas({
             allocation={selected}
             state={state}
             path={inspection?.allocationId === selected.id ? inspection.path : []}
+            chars={chars}
             editable={!!selectedNode?.data.editable}
             onEdit={(fn, merge) => mutate(s => fn(getAllocation(s, selected.id), s), merge)}
             onDelete={() => {
@@ -645,6 +678,85 @@ export default function MemoryCanvas({
           {status?.text}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "View: Both ▾" with a menu of the three presets, plus how char values read.
+ * The menu closes on outside clicks.
+ */
+function ViewMenu({ view, chars, open, onOpenChange, onChange, onCharsChange }) {
+  const root = useRef(null);
+  const toggle = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = event => {
+      if (!root.current?.contains(event.target)) onOpenChange(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [open, onOpenChange]);
+  const current = VIEW_MODES.find(m => m.id === view) ?? VIEW_MODES[0];
+  return (
+    <div className="view-menu" ref={root}>
+      <button
+        ref={toggle}
+        className="plain-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Choose whether the diagram shows addresses, arrows, or both, and how char values read"
+        onClick={() => onOpenChange(!open)}
+      >
+        View: {current.label} ▾
+      </button>
+      {open && (
+        <div className="view-menu-list" role="menu" aria-label="View">
+          <div className="view-menu-heading" role="presentation">
+            Show
+          </div>
+          {VIEW_MODES.map(mode => (
+            <button
+              key={mode.id}
+              role="menuitemradio"
+              aria-checked={mode.id === view}
+              onClick={() => {
+                onChange(mode.id);
+                // The chosen item disappears with the menu; keep focus (and Escape, Ctrl+Z) in the canvas.
+                toggle.current?.focus();
+              }}
+            >
+              <span className="view-menu-check" aria-hidden="true">
+                {mode.id === view ? '✓' : ''}
+              </span>
+              {mode.label}
+            </button>
+          ))}
+          <div className="view-menu-heading" role="presentation">
+            char values
+          </div>
+          {CHAR_MODES.map(mode => (
+            <button
+              key={mode.id}
+              role="menuitemradio"
+              aria-checked={mode.id === chars}
+              aria-label={`Show char values as ${mode.label.toLowerCase()}s, like ${mode.example}`}
+              onClick={() => {
+                onCharsChange(mode.id);
+                toggle.current?.focus();
+              }}
+            >
+              <span className="view-menu-check" aria-hidden="true">
+                {mode.id === chars ? '✓' : ''}
+              </span>
+              {mode.label}
+              <code className="view-menu-example" aria-hidden="true">
+                {mode.example}
+              </code>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

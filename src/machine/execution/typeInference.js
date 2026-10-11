@@ -1,7 +1,9 @@
 /** Static expression types, used where C needs a type without evaluating (sizeof, initializers). */
 import { arithmeticType, isIntegerType, promote, SIZE_T } from '../../language/numeric.js';
 import {
+  CHAR,
   INT,
+  array,
   isArray,
   isPointer,
   isPrimitive,
@@ -51,6 +53,7 @@ export function inferExpressionType(expr, ctx, env, frame) {
   }
   if (expr.kind === 'IntLiteral' || expr.kind === 'FloatLiteral') return expr.type ?? INT;
   if (expr.kind === 'CharLiteral' || expr.kind === 'NullLiteral') return INT;
+  if (expr.kind === 'StringLiteral') return array(CHAR, expr.value.length + 1);
   if (expr.kind === 'SizeofType' || expr.kind === 'SizeofExpression') return SIZE_T;
   if (expr.kind === 'Call') {
     if (expr.name === 'free') return { kind: 'void' };
