@@ -123,7 +123,7 @@ function TargetHandles({ path = [], state, allocation, sourceType, editable }) {
   ));
 }
 
-function Value({ state, value, type, viewMode }) {
+function Value({ state, value, type }) {
   if (isPointer(type)) {
     const d = describePointer(state, value);
     const text =
@@ -138,26 +138,7 @@ function Value({ state, value, type, viewMode }) {
       <span
         className={`val pointer-value ${['dangling', 'invalid'].includes(d.status) ? 'dangling' : 'ptr'}`}
       >
-        {viewMode === 'arrows' && d.target ? (
-          <svg
-            className="pointer-indicator"
-            width="30"
-            height="20"
-            viewBox="0 0 30 20"
-            aria-hidden="true"
-          >
-            <path
-              d="M2 10H26M18 3L26 10L18 17"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : (
-          text
-        )}
+        {text}
       </span>
     );
   }
@@ -177,7 +158,6 @@ function MemoryAllocationNode({ id, data, selected }) {
     changed,
     changedPaths,
     sourceSides,
-    viewMode = 'both',
     inspectedPath,
   } = data;
   const fromHandle = useConnection(connection => connection.fromHandle);
@@ -209,7 +189,7 @@ function MemoryAllocationNode({ id, data, selected }) {
   return (
     <div
       style={memoryMetricsStyle}
-      className={`mem-cell view-${viewMode} ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}
+      className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}
     >
       <div className="head">
         {(isArray(a.type) || isStruct(a.type)) && <TargetHandles {...targetProps} />}
@@ -229,13 +209,7 @@ function MemoryAllocationNode({ id, data, selected }) {
       </div>
       <div className="memory-address-strip">
         <span>
-          {viewMode === 'arrows' ? (
-            a.storage.kind
-          ) : (
-            <>
-              Address <code>{formatAddress(a.baseAddress)}</code>
-            </>
-          )}
+          Address <code>{formatAddress(a.baseAddress)}</code>
         </span>
         <span>{sizeOf(a.type, state.structTypes)} bytes</span>
       </div>
@@ -247,7 +221,7 @@ function MemoryAllocationNode({ id, data, selected }) {
       {aggregate && (
         <div className="memory-columns">
           <span>Member</span>
-          {viewMode !== 'arrows' && <span>Address</span>}
+          <span>Address</span>
           <span>Value</span>
         </div>
       )}
@@ -280,19 +254,15 @@ function MemoryAllocationNode({ id, data, selected }) {
                 >
                   {s.ref.path.length ? formatPath(s.ref.path) : 'Value'}
                 </button>
-                {aggregate && viewMode !== 'arrows' && (
-                  <code className="sub-address">{address}</code>
-                )}
-                <Value state={state} type={s.type} value={s.value} viewMode={viewMode} />
+                {aggregate && <code className="sub-address">{address}</code>}
+                <Value state={state} type={s.type} value={s.value} />
               </div>
               {pointerInfo && (
                 <div
                   className={`pointer-caption ${['dangling', 'invalid', 'one-past'].includes(pointerInfo.status) ? 'warning' : ''}`}
                   title={pointerCaption(pointerInfo)}
                 >
-                  {s.value.kind === 'null' && viewMode !== 'arrows'
-                    ? '0x00000000 · no target'
-                    : pointerCaption(pointerInfo)}
+                  {s.value.kind === 'null' ? '0x00000000 · no target' : pointerCaption(pointerInfo)}
                 </div>
               )}
               {pointerInfo &&

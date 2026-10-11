@@ -21,7 +21,7 @@ export { expect };
 /** Open the app and wait until the C parser (both WASM files) has loaded. */
 export async function openApp(page) {
   await page.goto('./');
-  await expect(page.getByRole('button', { name: 'Run →' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
 }
 
 export async function openTab(page, name) {

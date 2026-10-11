@@ -266,24 +266,17 @@ test('growing an array revalidates incoming one-past status', () => {
   changeAllocationType(s, a.id, array(int, 3));
   assert.equal(describePointer(s, p.value).status, 'valid');
 });
-test('all three views preserve state, geometry, routing and exact typed targets', () => {
+test('the memory view preserves state, geometry, routing and exact typed targets', () => {
   const s = makeState(),
     a = object(s, 'a', array(int, 3));
   const p = object(s, 'p', pointer(int), { value: pointerValue(ref(a.id, [1])) });
   const before = structuredClone(s),
-    both = stateToFlow(s),
-    arrows = stateToFlow(s, { viewMode: 'arrows' }),
-    numbers = stateToFlow(s, { viewMode: 'addresses' });
+    first = stateToFlow(s),
+    again = stateToFlow(s);
   const geometry = flow => flow.nodes.map(n => [n.id, n.position, n.width, n.height]);
-  assert.deepEqual(geometry(both), geometry(arrows));
-  assert.deepEqual(geometry(both), geometry(numbers));
-  assert.equal(both.edges[0].hidden, false);
-  assert.equal(numbers.edges[0].hidden, true);
-  assert.equal(numbers.edges[0].data.path, both.edges[0].data.path);
-  assert.equal(
-    stateToFlow(s, { viewMode: 'addresses', revealedPointer: ref(p.id) }).edges[0].hidden,
-    false,
-  );
+  assert.deepEqual(geometry(first), geometry(again));
+  assert.ok(!first.edges[0].hidden);
+  assert.equal(first.edges[0].data.path, again.edges[0].data.path);
   assert.deepEqual(s, before);
   const metrics = allocationMetrics(p, s);
   assert.equal(metrics.rows[0].height, GEOMETRY.row + GEOMETRY.pointerStatus);

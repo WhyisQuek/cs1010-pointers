@@ -1,5 +1,7 @@
 # PointerViz UI/UX review
 
+> **Superseded in part (11 October 2026):** layout, toolbar and inspector recommendations were reworked and implemented in [SANDBOX_UI_PLAN.md](SANDBOX_UI_PLAN.md). The Generate-from-snapshot fix (section 6) is done. Draft persistence, semantic undo and the other non-layout findings remain open.
+
 Reviewed 25 September 2026 against the current working tree, including the new memory-address interface.
 
 ## Assessment

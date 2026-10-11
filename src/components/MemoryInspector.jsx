@@ -92,7 +92,7 @@ export default function MemoryInspector({
     <div className="address-fact">
       <dt>{title}</dt>
       <dd>
-        <code>{formatAddress(address, true)}</code>
+        <code title={formatAddress(address, true)}>{formatAddress(address)}</code>
         {Number.isSafeInteger(address) && (
           <button
             className="mini-btn"
@@ -133,12 +133,24 @@ export default function MemoryInspector({
   const targetListed = candidates.some(group =>
     group.targets.some(item => `ref:${JSON.stringify(item.ref)}` === targetValue),
   );
+  const lifetime = a.alive ? null : a.storage.kind === 'heap' ? 'freed' : 'out of scope';
+  const pointsTo = !d
+    ? null
+    : d.status === 'null'
+      ? 'NULL · no target'
+      : d.status === 'uninitialized'
+        ? 'Uninitialized · no stored address'
+        : d.status === 'valid'
+          ? (d.qualifiedLabel ?? d.label)
+          : `${d.status === 'dangling' ? 'Dangling · former target' : d.status} ${d.qualifiedLabel ?? d.label}`;
   return (
     <aside className="inspector" aria-label={`Inspect ${allocationDisplayName(state, a)}`}>
       <div className="inspector-heading">
-        <h4>Inspect {allocationDisplayName(state, a)}</h4>
-        <button className="plain-btn" onClick={onClose} aria-label="Close inspector">
-          Close
+        <h4>
+          {label} <span className="inspector-type">· {typeToString(selected.type)}</span>
+        </h4>
+        <button className="mini-btn" onClick={onClose} aria-label="Close inspector" title="Close">
+          ✕
         </button>
       </div>
       {subobjects.length > 1 && (
@@ -161,50 +173,39 @@ export default function MemoryInspector({
         </label>
       )}
       <div className="inspector-summary">
-        {qualifiedLabel(state, selected.ref)} · {typeToString(selected.type)}
-        <br />
-        {a.storage.kind} ·{' '}
-        {a.alive ? 'alive' : a.storage.kind === 'heap' ? 'freed' : 'out of scope'}
+        {qualifiedLabel(state, selected.ref)} ·{' '}
+        {selected.onePast
+          ? 'one-past · no storage'
+          : `${sizeOf(selected.type, state.structTypes)} bytes`}{' '}
+        · +{location.offset}
+        {lifetime && <span className="warning"> · {lifetime}</span>}
       </div>
       <dl className="address-facts">
-        {addressFact(
-          selected.onePast ? 'Boundary address' : `Address of ${label} (&${label})`,
-          location.address,
-        )}
-        <div>
-          <dt>{selected.onePast ? 'Boundary' : 'Size and offset'}</dt>
-          <dd>
-            {selected.onePast
-              ? 'One-past · no storage here'
-              : `${sizeOf(selected.type, state.structTypes)} bytes`}{' '}
-            · +{location.offset} bytes from {allocationDisplayName(state, a)}
-          </dd>
-        </div>
-        {d && (
+        {addressFact(selected.onePast ? 'Boundary at' : `Located at (&${label})`, location.address)}
+        {d ? (
           <>
-            {addressFact(`Stored address (${label})`, d.address)}
-            <div>
-              <dt>Pointer status</dt>
+            {addressFact(`Stores (${label})`, d.address)}
+            <div className="address-fact">
+              <dt>Points to</dt>
               <dd
                 className={['dangling', 'invalid', 'one-past'].includes(d.status) ? 'warning' : ''}
               >
-                {d.status === 'null' ? 'NULL · no target' : d.status}
-                {d.status === 'uninitialized' && ' · stored address unknown'}
+                <span>{pointsTo}</span>
+                {d.target && (
+                  <button className="mini-btn" onClick={() => onShowTarget(d.target)}>
+                    Show
+                  </button>
+                )}
               </dd>
             </div>
             <div>
-              <dt>{d.status === 'dangling' ? 'Former target' : 'Target'}</dt>
-              <dd>{d.qualifiedLabel ?? d.label}</dd>
-            </div>
-            <div>
-              <dt>Target value (*{label})</dt>
+              <dt>Value (*{label})</dt>
               <dd>
                 {d.status === 'valid' ? valueSummary(state, d.type, d.value) : 'Cannot dereference'}
               </dd>
             </div>
           </>
-        )}
-        {!d && (
+        ) : (
           <div>
             <dt>Value</dt>
             <dd>
@@ -215,21 +216,6 @@ export default function MemoryInspector({
           </div>
         )}
       </dl>
-      {d?.target && (
-        <button className="plain-btn" onClick={() => onShowTarget(d.target, selected.ref)}>
-          {d.status === 'one-past'
-            ? 'Show boundary'
-            : d.status === 'dangling'
-              ? 'Show expired target'
-              : 'Show target'}
-        </button>
-      )}
-      {d && (
-        <p className="inspector-help">
-          A pointer has its own address and stores the address of its target. Pointers occupy 8
-          bytes; canvas addresses omit leading zeros.
-        </p>
-      )}
       {writable && (
         <>
           {isPointer(selected.type) ? (
@@ -307,39 +293,44 @@ export default function MemoryInspector({
       )}
       {editable && a.alive && (
         <div className="object-editor">
-          <h4>Edit object</h4>
-          {a.storage.kind === 'stack' && (
-            <label>
-              Name
-              <input
-                aria-label="Object name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                onBlur={() => {
-                  if (name !== a.name)
-                    onEdit(obj => {
-                      obj.name = name;
-                    });
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') e.currentTarget.blur();
-                }}
-              />
-            </label>
+          {(a.storage.kind === 'stack' || canEditType) && (
+            <div className="type-row">
+              {a.storage.kind === 'stack' && (
+                <label>
+                  Name
+                  <input
+                    aria-label="Object name"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    onBlur={() => {
+                      if (name !== a.name)
+                        onEdit(obj => {
+                          obj.name = name;
+                        });
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                  />
+                </label>
+              )}
+              {canEditType && (
+                <label>
+                  Shape
+                  <select
+                    aria-label="Object shape"
+                    value={editor.shape}
+                    onChange={e => setType({ shape: e.target.value })}
+                  >
+                    <option value="scalar">scalar</option>
+                    <option value="array">array</option>
+                  </select>
+                </label>
+              )}
+            </div>
           )}
           {canEditType && (
             <>
-              <label>
-                Shape
-                <select
-                  aria-label="Object shape"
-                  value={editor.shape}
-                  onChange={e => setType({ shape: e.target.value })}
-                >
-                  <option value="scalar">scalar</option>
-                  <option value="array">array</option>
-                </select>
-              </label>
               <div className="type-row">
                 <label>
                   Type
@@ -383,23 +374,28 @@ export default function MemoryInspector({
               )}
             </>
           )}
-          {a.storage.kind === 'heap' && (
-            <button
-              className="plain-btn"
-              onClick={() =>
-                onEdit(obj => {
-                  obj.alive = false;
-                })
-              }
-            >
-              Mark as freed
+          <div className="inspector-actions">
+            {a.storage.kind === 'heap' && (
+              <button
+                className="plain-btn"
+                onClick={() =>
+                  onEdit(obj => {
+                    obj.alive = false;
+                  })
+                }
+              >
+                Mark as freed
+              </button>
+            )}
+            <button className="plain-btn danger" onClick={onDelete}>
+              Delete object
             </button>
-          )}
-          <button className="plain-btn danger" onClick={onDelete}>
-            Delete object
-          </button>
+          </div>
         </div>
       )}
+      <p className="inspector-help">
+        Simulated addresses; real programs may place objects differently.
+      </p>
       <div className="inspector-notice" role="status" aria-live="polite">
         {notice}
       </div>

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — sandbox layout
+
+See [docs/SANDBOX_UI_PLAN.md](docs/SANDBOX_UI_PLAN.md).
+
+### Changed
+
+- The central Run/Generate strip is gone: **Run** is in the code header and **Generate C** in the memory header. A draggable divider resizes the code and memory panes (double-click resets; drag fully left to collapse the code pane). Challenges uses the same layout.
+- The memory toolbar and edit toolbar were removed. Arrows / Both / Addresses modes were retired (addresses and arrows are always shown); Fit view and Reset layout live in the canvas controls; layout Undo/Redo is keyboard-only; Snap was removed; Show expired became a **Show out-of-scope** button that appears only when something is hidden. **+ Variable** and **+ Heap block** float over the canvas; **Clear diagram** moved to the right-click menu.
+- The inspector floats over the canvas instead of shrinking it, pans just enough to keep the selected object visible, and uses shorter labels (Located at, Stores, Points to, Value).
+- Messages appear once: Run and generation messages in the code pane, canvas messages as a toast. The persistent status row and duplicate message log were removed.
+- Cards and frames are more compact (cards from 200 px, frames sized to their contents).
+
+### Fixed
+
+- Generate C used the final run state instead of the playback step on screen; it now uses the displayed memory and keeps it displayed.
+
 ## Unreleased — code audit and maintenance
 
 See [docs/CODE_AUDIT.md](docs/CODE_AUDIT.md) for the full report.

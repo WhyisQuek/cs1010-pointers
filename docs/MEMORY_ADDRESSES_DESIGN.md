@@ -2,6 +2,8 @@
 
 **Status:** Initial implementation complete in the working tree; broader release/learner validation remains pending.
 
+> **Update, 11 October 2026:** the Arrows / Both / Addresses display modes (sections 1, 4 and related) were retired. The canvas now always renders what "Both" showed: addresses alongside arrows. The "Simulated addresses" toolbar disclosure became a one-line note in the inspector, and the inspector's labels became **Located at (&p)**, **Stores (p)**, **Points to** and **Value (\*p)**. See [SANDBOX_UI_PLAN.md](SANDBOX_UI_PLAN.md). The rest of this document is kept as the original design record.
+
 **Date:** 18 September 2026  
 **Baseline:** PointerViz 2.2.1  
 **Scope:** Sandbox, playback, editable snapshots, both challenge directions, and instructor previews.

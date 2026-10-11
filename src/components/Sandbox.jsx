@@ -1,7 +1,8 @@
 /** Bidirectional code/memory sandbox with step-through playback. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CodePanel } from './CodePanel.jsx';
 import MemoryCanvas from './MemoryCanvas.jsx';
+import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../machine/memory.js';
@@ -11,20 +12,27 @@ const STARTER = `int main(void) {
     return 0;
 }
 `;
+const NOTICE_MS = 5000;
 
 export default function Sandbox() {
   const [code, setCode] = useState(STARTER);
   const [state, setState] = useState(makeState);
   const [snapshots, setSnapshots] = useState(null);
   const [step, setStep] = useState(0);
-  const [messages, setMessages] = useState([]);
+  // One current message about the code: errors stay until the next edit or run.
+  const [notice, setNotice] = useState(null);
   const [canvasSession, setCanvasSession] = useState(0);
   const [savedPlayback, setSavedPlayback] = useState(null);
-  const say = m => setMessages(prev => [...prev.slice(-4), m]);
-  const reportError = e => {
-    if (e instanceof ValidationError) e.errors.forEach(text => say({ kind: 'err', text }));
-    else say({ kind: 'err', text: e.message });
-  };
+  const reportError = e =>
+    setNotice({
+      kind: 'err',
+      text: e instanceof ValidationError ? e.errors.join('\n') : e.message,
+    });
+  useEffect(() => {
+    if (notice?.kind !== 'ok') return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const codeToDiagram = () => {
     try {
@@ -34,31 +42,12 @@ export default function Sandbox() {
       setState(result.state);
       setSnapshots(result.snapshots);
       setStep(0);
-      say({
+      setNotice({
         kind: 'ok',
-        text: `Ready: ${result.snapshots.length} execution steps. Select Next to begin. Yellow marks the next line and new or changed memory.`,
+        text: `Ready: ${result.snapshots.length} execution steps. Select Next to begin.`,
       });
     } catch (e) {
       reportError(e);
-    }
-  };
-  const diagramToCode = () => {
-    try {
-      setCode(generate(state));
-      setSnapshots(null);
-      setSavedPlayback(null);
-      say({ kind: 'ok', text: 'Generated C from the current memory state.' });
-    } catch (e) {
-      reportError(e);
-    }
-  };
-  const onDiagramEdit = next => {
-    setState(next);
-    setSnapshots(null);
-    try {
-      validate(next);
-    } catch (e) {
-      if (e instanceof ValidationError) say({ kind: 'err', text: e.errors[0] });
     }
   };
 
@@ -69,14 +58,34 @@ export default function Sandbox() {
   const previousState = shownSnapshot ? (step > 1 ? snapshots[step - 2].state : emptyState) : null;
   const nextLine = snapshots ? (step === 0 ? snapshots[0]?.line : shownSnapshot?.nextLine) : null;
 
+  // Generates from the memory on screen, which during playback is the selected step.
+  const diagramToCode = () => {
+    try {
+      setCode(generate(shownState));
+      if (snapshots) setState(structuredClone(shownState));
+      setSnapshots(null);
+      setSavedPlayback(null);
+      setNotice({ kind: 'ok', text: 'Generated C from the memory shown.' });
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  const onDiagramEdit = next => {
+    setState(next);
+    setSnapshots(null);
+    try {
+      validate(next);
+      setNotice(n => (n?.kind === 'err' ? null : n));
+    } catch (e) {
+      if (e instanceof ValidationError)
+        setNotice({ kind: 'err', text: `Cannot generate C: ${e.errors[0]}` });
+    }
+  };
+
   const editSnapshot = () => {
     setSavedPlayback({ state, snapshots, step });
     setState(structuredClone(shownState));
     setSnapshots(null);
-    say({
-      kind: 'ok',
-      text: 'Editing a copy of this snapshot. Return to playback restores the recorded execution. C generation currently supports only a single main() frame.',
-    });
   };
   const returnToPlayback = () => {
     setState(savedPlayback.state);
@@ -88,49 +97,59 @@ export default function Sandbox() {
     setCode(value);
     setSnapshots(null);
     setSavedPlayback(null);
+    setNotice(null);
   };
 
+  const memoryContext = shownSnapshot
+    ? `step ${step}/${snapshots.length} · ${shownSnapshot.function}() line ${shownSnapshot.line}`
+    : snapshots
+      ? `step 0/${snapshots.length}`
+      : savedPlayback
+        ? `editing a copy of step ${savedPlayback.step}`
+        : null;
+
   return (
-    <>
-      <div className="workbench">
+    <Workbench
+      left={
         <section className="panel" aria-label="C code">
           <div className="panel-head">
             C code
-            {snapshots && (
-              <span className="panel-context">
-                {nextLine ? `Next: line ${nextLine}` : 'Execution complete'}
-              </span>
-            )}
+            {snapshots && !nextLine && <span className="panel-context">Execution complete</span>}
+            <div className="panel-actions">
+              <button className="primary-btn head-btn" onClick={codeToDiagram}>
+                Run
+              </button>
+            </div>
           </div>
           <CodePanel code={code} onCode={onCode} activeLine={nextLine} />
+          <div
+            className={`pane-message${notice ? ` ${notice.kind}` : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            {notice?.text}
+          </div>
         </section>
-        <div className="spine" role="group" aria-label="convert">
-          <button className="convert-btn" title="Run C and show memory" onClick={codeToDiagram}>
-            Run →
-          </button>
-          <button className="convert-btn" title="Generate C from memory" onClick={diagramToCode}>
-            ← Generate
-          </button>
-        </div>
+      }
+      right={
         <section className="panel" aria-label="memory diagram">
           <div className="panel-head">
             Memory
-            {shownSnapshot && (
-              <span className="panel-context">
-                {shownSnapshot.function}(), line {shownSnapshot.line}
-              </span>
-            )}
-            <div className="snapshot-actions">
+            {memoryContext && <span className="panel-context">{memoryContext}</span>}
+            <div className="panel-actions">
               {shownSnapshot && (
-                <button className="plain-btn" onClick={editSnapshot}>
-                  Edit this snapshot
+                <button className="plain-btn head-btn" onClick={editSnapshot}>
+                  Edit
                 </button>
               )}
               {savedPlayback && (
-                <button className="plain-btn" onClick={returnToPlayback}>
-                  Return to playback
+                <button className="plain-btn head-btn" onClick={returnToPlayback}>
+                  Back to playback
                 </button>
               )}
+              <button className="plain-btn head-btn" onClick={diagramToCode}>
+                Generate C
+              </button>
             </div>
           </div>
           <MemoryCanvas
@@ -139,7 +158,6 @@ export default function Sandbox() {
             previousState={previousState}
             onChange={onDiagramEdit}
             editable={!snapshots}
-            onMessage={say}
           />
           {snapshots?.length > 0 && (
             <div className="stepper">
@@ -167,16 +185,7 @@ export default function Sandbox() {
             </div>
           )}
         </section>
-      </div>
-      {messages.length > 0 && (
-        <div className="msgbar" role="log">
-          {messages.map((m, i) => (
-            <div key={i} className={m.kind}>
-              {m.text}
-            </div>
-          ))}
-        </div>
-      )}
-    </>
+      }
+    />
   );
 }

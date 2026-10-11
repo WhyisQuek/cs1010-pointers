@@ -1,6 +1,13 @@
 /** Interactive MemoryState editor. React Flow layout never becomes semantic state. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, ReactFlow, useNodesInitialized, useReactFlow } from '@xyflow/react';
+import {
+  Background,
+  ControlButton,
+  Controls,
+  ReactFlow,
+  useNodesInitialized,
+  useReactFlow,
+} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { edgeTypes, nodeTypes } from '../flow/memoryFlow.jsx';
 import { GEOMETRY, pathFromHandle, stateToFlow } from '../flow/layout.js';
@@ -26,14 +33,13 @@ import {
 } from '../machine/memory.js';
 import { upgradeMemoryState } from '../machine/addresses.js';
 import { removeAllocation } from '../machine/editing.js';
-import {
-  describePointer,
-  formatAddress,
-  readViewMode,
-  saveViewMode,
-  VIEW_MODES,
-} from '../flow/addressPresentation.js';
+import { describePointer, formatAddress } from '../flow/addressPresentation.js';
 import MemoryInspector from './MemoryInspector.jsx';
+
+const FIT = { padding: 0.15, maxZoom: 1 };
+const TOAST_MS = 4000;
+// Space kept between a revealed node and the canvas edge or the inspector.
+const REVEAL_MARGIN = 24;
 
 export default function MemoryCanvas({
   state: rawState,
@@ -47,12 +53,11 @@ export default function MemoryCanvas({
     () => (rawState.addressSpace ? rawState : upgradeMemoryState(rawState)),
     [rawState],
   );
-  const [viewMode, setViewMode] = useState(readViewMode);
   const [inspection, setInspection] = useState(null);
-  const [revealedPointer, setRevealedPointer] = useState(null);
   const [editedPreviousState, setEditedPreviousState] = useState(null);
   const [status, setStatus] = useState(null);
-  const pendingFocus = useRef(null);
+  const pendingReveal = useRef(null);
+  const content = useRef(null);
   const notify = useCallback(
     message => {
       setStatus(message);
@@ -60,6 +65,12 @@ export default function MemoryCanvas({
     },
     [onMessage],
   );
+  // Confirmations fade; errors stay until the next canvas action replaces them.
+  useEffect(() => {
+    if (status?.kind !== 'ok') return;
+    const timer = setTimeout(() => setStatus(null), TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [status]);
   const [history, setHistory] = useState(initialHistory);
   const historyRef = useRef(history);
   const dispatch = useCallback(action => {
@@ -73,7 +84,6 @@ export default function MemoryCanvas({
   const begin = useCallback(() => dispatch({ type: 'begin' }), [dispatch]);
   const end = useCallback(() => dispatch({ type: 'end' }), [dispatch]);
   const [showExpired, setShowExpired] = useState(false);
-  const [snap, setSnap] = useState(false);
   const [menu, setMenu] = useState(null);
   const [viewportSession, setViewportSession] = useState(0);
   const [flow, setFlow] = useState(null);
@@ -87,8 +97,6 @@ export default function MemoryCanvas({
       badIds: badIds ?? new Set(),
       showExpired,
       previousState: previousState ?? (editable ? editedPreviousState : null),
-      viewMode,
-      revealedPointer,
     });
     result.nodes = result.nodes.map(n => ({
       ...n,
@@ -116,8 +124,6 @@ export default function MemoryCanvas({
     selectedId,
     selectedEdgeId,
     editedPreviousState,
-    viewMode,
-    revealedPointer,
   ]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -146,21 +152,19 @@ export default function MemoryCanvas({
   const closeInspector = () => {
     setSelectedId(null);
     setInspection(null);
-    setRevealedPointer(null);
   };
   const inspect = (allocationId, path = []) => {
     setSelectedId(allocationId);
     setSelectedEdgeId(null);
     setInspection(ref(allocationId, path));
-    setRevealedPointer(null);
+    setMenu(null);
+    pendingReveal.current = allocationId;
   };
-  const showTarget = (target, source) => {
+  const showTarget = target => {
     const description = describePointer(state, { kind: 'pointer', target });
     if (!description.target) return;
     if (!description.allocation.alive) setShowExpired(true);
     inspect(target.allocationId, target.path);
-    setRevealedPointer(source);
-    pendingFocus.current = target.allocationId;
     setStatus({
       kind: 'ok',
       text:
@@ -169,15 +173,40 @@ export default function MemoryCanvas({
           : `Showing ${description.qualifiedLabel}${description.status === 'dangling' ? ' (former target)' : ''}.`,
     });
   };
+  // Pans just enough to keep a newly inspected node clear of the canvas edges and the
+  // inspector overlay. Zoom never changes, and nodes already in view stay where they are.
   useEffect(() => {
-    const target = nodes.find(n => n.id === pendingFocus.current);
-    if (!flow || !target) return;
+    const id = pendingReveal.current;
+    if (!flow || !id || !content.current || !nodes.some(n => n.id === id)) return;
     const request = requestAnimationFrame(() => {
-      flow.fitView({ nodes: [target], padding: 0.6, maxZoom: 1, duration: 180 });
-      pendingFocus.current = null;
+      pendingReveal.current = null;
+      const node = flow.getInternalNode(id);
+      if (!node) return;
+      const box = content.current.getBoundingClientRect();
+      const panel = content.current.querySelector('.inspector')?.getBoundingClientRect();
+      let right = box.width,
+        bottom = box.height;
+      // Side panel when it starts right of the left edge, bottom sheet otherwise.
+      if (panel && panel.left - box.left > REVEAL_MARGIN) right = panel.left - box.left;
+      else if (panel) bottom = panel.top - box.top;
+      const { x, y, zoom } = flow.getViewport();
+      const { x: nx, y: ny } = node.internals.positionAbsolute;
+      const left = nx * zoom + x,
+        top = ny * zoom + y,
+        width = (node.measured.width ?? node.width) * zoom,
+        height = (node.measured.height ?? node.height) * zoom;
+      const shift = (start, size, limit) =>
+        start < REVEAL_MARGIN
+          ? REVEAL_MARGIN - start
+          : start + size > limit - REVEAL_MARGIN
+            ? Math.max(REVEAL_MARGIN - start, limit - REVEAL_MARGIN - start - size)
+            : 0;
+      const dx = shift(left, width, right),
+        dy = shift(top, height, bottom);
+      if (dx || dy) flow.setViewport({ x: x + dx, y: y + dy, zoom }, { duration: 180 });
     });
     return () => cancelAnimationFrame(request);
-  }, [nodes, flow]);
+  }, [nodes, flow, selectedId]);
   const onNodesChange = useCallback(
     changes => {
       let currentNodes = nodesRef.current;
@@ -287,14 +316,27 @@ export default function MemoryCanvas({
       setSelectedId(a.id);
       setMenu(null);
     });
+  const clearDiagram = () => {
+    dispatch({ type: 'clear' });
+    setViewportSession(s => s + 1);
+    setSelectedId(null);
+    setSelectedEdgeId(null);
+    setMenu(null);
+    setInspection(null);
+    setEditedPreviousState(null);
+    onChange?.(makeState(state.structTypes));
+  };
   const selectedNode = nodes.find(n => n.id === selectedId);
   const selected = selectedNode?.data.allocation ?? null;
-  const changeViewMode = mode => {
-    setViewMode(mode);
-    saveViewMode(mode);
-    setSelectedEdgeId(null);
-    setStatus({ kind: 'ok', text: `${capitalize(mode)} view` });
-  };
+  // Returned calls and out-of-scope objects are hidden unless asked for.
+  const hiddenCount =
+    (state.frames ?? []).filter(f => !f.active).length +
+    state.allocations.filter(
+      a =>
+        !a.alive &&
+        a.storage.kind === 'stack' &&
+        state.frames?.find(f => f.id === a.storage.frameId)?.active !== false,
+    ).length;
   const selectedFrame =
     selectedNode?.type === 'frameGroup'
       ? selectedNode
@@ -342,18 +384,21 @@ export default function MemoryCanvas({
       onReset: () => resetRoute(e.id),
     },
   }));
-  const contextMenu = (event, node) => {
-    if (!node.data.frame || !node.data.editable) return;
+  // Frame menus place a variable at the click; the pane menu places a heap block there.
+  const openMenu = (event, node = null) => {
+    if (!editable || (node && (!node.data.frame || !node.data.editable))) return;
     event.preventDefault();
     const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    const bounds = event.currentTarget.closest('.canvas-content').getBoundingClientRect();
-    setSelectedId(node.id);
-    setSelectedEdgeId(null);
+    const bounds = content.current.getBoundingClientRect();
+    if (node) {
+      setSelectedId(node.id);
+      setSelectedEdgeId(null);
+    }
     setMenu({
-      frameId: node.data.frame.id,
+      frameId: node?.data.frame.id ?? null,
       x: Math.min(event.clientX - bounds.left, bounds.width - 180),
-      y: Math.min(event.clientY - bounds.top, bounds.height - 45),
-      position: { x: point.x - node.position.x, y: point.y - node.position.y },
+      y: Math.min(event.clientY - bounds.top, bounds.height - 120),
+      position: node ? { x: point.x - node.position.x, y: point.y - node.position.y } : point,
     });
   };
 
@@ -373,102 +418,7 @@ export default function MemoryCanvas({
         }
       }}
     >
-      <div className="canvas-toolbar">
-        <div className="view-mode" role="group" aria-label="Memory view">
-          <span>View</span>
-          {VIEW_MODES.map(mode => (
-            <button
-              key={mode}
-              className="plain-btn"
-              aria-pressed={viewMode === mode}
-              onClick={() => changeViewMode(mode)}
-            >
-              {capitalize(mode)}
-            </button>
-          ))}
-        </div>
-        <label className="view-mode-select">
-          View
-          <select value={viewMode} onChange={e => changeViewMode(e.target.value)}>
-            {VIEW_MODES.map(mode => (
-              <option key={mode} value={mode}>
-                {capitalize(mode)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <details className="address-model-info">
-          <summary>Simulated addresses</summary>
-          <p>
-            Addresses follow PointerViz’s 64-bit teaching model. Arrays and fields use byte offsets.
-            Separate objects use spaced addresses that stay stable while you edit. Native addresses
-            and placement can differ. Addresses are not reused during a run.
-          </p>
-        </details>
-        <button className="plain-btn" onClick={() => flow?.fitView({ padding: 0.15, maxZoom: 1 })}>
-          Fit view
-        </button>
-        <button className="plain-btn" onClick={() => setLayout(emptyLayout())}>
-          Reset layout
-        </button>
-        <button
-          className="plain-btn"
-          disabled={!history.past.length}
-          onClick={() => dispatch({ type: 'undo' })}
-          title="Undo layout (Ctrl+Z)"
-        >
-          Undo
-        </button>
-        <button
-          className="plain-btn"
-          disabled={!history.future.length}
-          onClick={() => dispatch({ type: 'redo' })}
-          title="Redo layout (Ctrl+Shift+Z)"
-        >
-          Redo
-        </button>
-        <label className="history-toggle">
-          <input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} />
-          Snap
-        </label>
-        <label className="history-toggle">
-          <input
-            type="checkbox"
-            checked={showExpired}
-            onChange={e => setShowExpired(e.target.checked)}
-          />
-          Show expired
-        </label>
-      </div>
-      {editable && (
-        <div className="canvas-edit-toolbar">
-          <button className="plain-btn" onClick={() => addBox('stack', addFrameId)}>
-            Add stack object
-          </button>
-          <button className="plain-btn" onClick={() => addBox('heap')}>
-            Add heap allocation
-          </button>
-          {state.allocations.length > 0 && (
-            <button
-              className="plain-btn danger"
-              onClick={() => {
-                dispatch({ type: 'clear' });
-                setViewportSession(s => s + 1);
-                setSelectedId(null);
-                setSelectedEdgeId(null);
-                setMenu(null);
-                setInspection(null);
-                setRevealedPointer(null);
-                setEditedPreviousState(null);
-                onChange?.(makeState(state.structTypes));
-              }}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      )}
-      <div className="canvas-content">
+      <div className="canvas-content" ref={content}>
         <ReactFlow
           nodes={interactiveNodes}
           edges={interactiveEdges}
@@ -487,35 +437,84 @@ export default function MemoryCanvas({
           onNodeDragStop={end}
           onSelectionDragStart={begin}
           onSelectionDragStop={end}
-          onNodeContextMenu={contextMenu}
+          onNodeContextMenu={openMenu}
+          onPaneContextMenu={event => openMenu(event)}
+          onNodeClick={(_, node) => {
+            if (node.type === 'memoryAllocation') pendingReveal.current = node.id;
+          }}
           onPaneClick={() => {
             setMenu(null);
             closeInspector();
             setSelectedEdgeId(null);
           }}
           onMoveStart={() => setMenu(null)}
-          snapToGrid={snap}
-          snapGrid={[24, 24]}
           nodesConnectable={editable}
           connectOnClick={false}
           deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
           fitView
-          fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+          fitViewOptions={FIT}
           minZoom={0.1}
           proOptions={{ hideAttribution: true }}
         >
           <CanvasViewport key={viewportSession} />
           <Background color="#30363d" gap={24} size={1} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-        {menu && (
-          <div className="canvas-context-menu" style={{ left: menu.x, top: menu.y }}>
-            <button
-              className="plain-btn"
-              onClick={() => addBox('stack', menu.frameId, menu.position)}
+          <Controls showInteractive={false} fitViewOptions={FIT}>
+            <ControlButton
+              onClick={() => setLayout(emptyLayout())}
+              title="Reset layout (Ctrl+Z undoes layout changes)"
+              aria-label="Reset layout"
             >
-              Add variable here
-            </button>
+              ↺
+            </ControlButton>
+          </Controls>
+        </ReactFlow>
+        {(editable || hiddenCount > 0) && (
+          <div className="canvas-overlay">
+            {editable && (
+              <>
+                <button className="plain-btn" onClick={() => addBox('stack', addFrameId)}>
+                  + Variable
+                </button>
+                <button className="plain-btn" onClick={() => addBox('heap')}>
+                  + Heap block
+                </button>
+              </>
+            )}
+            {hiddenCount > 0 && (
+              <button
+                className="plain-btn canvas-chip"
+                aria-pressed={showExpired}
+                onClick={() => setShowExpired(v => !v)}
+              >
+                {showExpired ? 'Hide out-of-scope memory' : `Show out-of-scope (${hiddenCount})`}
+              </button>
+            )}
+          </div>
+        )}
+        {menu && (
+          <div className="canvas-context-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+            {menu.frameId ? (
+              <button
+                className="plain-btn"
+                role="menuitem"
+                onClick={() => addBox('stack', menu.frameId, menu.position)}
+              >
+                Add variable here
+              </button>
+            ) : (
+              <button
+                className="plain-btn"
+                role="menuitem"
+                onClick={() => addBox('heap', undefined, menu.position)}
+              >
+                Add heap block here
+              </button>
+            )}
+            {state.allocations.length > 0 && (
+              <button className="plain-btn danger" role="menuitem" onClick={clearDiagram}>
+                Clear diagram
+              </button>
+            )}
           </div>
         )}
         {selectedEdgeId && edges.some(e => e.id === selectedEdgeId && !e.hidden) && (
@@ -544,9 +543,13 @@ export default function MemoryCanvas({
             onClose={closeInspector}
           />
         )}
-      </div>
-      <div className={`canvas-status ${status?.kind ?? ''}`} role="status" aria-live="polite">
-        {status?.text}
+        <div
+          className={`canvas-toast${status ? ` visible ${status.kind}` : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          {status?.text}
+        </div>
       </div>
     </div>
   );
@@ -559,15 +562,13 @@ function CanvasViewport() {
   useEffect(() => {
     if (!initialized || fitted.current) return;
     const frame = requestAnimationFrame(() => {
-      fitView({ padding: 0.15, maxZoom: 1 });
+      fitView(FIT);
       fitted.current = true;
     });
     return () => cancelAnimationFrame(frame);
   }, [initialized, fitView]);
   return null;
 }
-
-const capitalize = text => text[0].toUpperCase() + text.slice(1);
 
 /** First unused single-letter name, then v1, v2, ... (never a name already in use). */
 function nextName(state) {

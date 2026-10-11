@@ -94,7 +94,7 @@ Examples:
 
 Frames remain after return with `active: false`.
 
-This is semantic history, independent of visibility. The canvas hides returned frames by default and can reveal them with Show expired.
+This is semantic history, independent of visibility. The canvas hides returned frames by default and can reveal them with Show out-of-scope.
 
 ### Allocation
 
@@ -231,4 +231,4 @@ The canvas keeps a presentation workspace separate from MemoryState: `positions`
 
 The workspace survives semantic edits, stepping backward and forward, and hiding expired allocations within one execution session. New objects receive unoccupied default positions; known objects keep their positions. A new Run remounts the canvas, and Clear resets the workspace and its history. Level-editor previews use the source as their session key so IDs from separate executions cannot inherit prior layout.
 
-Pure workspace operations expand frames around dragged locals, resize edges while preserving child world coordinates, and keep up to 50 layout undo steps. Pointer edits still change MemoryState through typed references. Edit this snapshot clones the displayed state; Return to playback restores the original recorded execution. See [VISUALIZATION.md](VISUALIZATION.md).
+Pure workspace operations expand frames around dragged locals, resize edges while preserving child world coordinates, and keep up to 50 layout undo steps. Pointer edits still change MemoryState through typed references. Edit clones the displayed state; Back to playback restores the original recorded execution. See [VISUALIZATION.md](VISUALIZATION.md).

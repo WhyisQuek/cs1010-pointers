@@ -8,7 +8,6 @@ import {
   pointerEdges,
   resolveRef,
   scalarSubobjects,
-  sameRef,
 } from '../machine/memory.js';
 import { describePointer } from './addressPresentation.js';
 import { curvePointer } from './routing.js';
@@ -23,10 +22,12 @@ export const GEOMETRY = {
   lifetime: 24,
   padding: 24,
   top: 52,
-  gap: 32,
+  gap: 24,
 };
 /** Smallest frame a user can resize to, shared with workspace operations. */
-export const FRAME_MIN = { width: 288, height: 160 };
+export const FRAME_MIN = { width: 240, height: 160 };
+// Space between call frames and between the stack and the heap column.
+const FRAME_SPACING = 64;
 // SVG markers need literal colours; keep these in sync with --err, --heap and --ptr in styles.css.
 const EDGE_COLORS = { dangling: '#f85149', changed: '#e3b341', normal: '#58a6ff' };
 export const memoryMetricsStyle = Object.fromEntries(
@@ -63,8 +64,10 @@ export function pathFromHandle(id) {
 
 function allocationSize(a, state) {
   const textWidth = (allocationDisplayName(state, a).length + typeToString(a.type).length) * 8 + 40;
+  // Aggregate rows also show a per-element address column.
+  const aggregate = isArray(a.type) || isStruct(a.type);
   return {
-    width: Math.min(440, Math.max(320, textWidth)),
+    width: Math.min(440, Math.max(aggregate ? 260 : 200, textWidth)),
     height: allocationMetrics(a, state).height,
   };
 }
@@ -79,8 +82,6 @@ export function stateToFlow(
     badIds = new Set(),
     showExpired = false,
     previousState = null,
-    viewMode = 'both',
-    revealedPointer = null,
   } = {},
 ) {
   const nodes = [];
@@ -152,13 +153,14 @@ export function stateToFlow(
       y = p.y + sizes[i].height + GEOMETRY.gap;
       return p;
     });
+    // Frames hug their contents unless the user has resized them.
     const width = Math.max(
-      frameSizes[id]?.width ?? 600,
+      frameSizes[id]?.width ?? 0,
       FRAME_MIN.width,
       ...sizes.map((s, i) => locals[i].x + s.width + GEOMETRY.padding),
     );
     const height = Math.max(
-      frameSizes[id]?.height ?? 240,
+      frameSizes[id]?.height ?? 0,
       FRAME_MIN.height,
       ...sizes.map((s, i) => locals[i].y + s.height + GEOMETRY.padding),
     );
@@ -195,7 +197,6 @@ export function stateToFlow(
         data: {
           allocation: a,
           state,
-          viewMode,
           ...changes(a),
           editable: editable && frame.active && a.alive,
           bad: badIds.has(a.id),
@@ -203,7 +204,7 @@ export function stateToFlow(
       });
     });
     // Every invocation gets a distinct slot, even with the same depth/name.
-    frameX += width + 96;
+    frameX += width + FRAME_SPACING;
     rightEdge = Math.max(rightEdge, position.x + width);
   }
   let heapY = 124;
@@ -215,7 +216,7 @@ export function stateToFlow(
     const size = allocationSize(a, state);
     let position = positions[a.id];
     if (!position) {
-      position = { x: rightEdge + 96, y: heapY };
+      position = { x: rightEdge + FRAME_SPACING, y: heapY };
       while (
         occupiedHeap.some(
           r =>
@@ -241,7 +242,6 @@ export function stateToFlow(
       data: {
         allocation: a,
         state,
-        viewMode,
         ...changes(a),
         editable: editable && a.alive,
         bad: badIds.has(a.id),
@@ -319,7 +319,6 @@ export function stateToFlow(
       type: 'memoryPointer',
       data: { ...route, manual: !!routes[id] },
       zIndex: 1,
-      hidden: viewMode === 'addresses' && !sameRef(e.source, revealedPointer),
       selectable: true,
       reconnectable: editable && byId.get(e.source.allocationId).data.editable ? 'target' : false,
       deletable: editable && byId.get(e.source.allocationId).data.editable,

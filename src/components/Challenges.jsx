@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
+import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { equivalent } from '../pipeline/equivalence.js';
 import { makeState } from '../machine/memory.js';
@@ -130,29 +131,31 @@ function ChallengeRunner({ level, onExit }) {
         </button>
       </div>
 
-      <div className="workbench">
-        <section className="panel">
-          <div className="panel-head">{isC2D ? 'given code (read-only)' : 'your code'}</div>
-          <CodePanel
-            code={isC2D ? level.code : studentCode}
-            onCode={isC2D ? undefined : setStudentCode}
-            readOnly={isC2D}
-          />
-        </section>
-        <div className="spine" />
-        <section className="panel">
-          <div className="panel-head">
-            {isC2D ? 'your memory diagram' : 'target memory (read-only)'}
-          </div>
-          <MemoryCanvas
-            state={isC2D ? studentState : target.state}
-            onChange={isC2D ? setStudentState : undefined}
-            editable={isC2D}
-            badIds={badIds}
-            onMessage={say}
-          />
-        </section>
-      </div>
+      <Workbench
+        left={
+          <section className="panel">
+            <div className="panel-head">{isC2D ? 'given code (read-only)' : 'your code'}</div>
+            <CodePanel
+              code={isC2D ? level.code : studentCode}
+              onCode={isC2D ? undefined : setStudentCode}
+              readOnly={isC2D}
+            />
+          </section>
+        }
+        right={
+          <section className="panel">
+            <div className="panel-head">
+              {isC2D ? 'your memory diagram' : 'target memory (read-only)'}
+            </div>
+            <MemoryCanvas
+              state={isC2D ? studentState : target.state}
+              onChange={isC2D ? setStudentState : undefined}
+              editable={isC2D}
+              badIds={badIds}
+            />
+          </section>
+        }
+      />
 
       {messages.length > 0 && (
         <div className="msgbar">

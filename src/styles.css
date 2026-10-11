@@ -53,7 +53,7 @@ button {
   color: var(--muted);
 }
 .topbar {
-  height: 48px;
+  height: 40px;
   display: flex;
   align-items: center;
   gap: 28px;
@@ -85,11 +85,56 @@ button {
   border-bottom-color: var(--text);
 }
 
+/* --code-fr / --memory-fr come from Workbench.jsx; minimums mirror CODE_MIN and MEMORY_MIN. */
 .workbench {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 5fr) 104px minmax(420px, 7fr);
+  grid-template-columns: minmax(220px, var(--code-fr, 38fr)) 6px minmax(
+      360px,
+      var(--memory-fr, 62fr)
+    );
+}
+.workbench.code-collapsed {
+  grid-template-columns: 28px 6px minmax(0, 1fr);
+}
+.workbench-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.workbench-pane[hidden] {
+  display: none;
+}
+.workbench-pane > .panel {
+  flex: 1;
+}
+.workbench-divider {
+  background: var(--line);
+  cursor: col-resize;
+  touch-action: none;
+}
+.workbench-divider:hover,
+.workbench-divider:focus-visible {
+  background: var(--ptr);
+  outline: none;
+}
+.code-rail {
+  border: 0;
+  padding: 10px 0;
+  background: var(--panel);
+  color: var(--muted);
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.code-rail:hover:not(:disabled) {
+  border: 0;
+  color: var(--text);
 }
 .panel {
   min-width: 0;
@@ -99,11 +144,11 @@ button {
   background: var(--panel);
 }
 .panel-head {
-  min-height: 38px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 4px 8px 4px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 12px;
@@ -113,22 +158,49 @@ button {
 }
 .panel-context {
   margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 400;
   text-transform: none;
   letter-spacing: 0;
 }
-.spine {
+.panel-actions {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  background: var(--bg);
+  flex-shrink: 0;
+  gap: 6px;
+  margin-left: auto;
 }
-.convert-btn,
+.panel-context + .panel-actions {
+  margin-left: 0;
+}
+.head-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.pane-message {
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: #13171b;
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  max-height: 110px;
+  overflow-y: auto;
+}
+.pane-message:empty {
+  display: none;
+}
+.pane-message.err {
+  color: #ff7b72;
+}
+.pane-message.ok {
+  color: #7ee787;
+}
 .plain-btn,
 .step-btn,
 .primary-btn,
@@ -143,10 +215,6 @@ button {
   color: var(--text);
   padding: 7px 10px;
   cursor: pointer;
-}
-.convert-btn {
-  font-size: 12px;
-  white-space: nowrap;
 }
 button:hover:not(:disabled) {
   border-color: #6e7681;
@@ -273,36 +341,53 @@ button:disabled {
   container-type: inline-size;
   container-name: memory;
 }
-.canvas-toolbar {
-  z-index: 10;
-  padding: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-}
-.canvas-edit-toolbar {
-  z-index: 10;
+/* Floating canvas controls: none of these take a row from the diagram. */
+.canvas-overlay {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  left: 10px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
+  pointer-events: none;
 }
-.history-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+.canvas-overlay button {
+  pointer-events: auto;
+  padding: 5px 10px;
   font-size: 12px;
+  box-shadow: 0 2px 8px #0006;
 }
-.history-toggle input {
-  accent-color: var(--ptr);
+.canvas-chip {
+  color: var(--muted);
+}
+.canvas-chip[aria-pressed='true'] {
+  color: var(--text);
+  border-color: var(--ptr);
+}
+.canvas-toast {
+  position: absolute;
+  z-index: 12;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(480px, 60%);
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--panel-2);
+  box-shadow: 0 4px 12px #0008;
+  color: #a8b2bf;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.canvas-toast:not(.visible) {
+  display: none;
+}
+.canvas-toast.err {
+  color: #ff9b92;
+  border-color: #f8514988;
 }
 .frame-group {
   background: #161b22;
@@ -423,10 +508,6 @@ button:disabled {
   gap: 8px;
   flex-shrink: 0;
 }
-.pointer-indicator {
-  display: block;
-  flex: 0 0 30px;
-}
 .val.dangling {
   color: var(--err);
 }
@@ -468,20 +549,36 @@ button:disabled {
   stroke-dasharray: 5 4;
 }
 
+/* Overlay, not a flex sibling: opening it never resizes the React Flow viewport. */
 .inspector {
-  z-index: 4;
-  flex: 0 0 340px;
-  min-height: 0;
-  min-width: 0;
-  width: 340px;
+  position: absolute;
+  z-index: 8;
+  top: 10px;
+  right: 10px;
+  width: 300px;
+  max-width: calc(100% - 20px);
+  max-height: calc(100% - 20px);
   overflow: auto;
-  padding: 12px;
+  padding: 10px 12px;
   background: #161b22;
-  border-left: 1px solid var(--line-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px #000a;
 }
 .inspector h4 {
   margin: 0 0 10px;
   font-size: 13px;
+}
+.inspector-type {
+  color: var(--muted);
+  font-weight: 400;
+  font-family: var(--mono);
+}
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
 }
 .inspector label {
   display: block;
@@ -507,7 +604,7 @@ button:disabled {
 }
 
 .stepper {
-  min-height: 42px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -727,16 +824,22 @@ button:disabled {
 }
 
 @media (max-width: 900px) {
+  .workbench,
+  .workbench.code-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(160px, var(--code-fr, 38fr)) 6px minmax(
+        360px,
+        var(--memory-fr, 62fr)
+      );
+  }
   .workbench {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(220px, 0.6fr) auto minmax(600px, 1.4fr);
     overflow: auto;
+  }
+  .workbench-divider {
+    cursor: row-resize;
   }
   .level-editor {
     grid-template-columns: 1fr;
-  }
-  .spine {
-    flex-direction: row;
   }
   .topbar {
     gap: 12px;
@@ -865,7 +968,18 @@ button:disabled {
 .canvas-context-menu {
   position: absolute;
   z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  min-width: 160px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
   box-shadow: 0 4px 16px #0008;
+}
+.canvas-context-menu button {
+  text-align: left;
 }
 .snapshot-actions {
   display: flex;
@@ -873,7 +987,6 @@ button:disabled {
   margin-left: auto;
 }
 
-/* Address modes share geometry so switching representation never moves handles. */
 .canvas-content {
   position: relative;
   display: flex;
@@ -885,54 +998,6 @@ button:disabled {
   flex: 1;
   min-width: 0;
   height: auto;
-}
-.view-mode {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-.view-mode > span {
-  margin: 0 4px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.view-mode button[aria-pressed='true'] {
-  background: #243b54;
-  border-color: var(--ptr);
-}
-.view-mode-select {
-  display: none;
-  gap: 6px;
-  align-items: center;
-}
-.view-mode-select select {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--line);
-  padding: 6px;
-}
-.address-model-info {
-  position: relative;
-  color: var(--muted);
-  font-size: 12px;
-}
-.address-model-info summary {
-  cursor: pointer;
-  padding: 6px;
-}
-.address-model-info p {
-  position: absolute;
-  left: 0;
-  top: 100%;
-  margin: 4px 0;
-  padding: 12px;
-  width: 260px;
-  max-width: 75cqw;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--line-strong);
-  box-shadow: 0 4px 12px #0008;
-  line-height: 1.5;
 }
 .memory-address-strip {
   height: var(--memory-metadata);
@@ -975,10 +1040,6 @@ button:disabled {
   gap: 8px;
   padding: 0 10px;
   font-size: 12px;
-}
-.view-arrows .memory-columns,
-.view-arrows .aggregate-line {
-  grid-template-columns: minmax(36px, 1fr) minmax(10ch, auto);
 }
 .memory-columns > :last-child {
   text-align: right;
@@ -1045,12 +1106,18 @@ button:disabled {
 .address-facts {
   margin: 10px 0;
   display: grid;
-  gap: 10px;
+  gap: 6px;
   font-size: 12px;
+}
+/* One fact per line: label column, then value. */
+.address-facts > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
 }
 .address-facts dt {
   color: #a8b2bf;
-  margin-bottom: 4px;
   overflow-wrap: anywhere;
 }
 .address-facts dd {
@@ -1070,40 +1137,23 @@ button:disabled {
   user-select: text;
 }
 .object-editor {
-  border-top: 1px solid var(--line);
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: 8px;
 }
-.object-editor > button {
-  margin: 10px 6px 0 0;
+.inspector .inspector-help {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
 }
-.canvas-status {
-  flex: 0 0 auto;
-  min-height: 24px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: #a8b2bf;
-  border-top: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.canvas-status.err {
-  color: #ff9b92;
-}
+/* Narrow canvas: the inspector becomes a bottom sheet, still overlaid. */
 @container memory (max-width: 760px) {
-  .canvas-content {
-    flex-direction: column;
-  }
   .inspector {
-    flex: 0 0 45%;
-    width: 100%;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-width: none;
     max-height: 45%;
-    border-left: 0;
-    border-top: 1px solid var(--line-strong);
-  }
-  .view-mode {
-    display: none;
-  }
-  .view-mode-select {
-    display: flex;
+    border-radius: 6px 6px 0 0;
   }
 }

@@ -60,25 +60,3 @@ export function pointerAccessibleLabel(state, scalar) {
     d = describePointer(state, scalar.value);
   return `${resolveRef(state, scalar.ref).label}, ${typeToString(scalar.type)}, stored at ${formatAddress(own.address)}, ${d.status}, stores ${d.address === undefined ? 'unknown address' : formatAddress(d.address)}, ${d.qualifiedLabel ?? d.label}`;
 }
-
-export const VIEW_MODES = ['arrows', 'both', 'addresses'];
-const VIEW_KEY = 'pointerviz.address-view.v1';
-let sessionMode = 'both';
-export function readViewMode() {
-  try {
-    const saved = localStorage.getItem(VIEW_KEY);
-    if (VIEW_MODES.includes(saved)) sessionMode = saved;
-  } catch {
-    /* private browsing */
-  }
-  return sessionMode;
-}
-export function saveViewMode(mode) {
-  if (!VIEW_MODES.includes(mode)) return;
-  sessionMode = mode;
-  try {
-    localStorage.setItem(VIEW_KEY, mode);
-  } catch {
-    /* session preference still works */
-  }
-}

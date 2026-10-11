@@ -65,6 +65,6 @@ int main(void) {
 }
 ```
 
-After temporary returns, p identifies an expired object. Show expired target reveals x and its returned frame. The old address is historical information, not permission to dereference it.
+After temporary returns, p identifies an expired object. Inspect p and select Show next to its target to reveal x and its returned frame. The old address is historical information, not permission to dereference it.
 
 Out-of-bounds arithmetic remains an execution error. For example, replacing `a + 3` in the first program with `a + 4` is rejected; PointerViz does not search other objects for a matching numeric address. Entering raw addresses into pointers is outside this implementation.

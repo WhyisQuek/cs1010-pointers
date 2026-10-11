@@ -202,7 +202,7 @@ Update this whenever a new semantic property should affect correctness.
 
 ### `src/flow/memoryFlow.jsx`
 
-React node/edge components. Renders frame headers, fixed-size allocation rows, target/source handles and SVG pointer indicators. Refreshes handle geometry after type/shape changes. Internal heap IDs use display labels such as `heap 1`.
+React node/edge components. Renders frame headers, fixed-size allocation rows and target/source handles. Refreshes handle geometry after type/shape changes. Internal heap IDs use display labels such as `heap 1`.
 
 It must not own semantic mutations.
 
@@ -214,15 +214,19 @@ These files have no React dependency and are tested directly. See [VISUALIZATION
 
 ### `src/components/MemoryCanvas.jsx`
 
-Interactive memory editor. Clones semantic state before edits and uses shared type/pointer rules. Owns layout (positions, frame sizes, arrow bends) with undo/redo, selection, view mode, Show expired and viewport fitting. Layout survives edits and playback steps; frames grow to contain moved locals. Dead locals cannot be edited or dragged. GUI coordinates remain outside `MemoryState`.
+Interactive memory editor. Clones semantic state before edits and uses shared type/pointer rules. Owns layout (positions, frame sizes, arrow bends) with keyboard undo/redo, selection, the out-of-scope toggle, floating add controls, the right-click menu, the message toast and viewport fitting/reveal panning. Layout survives edits and playback steps; frames grow to contain moved locals. Dead locals cannot be edited or dragged. GUI coordinates remain outside `MemoryState`. Nothing in the canvas may add a row above or below the React Flow viewport; controls float over it.
 
 ### `src/components/MemoryInspector.jsx`
 
-Shows own/stored addresses and target values for the selected object or member. Edits go through `onEdit`, which the canvas applies to a cloned state; typed values are range-checked with `scalarFromInput()`.
+Overlay panel showing own/stored addresses and target values for the selected object or member. Edits go through `onEdit`, which the canvas applies to a cloned state; typed values are range-checked with `scalarFromInput()`.
+
+### `src/components/Workbench.jsx`
+
+Two-pane split with a draggable, keyboard-operable divider, used by Sandbox and Challenges. Collapses the left pane to a rail and remembers the split in `localStorage`.
 
 ### `src/components/Sandbox.jsx` and `CodePanel.jsx`
 
-Bidirectional workbench. Owns source text, current state, snapshots and current step. `CodePanel` is the shared editor (four-space Tab/Shift+Tab indentation, syntax colouring, next-line highlight) also used by challenges and the level editor.
+Bidirectional workbench. Owns source text, current state, snapshots and current step. Generate C uses the displayed state (`shownState`), so it matches the selected playback step. `CodePanel` is the shared editor (four-space Tab/Shift+Tab indentation, syntax colouring, next-line highlight) also used by challenges and the level editor.
 
 ### `src/components/Challenges.jsx`
 

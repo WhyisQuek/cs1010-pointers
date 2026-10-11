@@ -7,7 +7,7 @@ It supports:
 - step-by-step C-to-memory visualization;
 - editable memory diagrams and canonical C generation;
 - pointers, arrays, heap allocations and pointer arithmetic;
-- simulated object/pointer addresses with Both, Arrows, and Addresses views;
+- simulated object/pointer addresses shown alongside pointer arrows;
 - array sizes inferred from initializer lists, such as `int arr[] = {1, 2, 3};` and `int rows[][2] = {{1, 2}, {3, 4}};` (up to 64 elements per dimension);
 - functions and separate call-stack frames;
 - named and self-referential structures;
@@ -56,13 +56,15 @@ production preview, tester checklist, and moving to another host later.
 
 ## Memory canvas
 
-**Both** shows addresses alongside arrows. Switch to **Arrows** or **Addresses** without changing the program. Select a name/member to see its own address, a pointer's stored address, and the target value separately. The inspector's typed Target picker works in every editable view; numeric addresses are read-only. Try [the memory-address examples](examples/memory-addresses.md).
+The code and memory panes are separated by a divider: drag it to resize, double-click it to reset, or drag it fully left to collapse the code pane into a rail. **Run** (code header) starts playback at step zero; **Generate C** (memory header) writes C for the memory currently on screen, including the selected playback step.
 
-Drag a function header to move its frame and locals together. Select a frame to resize it from any edge or corner. Variables move freely in both directions; their frame grows to accommodate them. Layout survives memory edits and playback steps. **Fit view** adjusts the viewport; **Reset layout** restores default placement. Layout changes support Undo/Redo.
+Cards show addresses alongside arrows. Select a name/member to open the inspector, which floats over the canvas and shows the object's own address, a pointer's stored address, its target and the target value. The inspector's typed Target picker sets pointers in editable diagrams; numeric addresses are read-only. Try [the memory-address examples](examples/memory-addresses.md).
 
-Returned frames and expired stack locals are hidden by default. **Show expired** reveals their history; dangling pointers keep their status even when their target is hidden. Freed heap objects remain visible.
+Drag a function header to move its frame and locals together. Select a frame to resize it from any edge or corner. Variables move freely in both directions; their frame grows to accommodate them. Layout survives memory edits and playback steps. The canvas controls (bottom left) zoom, fit the view and reset layout; Ctrl+Z / Ctrl+Shift+Z undo and redo layout changes.
 
-Arrows choose attachment sides automatically and use smooth curves with obstacle-aware detours. Select an arrow and drag its diamond to bend it, or drag its arrowhead to reconnect it. **Edit this snapshot** makes an editable copy of a playback step; right-click inside an active frame to add a variable at that position. **Run** starts playback at step zero; yellow highlights the next source line and memory changed by the current step. The editor includes C syntax colouring. See [visualization behavior and limits](docs/VISUALIZATION.md).
+Returned frames and expired stack locals are hidden by default. When there are any, a **Show out-of-scope** button appears at the top of the canvas; dangling pointers keep their status even when their target is hidden. Freed heap objects remain visible.
+
+Arrows choose attachment sides automatically and use smooth curves with obstacle-aware detours. Select an arrow and drag its diamond to bend it, or drag its arrowhead to reconnect it. **Edit** makes an editable copy of a playback step. While editing, **+ Variable** and **+ Heap block** float at the top of the canvas; right-click inside an active frame to add a variable at that position, or on empty canvas to add a heap block or clear the diagram. Yellow highlights the next source line and memory changed by the current step. The editor includes C syntax colouring. See [visualization behavior and limits](docs/VISUALIZATION.md).
 
 ## Contributing
 

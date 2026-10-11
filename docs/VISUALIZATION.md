@@ -2,39 +2,41 @@
 
 ## Simulated addresses
 
-**Both** is the default: each object shows its own address and size, pointer values show the target's address, and arrows show the relationship. **Arrows** hides numeric canvas labels; **Addresses** hides persistent edges. The view preference is saved locally. Switching modes does not change state, positions, dimensions, routes, or grading.
+There is a single memory view: each object shows its own address and size, pointer values show the target's address, and arrows show the relationship. (The earlier Arrows / Both / Addresses modes were retired in October 2026; see [SANDBOX_UI_PLAN.md](SANDBOX_UI_PLAN.md).)
 
-Select an object name or member label to inspect it, including during playback. The inspector separates **Address of p (&p)**, **Stored address (p)**, and **Target value (*p)**, with full-width hexadecimal addresses and Copy actions. **Show target** selects the exact member and reveals its relationship in Addresses mode. **Show expired target** reveals historical storage. **Show boundary** identifies a one-past location without reading it. Narrow memory panes put the scrollable inspector below the canvas.
+Select an object name or member label to inspect it, including during playback. The inspector floats over the top-right of the canvas, so opening it never resizes the diagram; if it would cover the selected object, the canvas pans just enough to keep the object visible, without changing zoom. It lists **Located at (&p)**, **Stores (p)**, **Points to** and **Value (*p)**, using the same 8-digit addresses as the cards; **Copy** copies the full 64-bit address. **Show** next to the target selects the exact member, revealing out-of-scope storage when needed; for a one-past pointer it identifies the boundary without reading it. Narrow memory panes show the inspector as a bottom sheet over the canvas.
 
-Editable pointers have a typed **Target** picker in every mode, including NULL and uninitialized choices. Source-dot dragging also works with hidden edges. Addresses are read-only. Type/array edits preserve a root's base address and reset its value, and are rejected atomically if an incoming pointer would become invalid or historical pointer facts would change. Valid changes to subobject addresses/status are highlighted. Deletion clears live incoming pointers but is rejected when an expired source still records the target.
+Editable pointers have a typed **Target** picker, including NULL and uninitialized choices. Addresses are read-only. Type/array edits preserve a root's base address and reset its value, and are rejected atomically if an incoming pointer would become invalid or historical pointer facts would change. Valid changes to subobject addresses/status are highlighted. Deletion clears live incoming pointers but is rejected when an expired source still records the target.
 
 The teaching model uses LP64 sizes and padding, deterministic spaced root addresses, and no address reuse within a run. NULL displays a zero address, uninitialized pointers have no known address, and dangling pointers retain a labeled former address. These are simulated addresses, not native process addresses. See [the runnable teaching examples](../examples/memory-addresses.md).
 
 ## Frames and lifetimes
 
-Each function invocation has its own frame ID and default horizontal slot. Slots use the visible frame order, rather than call depth, so repeated calls and recursion do not overlap. Frames start with horizontal room for multiple boxes and grow to fit their visible allocations, including long declarations and 64-element arrays.
+Each function invocation has its own frame ID and default horizontal slot. Slots use the visible frame order, rather than call depth, so repeated calls and recursion do not overlap. Frames size themselves to their visible allocations (at least 240 × 160 px), including long declarations and 64-element arrays, unless the user has resized them. Cards are at least 200 px wide (260 px for arrays and structs, which have an address column).
 
-Drag a frame's header to move it with its locals. Select a frame to reveal resize controls on all edges and corners and **Fit frame to contents**. Resizing keeps child world positions fixed and cannot clip contents. Live locals move freely in both axes; dragging beyond any boundary expands the owning frame, retaining header space and padding. Optional **Snap** aligns node movement to the grid. Returned locals cannot be dragged or edited. Frames cannot be deleted as diagram objects.
+Drag a frame's header to move it with its locals. Select a frame to reveal resize controls on all edges and corners and **Fit frame to contents**. Resizing keeps child world positions fixed and cannot clip contents. Live locals move freely in both axes; dragging beyond any boundary expands the owning frame, retaining header space and padding. Returned locals cannot be dragged or edited. Frames cannot be deleted as diagram objects.
 
-The default view shows live stack allocations and active frames. **Show expired** also shows returned frames and expired block/loop locals with dashed frame borders and lifetime labels. Freed heap allocations remain visible because free/alias relationships are part of heap lessons.
+The default view shows live stack allocations and active frames. When returned frames or expired block/loop locals exist, a **Show out-of-scope (n)** button appears at the top-left of the canvas; it reveals them with dashed frame borders and lifetime labels, and becomes **Hide out-of-scope memory**. Freed heap allocations remain visible because free/alias relationships are part of heap lessons.
 
-Hiding an object never deletes it from `MemoryState`. A live pointer to a hidden expired object still says **dangling**; hover it to see its target. Turn on **Show expired** to see the target and dashed red edge. One-past pointers have a status label but no arrow to a fabricated array element.
+Hiding an object never deletes it from `MemoryState`. A live pointer to a hidden expired object still says **dangling**; hover it to see its target. Use **Show out-of-scope** to see the target and dashed red edge. One-past pointers have a status label but no arrow to a fabricated array element.
 
 ## Position lifetime
 
-Positions, manually chosen frame sizes, and arrow bends survive memory edits and playback steps within a run. Show expired preserves the layout of hidden objects. New Run, Clear, or a fresh instructor preview starts a new workspace so reused IDs cannot inherit stale positions.
+Positions, manually chosen frame sizes, and arrow bends survive memory edits and playback steps within a run. Hiding out-of-scope memory preserves the layout of hidden objects. New Run, Clear diagram, or a fresh instructor preview starts a new workspace so reused IDs cannot inherit stale positions.
 
-**Fit view** adjusts the viewport without changing layout. The first nonempty view fits automatically; subsequent edits and steps leave the viewport alone. **Reset layout** restores default positions, dimensions, and arrow routes without moving the viewport. **Undo** and **Redo** restore layout changes, with a complete drag counted as one action (up to 50 actions). Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, and Ctrl/Cmd+Y work when canvas controls have focus; text inputs keep their own editing shortcuts. Layout undo does not change memory values or pointer targets.
+The canvas controls at the bottom left zoom, **fit the view** without changing layout, and **reset layout** (↺), which restores default positions, dimensions, and arrow routes without moving the viewport. The first nonempty view fits automatically; subsequent edits and steps leave the viewport alone. Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, and Ctrl/Cmd+Y undo and redo layout changes when the canvas has focus, with a complete drag counted as one action (up to 50 actions); text inputs keep their own editing shortcuts. Layout undo does not change memory values or pointer targets.
+
+Messages about canvas actions appear as a short toast at the bottom of the canvas: confirmations fade after a few seconds, errors stay until the next canvas action. Run and generation messages appear at the bottom of the code pane instead.
 
 ## Editing a snapshot
 
-Playback is read-only for memory values and pointer targets, while layout remains adjustable. **Edit this snapshot** clones the displayed state and enables creation and editing in active frames. Select a frame and use **+ Variable**, or right-click its background and choose **Add variable here**. The toolbar's Add stack object uses the selected active frame, defaulting to main. The owning frame is highlighted. **Return to playback** restores the recorded state and step, discarding semantic edits to the copy.
+Playback is read-only for memory values and pointer targets, while layout remains adjustable. **Edit** (memory header) clones the displayed state and enables creation and editing in active frames. **+ Variable** and **+ Heap block** float at the top-left of the canvas; + Variable uses the selected active frame, defaulting to main. Select a frame and use its own **+ Variable**, or right-click its background and choose **Add variable here**. Right-clicking empty canvas offers **Add heap block here** and **Clear diagram**. The owning frame is highlighted. **Back to playback** restores the recorded state and step, discarding semantic edits to the copy.
 
-Returned frames and expired locals remain read-only. Generating C still requires a single main frame; multiple function-frame diagrams can be explored but cannot yet be converted back into function-call code. Editing source or successfully generating C exits the saved-playback workflow.
+Returned frames and expired locals remain read-only. **Generate C** converts the memory currently on screen, including a selected playback step, and leaves that memory displayed as an editable diagram. It still requires a single main frame; multiple function-frame diagrams can be explored but cannot yet be converted back into function-call code. Editing source or successfully generating C exits the saved-playback workflow.
 
 ## Boxes and arrows
 
-Pointer values use hexadecimal text in Both/Addresses and a fixed 30 × 20 SVG indicator in Arrows. Names and types use bounded columns, with full text available on hover. Pointer rows reserve a second line for target/status information in every mode; row metrics and CSS variables come from the same geometry definition.
+Pointer values use hexadecimal text. Names and types use bounded columns, with full text available on hover. Pointer rows reserve a second line for target/status information; row metrics and CSS variables come from the same geometry definition.
 
 Pointers choose left or right attachment sides based on relative box positions. Each editable pointer has one blue source dot on its outgoing side (the right side before it has an arrow). Drag this dot to set the pointer. Target anchors are hidden at rest, including during playback; while drawing or reconnecting an arrow, compatible editable targets appear as outlined squares on both sides. Hidden handles remain mounted so existing arrows retain their geometry. Type and array-size edits refresh handle geometry.
 
@@ -46,7 +48,9 @@ In an editable diagram, drag an arrowhead to reconnect to a compatible target. D
 
 ## Playback and code
 
-**Run** prepares the execution trace at step zero. **Next**, **Previous**, and the slider navigate it. Function entry (with parameters), statements, condition checks, loop updates, and function exit have separate snapshots.
+The code and memory panes share a divider (`src/components/Workbench.jsx`). Drag it to resize, double-click (or press Enter/Home while it has focus) to reset to 38% code, use the arrow keys to move it 24 px, or drag it fully left to collapse the code pane into a rail that restores it on click. The split is remembered in `localStorage` (`pointerviz.split.v1`). Below 900 px the panes stack and the divider becomes horizontal.
+
+**Run** (code header) prepares the execution trace at step zero. **Next**, **Previous**, and the slider navigate it. Function entry (with parameters), statements, condition checks, loop updates, and function exit have separate snapshots.
 
 The code editor colours C keywords, types, function names, literals, comments, and preprocessing lines. Yellow marks the line about to run; the highlight clears at completion or when source code changes. New frames/objects get yellow outlines, changed value rows get yellow backgrounds, and new or redirected pointer edges turn yellow for that step. Highlights compare adjacent execution snapshots, including when stepping backward.
 
@@ -57,11 +61,12 @@ Automatic routing is a lightweight heuristic, not a general obstacle solver. Man
 - `src/flow/layout.js`: visibility, initial placement, minimum dimensions, typed handles, edge data.
 - `src/flow/workspace.js`: positions, resizing, growth, content fitting, and layout undo/redo.
 - `src/flow/routing.js`: cubic curves, manual bends, obstacle-aware fallback, self-loops.
-- `src/flow/memoryFlow.jsx`: node/edge React components and pointer indicator.
-- `src/components/MemoryCanvas.jsx`: session layout, drag gestures, selection, creation, semantic editor, history toggle, viewport.
-- `src/components/MemoryInspector.jsx`: read-only address facts, typed target editing, and exact subobject navigation.
+- `src/flow/memoryFlow.jsx`: node/edge React components.
+- `src/components/Workbench.jsx`: resizable, collapsible code/memory split shared by Sandbox and Challenges.
+- `src/components/MemoryCanvas.jsx`: session layout, drag gestures, selection, floating creation controls, context menu, semantic editor, out-of-scope toggle, toast, viewport and reveal-on-inspect panning.
+- `src/components/MemoryInspector.jsx`: overlay with read-only address facts, typed target editing, and exact subobject navigation.
 - `src/machine/addresses.js`, `src/machine/editing.js`: simulated address placement and atomic structural edits.
-- `src/flow/addressPresentation.js`: safe pointer descriptions, formatting, and display preference.
+- `src/flow/addressPresentation.js`: safe pointer descriptions and formatting.
 - `src/styles.css`: fixed header/row dimensions and visual layers. Keep these dimensions in sync with `GEOMETRY`.
 
 The parent/child layout follows React Flow's [sub-flow model](https://reactflow.dev/learn/layouting/sub-flows). Parent nodes precede children and children use relative positions. Children have no fixed parent extent; workspace operations grow the parent to preserve ownership, header space, and padding. Custom edges render through [BaseEdge](https://reactflow.dev/api-reference/components/base-edge).
