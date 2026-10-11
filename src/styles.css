@@ -1525,6 +1525,23 @@ button:disabled {
   color: var(--muted);
   font: 12px var(--mono);
 }
+/* Monospace fonts sit off-centre in their line box (ascent 11px vs descent 3px at 12px), so text in
+   slots looked 1px high and the brackets 1px low. Trimming each line box to cap height and baseline,
+   then padding it equally, centres the glyphs exactly. Without text-box support the padding above applies.
+   Canvas .val slots (16px line in 22px) already measure centred, so they are left alone. */
+@supports (text-box: trim-both cap alphabetic) {
+  .slot {
+    text-box: trim-both cap alphabetic;
+  }
+  /* Brackets reach below the baseline, so centring their x-height lines them up with the digit. */
+  .length-group > span {
+    text-box: trim-both ex alphabetic;
+  }
+  /* 26px slot: 24px inside the borders, minus the trimmed line (1cap), split above and below. */
+  .slot {
+    padding-block: calc((24px - 1cap) / 2);
+  }
+}
 .length-group:focus-within {
   outline: 2px solid var(--ptr);
   outline-offset: -2px;
