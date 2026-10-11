@@ -11,6 +11,7 @@ See [docs/SANDBOX_UI_PLAN.md](docs/SANDBOX_UI_PLAN.md).
 - The inspector floats over the canvas instead of shrinking it, pans just enough to keep the selected object visible, and uses shorter labels (Located at, Stores, Points to, Value).
 - Messages appear once: Run and generation messages in the code pane, canvas messages as a toast. The persistent status row and duplicate message log were removed.
 - Cards and frames are more compact (cards from 200 px, frames sized to their contents).
+- The C editor auto-indents: Enter keeps the current line's indentation (one level deeper after `{`, and pressing Enter between `{}` moves the `}` to its own line), and typing `}` on a blank line outdents it.
 
 ### Fixed
 

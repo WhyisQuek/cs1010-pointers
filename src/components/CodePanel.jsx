@@ -1,13 +1,16 @@
 /** Syntax-highlighted C editor shared by the sandbox, challenges and level editor. */
 import { useEffect, useMemo, useRef } from 'react';
 import { highlightC } from '../language/highlight.js';
+import { INDENT, closeBraceOutdent, newlineWithIndent } from './autoIndent.js';
 
-const INDENT = '    ';
 // Keep in sync with .code-highlight padding and line-height (13px × 1.6) in styles.css.
 const PADDING_TOP = 12;
 const LINE_HEIGHT = 20.8;
 
-/** Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus. */
+/**
+ * Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus.
+ * Enter carries indentation forward (one level deeper after `{`), and `}` on a blank line outdents.
+ */
 export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
   const lines = useMemo(() => highlightC(code), [code]);
   const wrap = useRef(null);
@@ -21,11 +24,28 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null }) {
   }, [activeLine]);
 
   const onKeyDown = e => {
-    if (readOnly || e.key !== 'Tab' || !onCode) return;
-    e.preventDefault();
+    if (readOnly || !onCode || e.nativeEvent.isComposing) return;
     const el = e.currentTarget;
     const start = el.selectionStart,
       end = el.selectionEnd;
+    const apply = edit => {
+      if (!edit) return;
+      e.preventDefault();
+      onCode(edit.text);
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = edit.cursor;
+      });
+    };
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      apply(newlineWithIndent(code, start, end));
+      return;
+    }
+    if (e.key === '}') {
+      apply(closeBraceOutdent(code, start, end));
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
     if (e.shiftKey) {
       const lineStart = code.lastIndexOf('\n', start - 1) + 1;
       const remove = code.slice(lineStart, lineStart + INDENT.length).match(/^ +/)?.[0].length ?? 0;
