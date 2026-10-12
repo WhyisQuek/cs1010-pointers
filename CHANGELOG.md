@@ -69,8 +69,6 @@
 
 ## Unreleased — sandbox layout
 
-See [docs/SANDBOX_UI_PLAN.md](docs/SANDBOX_UI_PLAN.md).
-
 ### Changed
 
 - The central Run/Generate strip is gone: **Run** is in the code header and **Generate C** in the memory header. A draggable divider resizes the code and memory panes (double-click resets; drag fully left to collapse the code pane). Challenges uses the same layout.

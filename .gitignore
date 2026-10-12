@@ -12,6 +12,9 @@ Thumbs.db
 playwright-report/
 test-results/
 
+# Archived working notes (kept locally only)
+docs/archive/
+
 # Local AI-assistant / editor config
 .claude/
 .vscode/
