@@ -1,5 +1,5 @@
 /** Interactive MemoryState editor. React Flow layout never becomes semantic state. */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Background,
   ControlButton,
@@ -64,6 +64,11 @@ export default function MemoryCanvas({
     () => (rawState.addressSpace ? rawState : upgradeMemoryState(rawState)),
     [rawState],
   );
+  // React Flow names its arrowhead <marker> elements after this ID, '1' by default. Several
+  // canvases stay mounted at once (hidden pages), so with a shared ID every arrow resolved
+  // to the first canvas's markers; inside a hidden page those don't render, and arrows lost
+  // their heads. A per-canvas ID keeps the markers apart.
+  const flowId = `canvas-${useId().replace(/:/g, '')}`;
   const [inspection, setInspection] = useState(null);
   const [editedPreviousState, setEditedPreviousState] = useState(null);
   const [status, setStatus] = useState(null);
@@ -505,6 +510,7 @@ export default function MemoryCanvas({
     >
       <div className="canvas-content" ref={content}>
         <ReactFlow
+          id={flowId}
           nodes={interactiveNodes}
           edges={interactiveEdges}
           nodeTypes={nodeTypes}

@@ -16,7 +16,11 @@
 
 ### Changed
 
-- Challenge progress is completion only (✓ completed / not completed). Stars are gone: they could be farmed by leaving and re-entering a level, which reset the attempt count. Earlier star records are not carried over.
+- Challenge progress is completion only. Stars are gone: they could be farmed by leaving and re-entering a level, which reset the attempt count. Earlier star records are not carried over.
+- The Challenges list is tidier. Card content starts at the top (cards are buttons, which centred their content, so shorter cards sat lower). Each card shows its number and direction, the title, and a **topic** (what the level teaches) instead of the instructions; completed levels get a green **✓ Completed** badge, and the heading says how many are completed. Levels have a new optional `topic` field, set in the Level editor; the instruction moved to the challenge header, and a level without one gets a default for its direction. The built-in levels have topics, and their instructions no longer give hints away.
+- Grading feedback says where an answer is wrong without giving the answer away: `'x' has the wrong value`, `'p' points to the wrong place`, `Variable 'x' has the wrong type`, `The number of heap blocks is wrong`, instead of the expected value, target, type or count. Missing and unexpected variables are still named, since the level already shows those names.
+- The challenge header reads **← Challenges**, **Show hint (2 left)** and **Check answer**. Hints appear as "Hint 1 of 2" in normal text instead of a monospace log line.
+- Check results: **Incorrect code** / **Incorrect diagram** (with the differences and the attempt number), **Your code doesn’t run** (with the error) when the code fails before it can be compared, and **Challenge complete!** with a **Next challenge** button.
 - Challenges stays loaded while another tab is open, so an answer in progress survives a tab switch. Returning to the tab refreshes the level list, and closes an open level that was deleted or edited meanwhile.
 - The Level editor preview updates once typing pauses instead of on every keystroke, and keeps its view while the result is unchanged.
 - After a Check, editing the answer clears the red markers and marks the verdict as out of date.
@@ -36,6 +40,8 @@
 
 ### Fixed
 
+- Pointer arrows lost their arrowheads in Challenges (and the Level editor preview) when the sandbox also showed a pointer. Every canvas shared React Flow's default ID, so arrowhead markers had the same element ID on every page, and arrows used the hidden sandbox's markers, which don't render. Each canvas now has its own ID.
+- In a diagram → code challenge, a failed check outlined boxes in the read-only target diagram. Those IDs belonged to the student's memory, so the wrong boxes were marked; markers now appear only on a student's own diagram.
 - Two code → diagram seed levels could not be solved. **A function call** needed an out-of-scope parameter in a returned frame, and **Linked structure** needed struct objects the diagram editor could not create. Grading now ignores out-of-scope locals that no pointer refers to (a returned call's parameter, a loop temporary), so the answer is the memory the program can still reach; an out-of-scope object a pointer still refers to is still graded. The inspector's Type picker offers struct types (the level's in a challenge; in the sandbox, those from the code that produced the diagram), as single objects, arrays or pointer targets. The Level editor refuses to save a code → diagram level whose answer still can't be drawn (an out-of-scope variable a pointer refers to, a string literal, a two-dimensional array), and Challenges explains such a stored level instead of letting it be attempted.
 - After a reload in the Addresses view, switching to Both sometimes drew no arrows; handle positions are now re-measured when the view changes.
 - Grading rejected any program that reused a variable name in a block or loop scope (`for (int i…)` twice, or a variable declared inside a loop body) as "duplicate variable name": the challenge crashed on Check, or a correct answer was marked wrong. Only live names must be unique now, and grading tells same-named out-of-scope objects apart by their order.

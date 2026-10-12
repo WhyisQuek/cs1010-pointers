@@ -191,7 +191,7 @@ export default function Sandbox() {
             previousState={previousState}
             onChange={onDiagramEdit}
             editable={!snapshots}
-            structHint="To use a struct here, define it in the code and Run, then Edit a step."
+            structHint="To use a struct, define it in the code and Run, then Edit a step."
           />
           {snapshots?.length > 0 && (
             <div className="stepper">

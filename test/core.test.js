@@ -131,11 +131,31 @@ test('heap value mismatch is reported on heap content, not the source pointer', 
   stack(b, 'p', pointer(INT), pointerValue(ref(bh.id)));
   const r = equivalent(a, b);
   assert.equal(r.equal, false);
-  assert.ok(
-    r.diffs.some(d => /expected 42/.test(d)),
-    r.diffs.join('; '),
+  assert.deepEqual(r.diffs, ["'heap 1' has the wrong value"]);
+});
+
+test('grading feedback locates mistakes without giving away the answer', () => {
+  const build = ({ value, type, target }) => {
+    const s = fresh();
+    const x = stack(s, 'x', type, { kind: 'scalar', value });
+    const y = stack(s, 'y', INT, { kind: 'scalar', value: 0 });
+    stack(s, 'p', pointer(INT), pointerValue(ref(target === 'x' ? x.id : y.id)));
+    return s;
+  };
+  const answer = build({ value: 7, type: INT, target: 'x' });
+  const valueAndTarget = equivalent(answer, build({ value: 8, type: INT, target: 'y' }));
+  assert.deepEqual(valueAndTarget.diffs, [
+    "'x' has the wrong value",
+    "'p' points to the wrong place",
+  ]);
+  // p points at y here, since an int * cannot point at a char.
+  const type = equivalent(
+    build({ value: 7, type: INT, target: 'y' }),
+    build({ value: 7, type: primitive('char'), target: 'y' }),
   );
-  assert.ok(!r.diffs.some(d => /p.*wrong place/.test(d)), r.diffs.join('; '));
+  assert.deepEqual(type.diffs, ["Variable 'x' has the wrong type"]);
+  for (const d of [...valueAndTarget.diffs, ...type.diffs])
+    assert.doesNotMatch(d, /\b7\b|\bint\b|should|expected/, d);
 });
 
 test('free(NULL) is a no-op in the semantic machine', () => {

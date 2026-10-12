@@ -20,13 +20,19 @@ import {
   getAllocation,
   heapAllocations,
   pointerStatus,
-  resolveRef,
   samePath,
   scalarSubobjects,
   stackAllocations,
   staticAllocations,
 } from '../machine/memory.js';
 import { validate, ValidationError } from './codegen.js';
+
+/**
+ * Feedback says where an answer is wrong, never what it should be: no expected values,
+ * types, pointer targets or counts, which would hand students the answer. Names that the
+ * level already shows (in its code or target diagram) may appear. Hints are for help.
+ */
+const MEMORY_MISMATCH = "Your memory doesn't match the expected layout";
 
 /**
  * The allocations grading compares: every live stack object and every heap block (freed or
@@ -121,20 +127,18 @@ export function equivalent(expected, actual, options = {}) {
       const key = stackKey(expected, a, aStack);
       const b = actualByName.get(key);
       if (!b) {
-        diffs.push(`missing ${stackLabel(expected, a, aStack)}`);
+        diffs.push(`Missing ${stackLabel(expected, a, aStack)}`);
         continue;
       }
       actualByName.delete(key);
       initial.set(a.id, b.id);
       if (!typeEquals(a.type, b.type)) {
-        diffs.push(
-          `${stackLabel(expected, a, aStack)} should have type ${typeToString(a.type)}, found ${typeToString(b.type)}`,
-        );
+        diffs.push(`${capitalize(stackLabel(expected, a, aStack))} has the wrong type`);
         badIds.add(b.id);
       }
     }
     for (const extra of actualByName.values()) {
-      diffs.push(`unexpected ${stackLabel(actual, extra, bStack)}`);
+      diffs.push(`Unexpected ${stackLabel(actual, extra, bStack)}`);
       badIds.add(extra.id);
     }
     if (diffs.length) return { equal: false, diffs, badIds };
@@ -142,7 +146,7 @@ export function equivalent(expected, actual, options = {}) {
     if (aStack.length !== bStack.length) {
       return {
         equal: false,
-        diffs: [`expected ${aStack.length} stack variable(s), found ${bStack.length}`],
+        diffs: ['The number of variables is wrong'],
         badIds: new Set(bStack.map(a => a.id)),
       };
     }
@@ -157,7 +161,7 @@ export function equivalent(expected, actual, options = {}) {
     if (!b)
       return {
         equal: false,
-        diffs: [`missing string literal ${a.name}`],
+        diffs: ['A string literal is missing'],
         badIds: new Set(),
       };
     initial.set(a.id, b.id);
@@ -168,7 +172,7 @@ export function equivalent(expected, actual, options = {}) {
   if (aHeap.length !== bHeap.length) {
     return {
       equal: false,
-      diffs: [`expected ${aHeap.length} heap allocation(s), found ${bHeap.length}`],
+      diffs: ['The number of heap blocks is wrong'],
       badIds: new Set(bHeap.map(a => a.id)),
     };
   }
@@ -177,7 +181,7 @@ export function equivalent(expected, actual, options = {}) {
   if (!result)
     return {
       equal: false,
-      diffs: ['memory graphs cannot be matched'],
+      diffs: [MEMORY_MISMATCH],
       badIds: new Set(actual.allocations.map(a => a.id)),
     };
   if (result.score === 0) return { equal: true, diffs: [], badIds: new Set() };
@@ -275,12 +279,12 @@ function collectDiffs(A, B, map, config) {
       b = getAllocation(B, bId);
     const label = objectLabel(A, a);
     if (!typeEquals(a.type, b.type)) {
-      diffs.push(`${label} should have type ${typeToString(a.type)}`);
+      diffs.push(`${label} has the wrong type`);
       badIds.add(b.id);
       continue;
     }
     if (config.compareLifetime && a.alive !== b.alive) {
-      diffs.push(`${label} should be ${a.alive ? 'alive' : 'freed'}`);
+      diffs.push(`${label}: check whether it should be freed`);
       badIds.add(b.id);
     }
 
@@ -290,40 +294,31 @@ function collectDiffs(A, B, map, config) {
       const av = as[i].value,
         bv = bs[i].value;
       const sublabel = subobjectLabel(A, a, as[i].ref.path);
-      if (av.kind !== bv.kind) {
-        diffs.push(`${sublabel} should hold ${describeValue(A, av)}`);
-        badIds.add(b.id);
-        continue;
-      }
-      if (av.kind === 'scalar' && av.value !== bv.value) {
-        diffs.push(`${sublabel} has value ${bv.value}; expected ${av.value}`);
-        badIds.add(b.id);
-        continue;
-      }
-      if (av.kind === 'pointer') {
-        const mappedTarget = map.get(av.target.allocationId);
-        if (mappedTarget !== bv.target.allocationId || !samePath(av.target.path, bv.target.path)) {
-          diffs.push(`${sublabel} should point to ${targetLabel(A, av.target)}`);
-          badIds.add(b.id);
-        }
-      }
+      // Any difference involving a pointer (wrong target, NULL, unset) is about where it points.
+      const pointerWrong =
+        (av.kind === 'pointer' || bv.kind === 'pointer') &&
+        (av.kind !== bv.kind ||
+          map.get(av.target.allocationId) !== bv.target.allocationId ||
+          !samePath(av.target.path, bv.target.path));
+      const valueWrong =
+        !pointerWrong &&
+        av.kind !== 'pointer' &&
+        (av.kind !== bv.kind || (av.kind === 'scalar' && av.value !== bv.value));
+      if (pointerWrong) diffs.push(`${sublabel} points to the wrong place`);
+      else if (valueWrong) diffs.push(`${sublabel} has the wrong value`);
+      else continue;
+      badIds.add(b.id);
     }
   }
 
   return {
     equal: diffs.length === 0,
-    diffs: diffs.length ? diffs : ['memory structure does not match'],
+    diffs: diffs.length ? diffs : [MEMORY_MISMATCH],
     badIds,
   };
 }
 
-function targetLabel(state, r) {
-  try {
-    return resolveRef(state, r).label;
-  } catch {
-    return `${r.allocationId}:${r.path.join('.')}`;
-  }
-}
+const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
 /** Student-facing labels use display names ("heap 2"), never internal IDs ("a7"). */
 function objectLabel(state, allocation) {
   return `'${allocationDisplayName(state, allocation)}'`;
@@ -332,14 +327,6 @@ function subobjectLabel(state, allocation, path) {
   let out = allocationDisplayName(state, allocation);
   for (const p of path) out += typeof p === 'number' ? `[${p}]` : `.${p}`;
   return `'${out}'`;
-}
-function describeValue(state, v) {
-  if (v.kind === 'scalar') return String(v.value);
-  if (v.kind === 'null') return 'NULL';
-  if (v.kind === 'uninit') return 'an uninitialized value';
-  if (v.kind === 'pointer')
-    return `a ${pointerStatus(state, v)} pointer to ${targetLabel(state, v.target)}`;
-  return v.kind;
 }
 function frameKey(state, frameId) {
   if (!frameId || frameId === 'main') return 'main';

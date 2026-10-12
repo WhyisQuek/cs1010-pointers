@@ -11,6 +11,11 @@ const PROGRESS_KEY = 'pointerviz.progress';
 const LEGACY_LEVELS_KEY = 'pointerlab.levels';
 const LEGACY_PROGRESS_KEY = 'pointerlab.progress';
 export const LEVEL_KINDS = Object.freeze(['code-to-diagram', 'diagram-to-code']);
+/** The instruction shown in a challenge's header when a level gives none. */
+export const DEFAULT_PROMPTS = Object.freeze({
+  'code-to-diagram': 'Draw the memory this code leaves behind.',
+  'diagram-to-code': 'Write C code that produces this memory.',
+});
 
 /** Storage can be unavailable (private mode, blocked site data) or full. */
 function readJson(key, legacyKey, fallback) {
@@ -55,7 +60,10 @@ export function normalizeLevel(raw) {
     id: text(raw.id, `custom-${Date.now()}`),
     kind: raw.kind,
     title: text(raw.title, 'Untitled level'),
-    prompt: text(raw.prompt, 'Recreate this memory state.'),
+    // What the level teaches, shown on its card; '' shows no subtitle.
+    topic: text(raw.topic, ''),
+    // The instruction, shown in the challenge header.
+    prompt: text(raw.prompt, DEFAULT_PROMPTS[raw.kind]),
     code: raw.code,
     hints: Array.isArray(raw.hints) ? raw.hints.map(h => text(h, '')).filter(Boolean) : [],
     // Only the options the Level editor offers; anything else in stored data is dropped.
@@ -153,13 +161,15 @@ export function clearProgress(levelId) {
 
 /* ── Seed levels ─────────────────────────────────────────────────────
    Target IRs are stored as plain code; the app interprets them at load
-   time so the level format stays human-writable and versionable.      */
+   time so the level format stays human-writable and versionable. They go
+   through normalizeLevel like any other level, so a level that leaves out
+   its prompt gets the default instruction for its kind.               */
 export const seedLevels = [
   {
     id: 'seed-1',
     kind: 'code-to-diagram',
     title: 'Read the arrow',
-    prompt: 'Build the memory diagram this code produces.',
+    topic: 'Pointers and the address-of operator',
     code: `int main() {\n    int a = 10;\n    int *b = &a;\n}`,
     hints: [
       'Two boxes: one plain int, one pointer.',
@@ -170,7 +180,7 @@ export const seedLevels = [
     id: 'seed-2',
     kind: 'diagram-to-code',
     title: 'Write the arrow',
-    prompt: 'Write C code that produces exactly this memory state.',
+    topic: 'Pointers and the address-of operator',
     code: `int main() {\n    int x = 7;\n    int *p = &x;\n}`,
     hints: ['Declare the int before the pointer.', 'Use & to take the address of x.'],
   },
@@ -178,7 +188,7 @@ export const seedLevels = [
     id: 'seed-3',
     kind: 'code-to-diagram',
     title: 'Pointers move',
-    prompt: 'Careful: p is reassigned, then written through. Where does 99 end up?',
+    topic: 'Reassigning a pointer and writing through it',
     code: `int main() {\n    int x = 1;\n    int y = 2;\n    int *p = &x;\n    p = &y;\n    *p = 99;\n}`,
     hints: [
       'After p = &y, the old arrow to x is gone.',
@@ -189,7 +199,7 @@ export const seedLevels = [
     id: 'seed-4',
     kind: 'diagram-to-code',
     title: 'Two hops',
-    prompt: 'Produce this double-pointer chain: pp → p → a, where a holds 5.',
+    topic: 'Pointers to pointers',
     code: `int main() {\n    int a = 5;\n    int *p = &a;\n    int **pp = &p;\n}`,
     hints: ['pp has type int ** — two stars.', 'Each & gives you exactly one arrow.'],
   },
@@ -197,7 +207,7 @@ export const seedLevels = [
     id: 'seed-5',
     kind: 'code-to-diagram',
     title: 'The nameless box',
-    prompt: 'malloc creates memory with no name. Build what this code leaves behind.',
+    topic: 'Heap memory from malloc',
     code: `int main() {\n    int *p = malloc(sizeof(int));\n    *p = 42;\n    int *q = p;\n}`,
     hints: [
       "The malloc'd box lives in the heap region and has no name.",
@@ -208,8 +218,7 @@ export const seedLevels = [
     id: 'seed-6',
     kind: 'diagram-to-code',
     title: 'Use after free',
-    prompt:
-      'Recreate this crime scene: two pointers left dangling after their heap cell was freed.',
+    topic: 'Freeing memory and dangling pointers',
     code: `int main() {\n    int *p = malloc(sizeof(int));\n    int *q = p;\n    free(p);\n}`,
     hints: ['You need malloc AND free.', 'Freeing through one pointer dangles every alias.'],
   },
@@ -217,7 +226,7 @@ export const seedLevels = [
     id: 'seed-7',
     kind: 'code-to-diagram',
     title: 'Inside the array',
-    prompt: 'Show where p points after it is advanced by one element.',
+    topic: 'Pointer arithmetic in an array',
     code: `int main() {
     int arr[3] = {10, 20, 30};
     int *p = arr;
@@ -232,8 +241,7 @@ export const seedLevels = [
     id: 'seed-8',
     kind: 'diagram-to-code',
     title: 'Heap array',
-    prompt:
-      'Write code that allocates three ints, fills them, and leaves p pointing at the first element.',
+    topic: 'Arrays on the heap',
     code: `int main() {
     int *p = malloc(3 * sizeof(int));
     p[0] = 4;
@@ -249,7 +257,8 @@ export const seedLevels = [
     id: 'seed-9',
     kind: 'code-to-diagram',
     title: 'A function call',
-    prompt: 'Build the memory left after set_value() returns.',
+    topic: 'Passing a pointer to a function',
+    prompt: 'Draw the memory left once set_value() has returned.',
     code: `void set_value(int *p) {
     *p = 25;
 }
@@ -268,7 +277,7 @@ int main(void) {
     id: 'seed-10',
     kind: 'code-to-diagram',
     title: 'Linked structure',
-    prompt: 'Inspect the fields and pointer relationship between two Node structures.',
+    topic: 'Structs that point to structs',
     code: `struct Node {
     int value;
     struct Node *next;
@@ -285,7 +294,7 @@ int main(void) {
     id: 'seed-11',
     kind: 'code-to-diagram',
     title: 'Choose a target',
-    prompt: 'Follow the condition and build the final pointer relationship.',
+    topic: 'Pointers and if statements',
     code: `int main(void) {
     int a = 1;
     int b = 2;
@@ -304,7 +313,7 @@ int main(void) {
     id: 'seed-12',
     kind: 'code-to-diagram',
     title: 'Fill an array',
-    prompt: 'Work through the loop and build the final array contents.',
+    topic: 'Writing to an array in a loop',
     code: `int main(void) {
     int values[4] = {0, 0, 0, 0};
     int i = 0;
@@ -318,4 +327,4 @@ int main(void) {
       'Each iteration writes to values[i] before i is incremented.',
     ],
   },
-];
+].map(normalizeLevel);

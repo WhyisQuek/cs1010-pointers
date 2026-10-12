@@ -90,7 +90,7 @@ test('grading still tells same-named expired objects apart', () => {
   const result = equivalent(target, fewer);
   assert.equal(result.equal, false);
   assert.ok(
-    result.diffs.some(d => /missing variable 't' \(out of scope, #2\)/.test(d)),
+    result.diffs.some(d => /Missing variable 't' \(out of scope, #2\)/.test(d)),
     result.diffs,
   );
 });
@@ -115,7 +115,7 @@ test('a dangling pointer keeps its out-of-scope target in the answer', () => {
   const result = equivalent(target, nowhere);
   assert.equal(result.equal, false);
   assert.ok(
-    result.diffs.some(d => /missing variable 'x' \(out of scope\)/.test(d)),
+    result.diffs.some(d => /Missing variable 'x' \(out of scope\)/.test(d)),
     result.diffs,
   );
 });

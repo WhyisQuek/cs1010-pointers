@@ -42,7 +42,7 @@ npm run test:e2e
 | Spec | Covers |
 | --- | --- |
 | `sandbox.spec.js` | Parser loading under the subpath; Run and step-through playback with addresses; adding an object, rejecting a fractional `int`, and generating matching C |
-| `challenges.spec.js` (student) | Grading a wrong and a correct diagram-to-code answer; solving code-to-diagram levels; no Level editor tab; course-pack levels listed and browser-saved drafts not; a broken course level asks the student to tell the instructor |
+| `challenges.spec.js` (student) | Result messages (code that doesn't run, incorrect code and diagram, attempt number, changed-since-check tag, challenge complete), Next challenge and the completed count and badge; hints revealed in order; cards top-aligned; solving code-to-diagram levels; no Level editor tab; course-pack levels listed and browser-saved drafts not; a broken course level asks the student to tell the instructor |
 | `level-editor.instructor.spec.js` (instructor) | Reference code visible (editor overlay stays transparent); preview on first open; saving, editing and deleting a level, seen in Challenges; refusing an undrawable level; a stored level with broken code shows an error; stored duplicate IDs are repaired |
 
 These automate the core of the release checks. The drag, resize, routing and keyboard checks below still need a person.

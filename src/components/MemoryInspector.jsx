@@ -46,6 +46,19 @@ function memberSuffix(path, type) {
   return path.map(part => (typeof part === 'number' ? `[${part}]` : `.${part}`)).join('');
 }
 
+/** An "i" icon that shows `tip` in a styled bubble on hover or keyboard focus. */
+function InfoDot({ tip }) {
+  return (
+    <span className="info-dot" tabIndex={0} role="img" aria-label={tip} data-tip={tip}>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M8 7.25v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx="8" cy="4.9" r="0.95" fill="currentColor" />
+      </svg>
+    </span>
+  );
+}
+
 export default function MemoryInspector({
   allocation: a,
   state,
@@ -58,7 +71,7 @@ export default function MemoryInspector({
   onSelectPath,
   onShowTarget,
   onClose,
-  // Shown under Type when the diagram knows no struct types (the sandbox explains how to add one).
+  // When the diagram knows no struct types: a tooltip on Type explaining how to add one.
   structHint = null,
 }) {
   // String literals are read-only in C, so their objects stay read-only in diagrams too.
@@ -137,6 +150,7 @@ export default function MemoryInspector({
   // Base types: the primitives, then the struct types this diagram knows (from the code that
   // produced it, or the challenge's definitions). Struct choices are keyed `struct:<tag>`.
   const structDefs = Object.values(state.structTypes ?? {});
+  const showStructHint = Boolean(structHint) && !structDefs.length;
   const structBase = def => ({
     kind: 'struct',
     name: def.name,
@@ -464,7 +478,10 @@ export default function MemoryInspector({
         {canEditType ? (
           <>
             <div className="field">
-              <span>Type</span>
+              <span>
+                Type
+                {showStructHint && <InfoDot tip={structHint} />}
+              </span>
               <div className="type-controls">
                 <select
                   aria-label="Object base type"
@@ -474,7 +491,7 @@ export default function MemoryInspector({
                   {PRIMITIVE_NAMES.map(t => (
                     <option key={t}>{t}</option>
                   ))}
-                  {structDefs.length > 0 && (
+                  {structDefs.length > 0 ? (
                     <optgroup label="Structs">
                       {structDefs.map(def => (
                         <option key={def.name} value={`struct:${def.name}`}>
@@ -482,6 +499,12 @@ export default function MemoryInspector({
                         </option>
                       ))}
                     </optgroup>
+                  ) : (
+                    showStructHint && (
+                      <option disabled value="">
+                        struct (none yet)
+                      </option>
+                    )
                   )}
                 </select>
                 <select
@@ -498,7 +521,6 @@ export default function MemoryInspector({
                 </select>
               </div>
             </div>
-            {structHint && !structDefs.length && <p className="field-hint">{structHint}</p>}
             <div className="field">
               <span>Shape</span>
               <div className="shape-controls">
@@ -568,6 +590,15 @@ export default function MemoryInspector({
       </button>,
     );
 
+  const hasFooter = (editable && a.alive) || Boolean(onRestore);
+  const hasEditBand = Boolean(valueEditor || declaration) || hasFooter;
+  // Sits in the edit band when there is one, else at the bottom of the panel.
+  const noticeLine = (
+    <div className="inspector-notice" role="status" aria-live="polite">
+      {notice}
+    </div>
+  );
+
   return (
     <aside className="inspector" aria-label={`Inspect ${allocationDisplayName(state, a)}`}>
       <div className="inspector-heading">
@@ -617,15 +648,7 @@ export default function MemoryInspector({
       <section aria-label="Memory">
         <h5 className="inspector-section">
           Memory
-          <span
-            className="info-dot"
-            tabIndex={0}
-            role="img"
-            aria-label="Simulated addresses; real programs may differ."
-            title="Simulated addresses; real programs may differ."
-          >
-            ⓘ
-          </span>
+          <InfoDot tip="Simulated addresses; real programs may differ." />
         </h5>
         <dl className="facts">
           {d ? (
@@ -669,27 +692,42 @@ export default function MemoryInspector({
         </dl>
       </section>
 
-      {(valueEditor || declaration) && (
-        <section aria-label="Edit">
-          <h5 className="inspector-section">Edit</h5>
-          <div className="edit-grid">
-            {valueEditor}
-            {declaration}
-          </div>
-        </section>
-      )}
-
-      {((editable && a.alive) || onRestore) && (
-        <div className="inspector-footer">
-          {actions}
-          <button className="text-btn danger" onClick={onDelete} aria-label="Delete object">
-            Delete
-          </button>
+      {hasEditBand ? (
+        // Everything that changes the object sits in its own darker band below what it is.
+        <div className="inspector-edit">
+          {(valueEditor || declaration) && (
+            <section aria-label="Edit">
+              <h5 className="inspector-section">
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                  <path
+                    d="M10.5 2.5l3 3L6 13H3v-3z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Edit
+              </h5>
+              <div className="edit-grid">
+                {valueEditor}
+                {declaration}
+              </div>
+            </section>
+          )}
+          {hasFooter && (
+            <div className="inspector-footer">
+              {actions}
+              <button className="text-btn danger" onClick={onDelete} aria-label="Delete object">
+                Delete
+              </button>
+            </div>
+          )}
+          {noticeLine}
         </div>
+      ) : (
+        noticeLine
       )}
-      <div className="inspector-notice" role="status" aria-live="polite">
-        {notice}
-      </div>
     </aside>
   );
 }

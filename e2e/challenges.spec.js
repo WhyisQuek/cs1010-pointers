@@ -13,17 +13,89 @@ test('a diagram-to-code challenge rejects a wrong answer and accepts a correct o
   const code = page.getByRole('textbox', { name: 'C source code' });
   const check = page.getByRole('button', { name: 'Check answer' });
 
+  const result = page.locator('.verdict');
+
+  await code.fill('int main() { int x = 7 }');
+  await check.click();
+  await expect(result).toContainText('Your code doesn’t run');
+  await expect(result).toContainText('missing ;');
+
   await code.fill('int main() { int x = 7; int y = 1; int *p = &y; }');
   await check.click();
-  await expect(page.getByRole('status').filter({ hasText: 'Not yet' })).toContainText(
-    'unexpected variable',
-  );
+  await expect(result).toContainText('Incorrect code');
+  await expect(result).toContainText('Attempt 2');
+  await expect(result).toContainText('Unexpected variable');
+  await code.fill('int main() { int x = 7; int y = 1; }');
+  await expect(result).toContainText('Changed since this check');
 
   await code.fill('int main() { int x = 7; int *p = &x; }');
   await check.click();
-  await expect(page.getByRole('status').filter({ hasText: 'Correct' })).toContainText(
-    'memory states match',
-  );
+  await expect(result).toContainText('Challenge complete!');
+  await expect(result).not.toContainText('Attempt');
+
+  await result.getByRole('button', { name: 'Next challenge →' }).click();
+  await expect(page.locator('.challenge-head strong')).toHaveText('Pointers move');
+  await page.getByRole('button', { name: '← Challenges' }).click();
+  await expect(page.getByText(/^1 of \d+ completed$/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Write the arrow/ })).toContainText('Completed');
+});
+
+test('arrowheads render while the sandbox, also drawing arrows, stays loaded', async ({ page }) => {
+  // The hidden sandbox's canvas comes first in the page. With a shared React Flow ID, every
+  // arrow referenced the sandbox's arrowhead <marker>, which does not render while hidden.
+  await openApp(page);
+  await page
+    .getByRole('textbox', { name: 'C source code' })
+    // The last statement leaves p's arrow unchanged, so it is drawn in the normal pointer
+    // colour (a just-changed arrow is highlighted, and its marker has a different ID).
+    .fill('int main(void) {\n    int a = 1;\n    int *p = &a;\n    a = 2;\n}');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  // Playback opens at step 0; step to the end so the sandbox draws p's arrow.
+  const slider = page.getByRole('slider', { name: 'execution step' });
+  await slider.fill(await slider.getAttribute('max'));
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await openTab(page, 'Challenges');
+  await page.getByRole('button', { name: /Write the arrow/ }).click();
+  await expect(page.locator('.page-host:not([hidden]) .react-flow__edge')).toHaveCount(1);
+
+  const markers = await page
+    .locator('.page-host:not([hidden]) .react-flow__edge [marker-end]')
+    .evaluateAll(paths =>
+      paths.map(path => {
+        const id = path.getAttribute('marker-end').match(/url\(['"]?#(.+?)['"]?\)/)[1];
+        const marker = path.ownerDocument.getElementById(id);
+        return { found: !!marker, visible: !marker?.closest('[hidden]') };
+      }),
+    );
+  expect(markers).toEqual([{ found: true, visible: true }]);
+});
+
+test('hints are revealed one at a time, labelled in order', async ({ page }) => {
+  await openLevel(page, /Read the arrow/);
+  await page.getByRole('button', { name: 'Show hint (2 left)' }).click();
+  await expect(page.getByRole('list', { name: 'Hints' })).toContainText('Hint 1 of 2');
+  await page.getByRole('button', { name: 'Show hint (1 left)' }).click();
+  await expect(page.getByRole('list', { name: 'Hints' })).toContainText('Hint 2 of 2');
+  await expect(page.getByRole('button', { name: /Show hint/ })).toHaveCount(0);
+});
+
+test('a wrong diagram is reported as an incorrect diagram', async ({ page }) => {
+  await openLevel(page, /Read the arrow/);
+  await page.getByRole('button', { name: 'Check answer' }).click();
+  await expect(page.locator('.verdict')).toContainText('Incorrect diagram');
+});
+
+test('level cards lay out from the top, whatever their height', async ({ page }) => {
+  await openApp(page);
+  await openTab(page, 'Challenges');
+  const tops = await page
+    .locator('.level-card')
+    .evaluateAll(cards =>
+      cards.map(
+        c => c.querySelector('h3').getBoundingClientRect().top - c.getBoundingClientRect().top,
+      ),
+    );
+  expect(new Set(tops).size).toBe(1);
 });
 
 test('the function-call level is solved by drawing what main() is left with', async ({ page }) => {
@@ -34,7 +106,7 @@ test('the function-call level is solved by drawing what main() is left with', as
   await name.press('Enter');
   await page.getByRole('spinbutton', { name: 'Value of value' }).fill('25');
   await page.getByRole('button', { name: 'Check answer' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Correct' })).toBeVisible();
+  await expect(page.locator('.verdict')).toContainText('Challenge complete!');
 });
 
 test('the struct level is solved by drawing struct objects', async ({ page }) => {
@@ -59,7 +131,7 @@ test('the struct level is solved by drawing struct objects', async ({ page }) =>
     .getAttribute('value');
   await select('Target of b.next').selectOption(toA);
   await page.getByRole('button', { name: 'Check answer' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Correct' })).toBeVisible();
+  await expect(page.locator('.verdict')).toContainText('Challenge complete!');
 });
 
 test('the student build has no Level editor', async ({ page }) => {
@@ -102,7 +174,7 @@ test.describe('course levels', () => {
   test('published levels are listed and stored drafts are not', async ({ page }) => {
     await openLevel(page, /Published level/);
     await expect(page.locator('.challenge-head strong')).toHaveText('Published level');
-    await page.getByRole('button', { name: '← levels' }).click();
+    await page.getByRole('button', { name: '← Challenges' }).click();
     await expect(page.getByRole('button', { name: /Draft/ })).toHaveCount(0);
   });
 

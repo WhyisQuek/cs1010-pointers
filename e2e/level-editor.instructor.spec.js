@@ -23,11 +23,14 @@ test('reference code is visible and the preview renders on first open', async ({
 test('a saved level appears in Challenges, can be edited, and can be deleted', async ({ page }) => {
   await openEditor(page);
   await page.getByLabel('title').fill('Smoke test level');
+  await page.getByLabel(/^topic/).fill('Smoke testing');
   await page.getByRole('button', { name: 'Save level' }).click();
   await expect(page.locator('.saved-row')).toContainText('Smoke test level');
 
   await openTab(page, 'Challenges');
-  await expect(page.getByRole('button', { name: /Smoke test level/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Smoke test level/ })).toContainText(
+    'Smoke testing',
+  );
 
   await openTab(page, 'Level editor');
   await page.getByRole('button', { name: 'edit', exact: true }).click();
@@ -84,13 +87,13 @@ test.describe('stored custom levels', () => {
     await expect(
       page.getByText(/reference code no longer runs: .*missing identifier.*Level editor/),
     ).toBeVisible();
-    await page.getByRole('button', { name: '← levels' }).click();
+    await page.getByRole('button', { name: '← Challenges' }).click();
     await expect(page.getByRole('heading', { name: 'Challenges' })).toBeVisible();
   });
 
   test('levels stored with duplicate IDs both load and open independently', async ({ page }) => {
     await page.getByRole('button', { name: /Duplicate id/ }).click();
-    await expect(page.getByText('given code (read-only)')).toBeVisible();
+    await expect(page.locator('.panel-head').filter({ hasText: 'Given code' })).toBeVisible();
     await expect(page.locator('.challenge-head strong')).toHaveText('Duplicate id');
   });
 });

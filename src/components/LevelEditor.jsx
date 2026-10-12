@@ -1,6 +1,6 @@
 /**
  * Instructor challenge editor. The target state is authored as C, previewed
- * once typing pauses, and saved as { title, kind, prompt, code, hints, grading }: the target
+ * once typing pauses, and saved as { title, kind, topic, prompt, code, hints, grading }: the target
  * MemoryState is always derived from the code, never stored. Levels export and
  * import as JSON; an exported pack committed as public/levels/course.json is what
  * students see. Only the instructor build includes this page (see edition.js).
@@ -11,6 +11,7 @@ import { CodePanel } from './CodePanel.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { drawingIssues } from '../pipeline/equivalence.js';
 import {
+  DEFAULT_PROMPTS,
   clearProgress,
   loadCustomLevels,
   mergeLevels,
@@ -51,6 +52,7 @@ export default function LevelEditor() {
   const [editingId, setEditingId] = useState(null);
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState('code-to-diagram');
+  const [topic, setTopic] = useState('');
   const [prompt, setPrompt] = useState('');
   const [code, setCode] = useState(DEFAULT_CODE);
   const [hints, setHints] = useState('');
@@ -80,6 +82,7 @@ export default function LevelEditor() {
   const resetForm = () => {
     setEditingId(null);
     setTitle('');
+    setTopic('');
     setPrompt('');
     setHints('');
   };
@@ -88,7 +91,9 @@ export default function LevelEditor() {
     setEditingId(level.id);
     setTitle(level.title);
     setKind(level.kind);
-    setPrompt(level.prompt);
+    setTopic(level.topic);
+    // A default prompt stays blank, so changing the direction picks the new default.
+    setPrompt(level.prompt === DEFAULT_PROMPTS[level.kind] ? '' : level.prompt);
     setCode(level.code);
     setHints(level.hints.join('\n'));
     setCompareNames(level.grading.compareNames ?? true);
@@ -110,6 +115,7 @@ export default function LevelEditor() {
       id: editingId ?? `custom-${Date.now()}`,
       title,
       kind,
+      topic,
       prompt,
       code,
       hints: hints.split('\n'),
@@ -188,13 +194,22 @@ export default function LevelEditor() {
           <option value="diagram-to-code">show diagram → student writes code</option>
         </select>
 
-        <label htmlFor="lv-prompt">prompt shown to students</label>
+        <label htmlFor="lv-topic">topic — shown on the challenge card</label>
+        <input
+          id="lv-topic"
+          type="text"
+          value={topic}
+          onChange={e => setTopic(e.target.value)}
+          placeholder="Pointers to pointers"
+        />
+
+        <label htmlFor="lv-prompt">instruction — shown above the challenge (optional)</label>
         <input
           id="lv-prompt"
           type="text"
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder="Recreate this memory state."
+          placeholder={DEFAULT_PROMPTS[kind]}
         />
 
         <label>target state (C code)</label>

@@ -7,6 +7,7 @@ import { primitive } from '../src/language/types.js';
 import { scalarFromInput } from '../src/language/numeric.js';
 import { addAllocation, makeState, pointerValue, ref } from '../src/machine/memory.js';
 import {
+  DEFAULT_PROMPTS,
   availableLevels,
   loadCourseLevels,
   loadCustomLevels,
@@ -78,6 +79,7 @@ test('imported levels are normalized and malformed entries rejected', () => {
     kind: 'diagram-to-code',
     code: 'int main(){}',
     title: '  T  ',
+    topic: ' Pointers ',
     hints: [' a ', 3, ''],
     grading: { compareNames: false, evil: true },
   });
@@ -85,11 +87,23 @@ test('imported levels are normalized and malformed entries rejected', () => {
     id: 'x',
     kind: 'diagram-to-code',
     title: 'T',
-    prompt: 'Recreate this memory state.',
+    topic: 'Pointers',
+    prompt: DEFAULT_PROMPTS['diagram-to-code'],
     code: 'int main(){}',
     hints: ['a'],
     grading: { compareNames: false },
   });
+  // A missing topic shows no subtitle; the default prompt follows the challenge direction.
+  const bare = normalizeLevel({ kind: 'code-to-diagram', code: 'int main(){}' });
+  assert.equal(bare.topic, '');
+  assert.equal(bare.prompt, DEFAULT_PROMPTS['code-to-diagram']);
+});
+
+test('every seed level has a topic and an instruction', () => {
+  for (const level of seedLevels) {
+    assert.ok(level.topic, `${level.id} has no topic`);
+    assert.ok(level.prompt, `${level.id} has no prompt`);
+  }
 });
 
 test('merging levels never produces duplicate IDs, including against seed levels', () => {

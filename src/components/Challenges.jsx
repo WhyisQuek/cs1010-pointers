@@ -13,7 +13,7 @@ import { makeState } from '../machine/memory.js';
 import { availableLevels, loadProgress, isSolved, markSolved } from '../data/levels.js';
 import { INSTRUCTOR } from '../edition.js';
 
-const kindLabel = kind => (kind === 'code-to-diagram' ? 'code → diagram' : 'diagram → code');
+const kindLabel = kind => (kind === 'code-to-diagram' ? 'Code → diagram' : 'Diagram → code');
 // Only the instructor build has the Level editor, so only it lists browser-saved levels.
 const allLevels = () => availableLevels({ includeCustom: INSTRUCTOR });
 const sameLevel = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -50,22 +50,41 @@ export default function Challenges({ shown = true }) {
     refresh();
   };
 
-  if (active) return <ChallengeRunner key={active.id} level={active} onExit={exit} />;
+  if (active) {
+    const next = levels[levels.findIndex(l => l.id === active.id) + 1] ?? null;
+    return (
+      <ChallengeRunner
+        key={active.id}
+        level={active}
+        onExit={exit}
+        onNext={next && (() => setActive(next))}
+      />
+    );
+  }
+  const completed = levels.filter(lv => isSolved(progress, lv.id)).length;
   return (
     <div className="page">
       <h2>Challenges</h2>
-      <p className="lede">Select a challenge.</p>
+      <p className="lede">
+        {completed} of {levels.length} completed
+      </p>
       <div className="level-grid">
-        {levels.map(lv => {
+        {levels.map((lv, i) => {
           const solved = isSolved(progress, lv.id);
           return (
-            <button key={lv.id} className="level-card" onClick={() => setActive(lv)}>
-              <span className="kind">{kindLabel(lv.kind)}</span>
-              <h3>{lv.title}</h3>
-              <p>{lv.prompt}</p>
-              <div className={`level-status${solved ? ' solved' : ''}`}>
-                {solved ? '✓ completed' : 'not completed'}
+            <button
+              key={lv.id}
+              className={`level-card${solved ? ' solved' : ''}`}
+              onClick={() => setActive(lv)}
+            >
+              <div className="level-card-meta">
+                <span className="kind">
+                  {String(i + 1).padStart(2, '0')} · {kindLabel(lv.kind)}
+                </span>
+                {solved && <span className="level-badge">✓ Completed</span>}
               </div>
+              <h3>{lv.title}</h3>
+              {lv.topic && <p>{lv.topic}</p>}
             </button>
           );
         })}
@@ -74,7 +93,19 @@ export default function Challenges({ shown = true }) {
   );
 }
 
-function ChallengeRunner({ level, onExit }) {
+/**
+ * The heading of a Check result. `failure` says why an answer was not accepted:
+ * 'mismatch' (wrong or invalid memory), 'crash' (the student's code did not run), or
+ * 'level' (the level's own target could not be graded; not the student's fault).
+ */
+function verdictHeading(verdict, isC2D) {
+  if (verdict.pass) return 'Challenge complete!';
+  if (verdict.failure === 'crash') return 'Your code doesn’t run';
+  if (verdict.failure === 'level') return 'This level can’t be checked';
+  return isC2D ? 'Incorrect diagram' : 'Incorrect code';
+}
+
+function ChallengeRunner({ level, onExit, onNext }) {
   // Course and custom levels can outlive grammar changes; a broken one must not crash the page.
   const target = useMemo(() => {
     try {
@@ -96,10 +127,10 @@ function ChallengeRunner({ level, onExit }) {
   const [verdict, setVerdict] = useState(null);
   const [badIds, setBadIds] = useState(() => new Set());
   const [attempts, setAttempts] = useState(0);
-  const [hintIdx, setHintIdx] = useState(0);
-  const [messages, setMessages] = useState([]);
+  // How many hints have been revealed, in order.
+  const [hintsShown, setHintsShown] = useState(0);
   const isC2D = level.kind === 'code-to-diagram';
-  const say = m => setMessages(prev => [...prev.slice(-4), m]);
+  const hints = level.hints ?? [];
   // Feedback from a Check describes the answer as it was then: drop the red markers, which
   // could point at things already fixed, and flag the verdict as out of date.
   const answerChanged = () => {
@@ -115,12 +146,16 @@ function ChallengeRunner({ level, onExit }) {
     answerChanged();
   };
 
+  const backButton = (
+    <button className="back-btn" onClick={onExit}>
+      ← Challenges
+    </button>
+  );
+
   if (undrawable.length) {
     return (
       <div className="page">
-        <button className="back-btn" onClick={onExit}>
-          ← levels
-        </button>
+        {backButton}
         <h2>{level.title}</h2>
         <p className="msgbar-inline err">
           This level&apos;s answer can&apos;t be drawn in the diagram editor: it needs{' '}
@@ -134,9 +169,7 @@ function ChallengeRunner({ level, onExit }) {
   if (target.error) {
     return (
       <div className="page">
-        <button className="back-btn" onClick={onExit}>
-          ← levels
-        </button>
+        {backButton}
         <h2>{level.title}</h2>
         <p className="msgbar-inline err">
           This level&apos;s reference code no longer runs: {target.error}.{' '}
@@ -147,41 +180,41 @@ function ChallengeRunner({ level, onExit }) {
   }
 
   const check = () => {
-    const n = attempts + 1;
-    setAttempts(n);
+    const attempt = attempts + 1;
+    setAttempts(attempt);
+    let student;
+    try {
+      student = isC2D ? studentState : interpret(studentCode).state;
+    } catch (e) {
+      setBadIds(new Set());
+      setVerdict({ pass: false, failure: 'crash', diffs: [e.message], attempt });
+      return;
+    }
+    // equivalent() throws only when the level's own target is invalid, not the answer.
     let result;
     try {
-      const student = isC2D ? studentState : interpret(studentCode).state;
       result = equivalent(target.state, student, level.grading ?? {});
     } catch (e) {
-      setVerdict({ pass: false, diffs: [e.message] });
+      setVerdict({ pass: false, failure: 'level', diffs: [e.message], attempt });
       return;
     }
     setBadIds(result.badIds ?? new Set());
     if (result.equal) markSolved(level.id);
-    setVerdict({ pass: result.equal, diffs: result.diffs });
+    setVerdict({ pass: result.equal, failure: 'mismatch', diffs: result.diffs, attempt });
   };
 
-  const showHint = () => {
-    if (hintIdx >= (level.hints?.length ?? 0)) return;
-    say({ kind: 'hint', text: `hint: ${level.hints[hintIdx]}` });
-    setHintIdx(hintIdx + 1);
-  };
-
-  const attemptText = `${attempts} attempt${attempts > 1 ? 's' : ''}`;
+  const hintsLeft = hints.length - hintsShown;
   return (
     <>
       <div className="challenge-head">
-        <button className="back-btn" onClick={onExit}>
-          ← levels
-        </button>
-        <div>
+        {backButton}
+        <div className="challenge-title">
           <strong>{level.title}</strong>
           <div className="prompt">{level.prompt}</div>
         </div>
-        {level.hints?.length > 0 && hintIdx < level.hints.length && (
-          <button className="hint-btn" onClick={showHint}>
-            hint ({level.hints.length - hintIdx})
+        {hintsLeft > 0 && (
+          <button className="hint-btn" onClick={() => setHintsShown(hintsShown + 1)}>
+            Show hint ({hintsLeft} left)
           </button>
         )}
         <button className="check-btn" onClick={check}>
@@ -192,7 +225,10 @@ function ChallengeRunner({ level, onExit }) {
       <Workbench
         left={
           <section className="panel">
-            <div className="panel-head">{isC2D ? 'given code (read-only)' : 'your code'}</div>
+            <div className="panel-head">
+              {isC2D ? 'Given code' : 'Your code'}
+              {isC2D && <span className="panel-context">Read-only</span>}
+            </div>
             <CodePanel
               code={isC2D ? level.code : studentCode}
               onCode={isC2D ? undefined : editCode}
@@ -203,43 +239,53 @@ function ChallengeRunner({ level, onExit }) {
         right={
           <section className="panel">
             <div className="panel-head">
-              {isC2D ? 'your memory diagram' : 'target memory (read-only)'}
+              {isC2D ? 'Your memory diagram' : 'Target memory'}
+              {!isC2D && <span className="panel-context">Read-only</span>}
             </div>
             <MemoryCanvas
               state={isC2D ? studentState : target.state}
               onChange={isC2D ? editDiagram : undefined}
               editable={isC2D}
-              badIds={badIds}
+              // Marked IDs belong to the student's memory, so they can only be shown on the
+              // student's own diagram, never on a diagram → code level's target.
+              badIds={isC2D ? badIds : undefined}
             />
           </section>
         }
       />
 
-      {messages.length > 0 && (
-        <div className="msgbar">
-          {messages.map((m, i) => (
-            <div key={i} className={m.kind}>
-              {m.text}
-            </div>
+      {hintsShown > 0 && (
+        <ol className="hint-list" aria-label="Hints">
+          {hints.slice(0, hintsShown).map((hint, i) => (
+            <li key={i}>
+              <span className="hint-label">
+                Hint {i + 1} of {hints.length}
+              </span>
+              {hint}
+            </li>
           ))}
-        </div>
+        </ol>
       )}
       {verdict && (
         <div className={`verdict ${verdict.pass ? 'pass' : 'fail'}`} role="status">
-          {verdict.stale && (
-            <div className="verdict-stale">Your answer has changed since this check.</div>
-          )}
-          {verdict.pass ? (
-            <>Correct — memory states match. Challenge completed ({attemptText}).</>
-          ) : (
-            <>
-              Not yet — {attemptText} so far:
-              <ul>
-                {verdict.diffs.map((d, i) => (
-                  <li key={i}>{d}</li>
-                ))}
-              </ul>
-            </>
+          <div className="verdict-head">
+            <strong>
+              {verdict.pass ? '✓' : '✕'} {verdictHeading(verdict, isC2D)}
+            </strong>
+            {verdict.stale && <span className="verdict-tag">Changed since this check</span>}
+            {!verdict.pass && <span className="verdict-meta">Attempt {verdict.attempt}</span>}
+            {verdict.pass && (
+              <button className="plain-btn verdict-action" onClick={onNext ?? onExit}>
+                {onNext ? 'Next challenge →' : 'Back to challenges'}
+              </button>
+            )}
+          </div>
+          {!verdict.pass && (
+            <ul>
+              {verdict.diffs.map((d, i) => (
+                <li key={i}>{d}</li>
+              ))}
+            </ul>
           )}
         </div>
       )}
