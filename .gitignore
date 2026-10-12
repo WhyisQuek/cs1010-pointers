@@ -11,3 +11,8 @@ Thumbs.db
 
 playwright-report/
 test-results/
+
+# Local AI-assistant / editor config
+.claude/
+.vscode/
+.idea/
