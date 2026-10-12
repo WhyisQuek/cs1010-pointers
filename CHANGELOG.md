@@ -28,6 +28,9 @@
 
 ### Fixed
 
+- Two code → diagram seed levels could not be solved. **A function call** needed an out-of-scope parameter in a returned frame, and **Linked structure** needed struct objects the diagram editor could not create. Grading now ignores out-of-scope locals that no pointer refers to (a returned call's parameter, a loop temporary), so the answer is the memory the program can still reach; an out-of-scope object a pointer still refers to is still graded. The inspector's Type picker offers struct types (the level's in a challenge; in the sandbox, those from the code that produced the diagram), as single objects, arrays or pointer targets. The Level editor refuses to save a code → diagram level whose answer still can't be drawn (an out-of-scope variable a pointer refers to, a string literal, a two-dimensional array), and Challenges explains such a stored level instead of letting it be attempted.
+- After a reload in the Addresses view, switching to Both sometimes drew no arrows; handle positions are now re-measured when the view changes.
+- Grading rejected any program that reused a variable name in a block or loop scope (`for (int i…)` twice, or a variable declared inside a loop body) as "duplicate variable name": the challenge crashed on Check, or a correct answer was marked wrong. Only live names must be unique now, and grading tells same-named out-of-scope objects apart by their order.
 - Generate C failed when the first pointer it reached into a heap block pointed inside the block (`int *q; struct S *s; q = &s->y;`). Interior pointers now wait until a base pointer has allocated the block, whatever the declaration order.
 - Generate C freed heap blocks in allocation order, so a freed linked list produced `free(head); free(head->next);` (a use after free). Blocks reached through another block are now freed first.
 - `%g` / `%G` dropped the final zero of a two-digit exponent (`1.23457e+1` instead of `1.23457e+10`).

@@ -48,9 +48,11 @@ export function validate(state) {
       const names = namesByFrame.get(frameId) ?? new Set();
       const nameError = variableNameError(a.name, state.structTypes);
       if (nameError) errors.push(`stack object name: ${nameError}`);
-      else if (names.has(a.name))
+      // Only live names must be unique: block and loop scopes reuse a name, and the
+      // expired objects they leave behind stay in the state (C 6.2.1).
+      else if (a.alive && names.has(a.name))
         errors.push(`duplicate variable name '${a.name}' in one stack frame`);
-      names.add(a.name);
+      if (a.alive) names.add(a.name);
       namesByFrame.set(frameId, names);
     } else if (a.storage?.kind === 'heap') {
       if (a.name) errors.push(`heap allocations must not have source-level variable names`);

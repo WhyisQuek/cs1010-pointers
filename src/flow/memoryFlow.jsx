@@ -212,8 +212,10 @@ function MemoryAllocationNode({ id, data, selected }) {
     }
     return paths;
   });
-  const signature = `${a.alive}:${JSON.stringify(a.type)}:${scalars.map(s => s.ref.path.join('.')).join('|')}`;
-  // Type/array-size edits change handle geometry even when the node ID survives.
+  const signature = `${view}:${a.alive}:${JSON.stringify(a.type)}:${scalars.map(s => s.ref.path.join('.')).join('|')}`;
+  // Type/array-size edits change handle geometry even when the node ID survives. The view is
+  // included too: a box first measured while its arrow was hidden (Addresses view after a
+  // reload) otherwise sometimes kept no usable handle bounds, and switching to Both drew no arrow.
   useLayoutEffect(() => {
     updateNodeInternals(id);
   }, [id, signature, updateNodeInternals]);

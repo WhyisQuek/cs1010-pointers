@@ -8,7 +8,7 @@ import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
 import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
-import { equivalent } from '../pipeline/equivalence.js';
+import { drawingIssues, equivalent } from '../pipeline/equivalence.js';
 import { makeState } from '../machine/memory.js';
 import { seedLevels, loadCustomLevels, loadProgress, recordResult } from '../data/levels.js';
 
@@ -59,7 +59,15 @@ function ChallengeRunner({ level, onExit }) {
       return { state: null, error: e.message };
     }
   }, [level]);
-  const [studentState, setStudentState] = useState(makeState);
+  // The student's diagram knows the level's struct types, so struct objects can be drawn.
+  const [studentState, setStudentState] = useState(() =>
+    makeState(target.state?.structTypes ?? {}),
+  );
+  // A code→diagram answer must be drawable; say so instead of letting a student fail forever.
+  const undrawable = useMemo(
+    () => (level.kind === 'code-to-diagram' && target.state ? drawingIssues(target.state) : []),
+    [level, target],
+  );
   const [studentCode, setStudentCode] = useState('int main() {\n    \n}');
   const [verdict, setVerdict] = useState(null);
   const [badIds, setBadIds] = useState(() => new Set());
@@ -68,6 +76,21 @@ function ChallengeRunner({ level, onExit }) {
   const [messages, setMessages] = useState([]);
   const isC2D = level.kind === 'code-to-diagram';
   const say = m => setMessages(prev => [...prev.slice(-4), m]);
+
+  if (undrawable.length) {
+    return (
+      <div className="page">
+        <button className="back-btn" onClick={onExit}>
+          ← levels
+        </button>
+        <h2>{level.title}</h2>
+        <p className="msgbar-inline err">
+          This level&apos;s answer can&apos;t be drawn in the diagram editor: it needs{' '}
+          {undrawable.join('; ')}. Make it a diagram → code level in the Level editor.
+        </p>
+      </div>
+    );
+  }
 
   if (target.error) {
     return (

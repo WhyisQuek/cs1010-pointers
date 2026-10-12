@@ -58,6 +58,8 @@ export default function MemoryInspector({
   onSelectPath,
   onShowTarget,
   onClose,
+  // Shown under Type when the diagram knows no struct types (the sandbox explains how to add one).
+  structHint = null,
 }) {
   // String literals are read-only in C, so their objects stay read-only in diagrams too.
   const editable = editableDiagram && a.storage.kind !== 'static';
@@ -132,19 +134,30 @@ export default function MemoryInspector({
       </dd>
     </div>
   );
+  // Base types: the primitives, then the struct types this diagram knows (from the code that
+  // produced it, or the challenge's definitions). Struct choices are keyed `struct:<tag>`.
+  const structDefs = Object.values(state.structTypes ?? {});
+  const structBase = def => ({
+    kind: 'struct',
+    name: def.name,
+    ...(def.alias && { alias: def.alias }),
+  });
   const scalarType = isArray(a.type) ? a.type.of : a.type;
   let leaf = scalarType;
   while (isPointer(leaf)) leaf = leaf.to;
-  const canEditType = isPrimitive(leaf) && (isPrimitive(scalarType) || isPointer(scalarType));
+  const knownStruct = isStruct(leaf) && !!state.structTypes?.[leaf.name];
+  // Editable shapes: [array of] pointer^k to a primitive or known struct.
+  const canEditType = (isPrimitive(leaf) || knownStruct) && !isArray(scalarType);
   const editor = {
     shape: isArray(a.type) ? 'array' : 'scalar',
-    base: basePrimitive(scalarType),
+    base: knownStruct ? `struct:${leaf.name}` : basePrimitive(scalarType),
     stars: pointerDepth(scalarType),
     length: isArray(a.type) ? a.type.length : lastLength.current,
   };
   const setType = patch => {
     const next = { ...editor, ...patch };
-    let type = primitive(next.base);
+    const def = next.base.startsWith('struct:') && state.structTypes[next.base.slice(7)];
+    let type = def ? structBase(def) : primitive(next.base);
     for (let i = 0; i < next.stars; i++) type = pointer(type);
     if (next.shape === 'array') type = array(type, clampArrayLength(next.length));
     // size_t and unsigned long are one type; only the displayed spelling changes.
@@ -461,6 +474,15 @@ export default function MemoryInspector({
                   {PRIMITIVE_NAMES.map(t => (
                     <option key={t}>{t}</option>
                   ))}
+                  {structDefs.length > 0 && (
+                    <optgroup label="Structs">
+                      {structDefs.map(def => (
+                        <option key={def.name} value={`struct:${def.name}`}>
+                          {typeToString(structBase(def))}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <select
                   aria-label="Pointer depth"
@@ -476,6 +498,7 @@ export default function MemoryInspector({
                 </select>
               </div>
             </div>
+            {structHint && !structDefs.length && <p className="field-hint">{structHint}</p>}
             <div className="field">
               <span>Shape</span>
               <div className="shape-controls">

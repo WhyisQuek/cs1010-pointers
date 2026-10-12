@@ -6,9 +6,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initParser, interpret } from '../src/pipeline/interpreter.js';
-import { generate } from '../src/pipeline/codegen.js';
-import { equivalent } from '../src/pipeline/equivalence.js';
-import { resolveRef } from '../src/machine/memory.js';
+import { generate, validate } from '../src/pipeline/codegen.js';
+import { drawingIssues, equivalent } from '../src/pipeline/equivalence.js';
+import {
+  addAllocation,
+  addFrame,
+  makeState,
+  ref,
+  resolveRef,
+  setRefValue,
+} from '../src/machine/memory.js';
+import { changeAllocationType } from '../src/machine/editing.js';
+import { primitive } from '../src/language/types.js';
+import { seedLevels } from '../src/data/levels.js';
 
 const programs = [
   'int main() { int a = 10; int *b = &a; }',
@@ -51,6 +61,111 @@ for (const source of programs) {
     assert.ok(result.equal, `${result.diffs.join('; ')}\n${generated}`);
   });
 }
+
+test('names reused by block and loop scopes are valid and gradable', () => {
+  const programs = [
+    // A variable declared in a loop body leaves one expired object per iteration.
+    'int main(void) { int a[3] = {1, 2, 3}; for (int i = 0; i < 3; i++) { int t = a[i]; a[i] = t * 2; } return 0; }',
+    // Two loops with the same loop variable.
+    'int main(void) { int s = 0; for (int i = 0; i < 2; i++) s += i; for (int i = 0; i < 2; i++) s += i; return 0; }',
+    // A live variable declared after an expired one of the same name.
+    'int main(void) { { int t = 1; } int t = 2; return 0; }',
+  ];
+  for (const source of programs) {
+    const state = interpret(source).state;
+    assert.doesNotThrow(() => validate(state), source);
+    // A student answer with the same code matches the reference.
+    const result = equivalent(state, interpret(source).state);
+    assert.ok(result.equal, `${source}\n${result.diffs.join('; ')}`);
+  }
+});
+
+test('grading still tells same-named expired objects apart', () => {
+  // Each iteration's t stays part of the answer because a pointer still refers to it.
+  const loop = n =>
+    `int main(void) { int *keep[2]; for (int i = 0; i < ${n}; i++) { int t = i; keep[i] = &t; } return 0; }`;
+  const target = interpret(loop(2)).state;
+  // One fewer iteration leaves one fewer referenced expired t.
+  const fewer = interpret(loop(1)).state;
+  const result = equivalent(target, fewer);
+  assert.equal(result.equal, false);
+  assert.ok(
+    result.diffs.some(d => /missing variable 't' \(out of scope, #2\)/.test(d)),
+    result.diffs,
+  );
+});
+
+test('out-of-scope objects nothing points to are not graded', () => {
+  // Different loop temporaries and helper calls; the same memory the program can still reach.
+  const target = interpret(`void set(int *p) { *p = 25; }
+int main(void) { int value = 10; set(&value); int sum = 0; for (int i = 0; i < 3; i++) { int t = i; sum += t; } return 0; }`).state;
+  const answer = interpret(
+    'int main(void) { int value = 25; int sum = 0; for (int k = 0; k < 3; k++) sum += k; return 0; }',
+  ).state;
+  const result = equivalent(target, answer);
+  assert.ok(result.equal, result.diffs.join('; '));
+  // A live variable still has to match.
+  const wrong = interpret('int main(void) { int value = 25; int sum = 2; return 0; }').state;
+  assert.equal(equivalent(target, wrong).equal, false);
+});
+
+test('a dangling pointer keeps its out-of-scope target in the answer', () => {
+  const target = interpret('int main(void) { int *p; { int x = 5; p = &x; } return 0; }').state;
+  const nowhere = interpret('int main(void) { int *p; { int x = 5; } p = NULL; return 0; }').state;
+  const result = equivalent(target, nowhere);
+  assert.equal(result.equal, false);
+  assert.ok(
+    result.diffs.some(d => /missing variable 'x' \(out of scope\)/.test(d)),
+    result.diffs,
+  );
+});
+
+test('every code-to-diagram seed level can be drawn in the diagram editor', () => {
+  for (const level of seedLevels.filter(l => l.kind === 'code-to-diagram'))
+    assert.deepEqual(drawingIssues(interpret(level.code).state), [], level.title);
+});
+
+test('answers the diagram editor cannot draw are reported', () => {
+  const issues = source => drawingIssues(interpret(source).state).join('; ');
+  assert.match(
+    issues('int main(void) { int *p; { int x = 5; p = &x; } return 0; }'),
+    /out-of-scope variable 'x'/,
+  );
+  assert.match(issues('int main(void) { char *s = "hi"; return 0; }'), /string literal/);
+  // A two-dimensional array: the editor makes arrays of scalars, pointers and structs only.
+  assert.match(issues('int main(void) { int m[2][3]; return 0; }'), /'m' of type /);
+  // A literal nothing points to any more is not part of the answer.
+  assert.equal(issues('int main(void) { char *s = "hi"; s = NULL; return 0; }'), '');
+});
+
+test('a struct answer built with the diagram editing operations matches seed 10', () => {
+  const target = interpret(seedLevels.find(l => l.id === 'seed-10').code).state;
+  // What the student canvas does: start from the level's struct types, add int boxes,
+  // then change their type to the struct and fill in the fields.
+  const answer = makeState(target.structTypes);
+  addFrame(answer, { id: 'main', name: 'main' });
+  const node = { kind: 'struct', name: 'Node' };
+  const box = name => {
+    const a = addAllocation(answer, { name, type: primitive('int') });
+    changeAllocationType(answer, a.id, node);
+    return a;
+  };
+  const a = box('a'),
+    b = box('b');
+  setRefValue(answer, ref(a.id, ['value']), { kind: 'scalar', value: 1 });
+  setRefValue(answer, ref(a.id, ['next']), { kind: 'null' });
+  setRefValue(answer, ref(b.id, ['value']), { kind: 'scalar', value: 2 });
+  setRefValue(answer, ref(b.id, ['next']), { kind: 'pointer', target: ref(a.id) });
+  const result = equivalent(target, answer);
+  assert.ok(result.equal, result.diffs.join('; '));
+});
+
+test('two live variables with one name in a frame are still rejected', () => {
+  const state = interpret('int main(void) { int t = 1; { int u = 2; } return 0; }').state;
+  state.allocations.find(a => a.name === 'u').alive = true;
+  state.allocations.find(a => a.name === 'u').name = 't';
+  assert.throws(() => validate(state), /duplicate variable name 't'/);
+});
 
 test('a heap block reachable only through an interior pointer cannot be generated', () => {
   const state = interpret(`struct S { int x; int y; };

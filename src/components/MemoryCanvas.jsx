@@ -57,6 +57,8 @@ export default function MemoryCanvas({
   editable = false,
   badIds,
   onMessage,
+  // Passed to the inspector: how to get struct types into a diagram that has none.
+  structHint = null,
 }) {
   const state = useMemo(
     () => (rawState.addressSpace ? rawState : upgradeMemoryState(rawState)),
@@ -668,6 +670,7 @@ export default function MemoryCanvas({
             onSelectPath={path => inspect(selected.id, path)}
             onShowTarget={showTarget}
             onClose={closeInspector}
+            structHint={structHint}
           />
         )}
         <div

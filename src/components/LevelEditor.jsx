@@ -8,6 +8,7 @@ import { useState } from 'react';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
 import { interpret } from '../pipeline/interpreter.js';
+import { drawingIssues } from '../pipeline/equivalence.js';
 import { loadCustomLevels, mergeLevels, normalizeLevel, saveCustomLevels } from '../data/levels.js';
 
 const DEFAULT_CODE = 'int main() {\n    int a = 10;\n    int *b = &a;\n}';
@@ -51,8 +52,14 @@ export default function LevelEditor() {
 
   const save = () => {
     if (!title.trim()) return setError('give the level a title');
-    const { error: codeError } = tryInterpret(code);
+    const { state, error: codeError } = tryInterpret(code);
     if (codeError) return setError(`target code invalid: ${codeError}`);
+    // Students draw code → diagram answers, so the answer must be drawable.
+    const issues = kind === 'code-to-diagram' ? drawingIssues(state) : [];
+    if (issues.length)
+      return setError(
+        `students cannot draw this answer in the diagram editor: it needs ${issues.join('; ')}. Save it as diagram → code instead.`,
+      );
     const level = normalizeLevel({
       id: `custom-${Date.now()}`,
       title,

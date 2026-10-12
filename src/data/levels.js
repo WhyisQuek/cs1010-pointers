@@ -207,7 +207,7 @@ export const seedLevels = [
     id: 'seed-9',
     kind: 'code-to-diagram',
     title: 'A function call',
-    prompt: 'Step through the call and inspect both stack frames.',
+    prompt: 'Build the memory left after set_value() returns.',
     code: `void set_value(int *p) {
     *p = 25;
 }
@@ -218,8 +218,8 @@ int main(void) {
     return 0;
 }`,
     hints: [
-      'The parameter p belongs to set_value(), not main().',
-      "p points back into main()'s stack frame.",
+      "p is set_value()'s parameter: it points back into main()'s frame, and is gone once set_value() returns.",
+      "Writing through p changed main's value, so only value remains, holding 25.",
     ],
   },
   {

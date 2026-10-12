@@ -1462,6 +1462,13 @@ button:disabled {
   color: var(--muted);
   font-size: 11px;
 }
+/* A note under a control: aligned with the controls, not the labels. */
+.edit-grid .field-hint {
+  grid-column: 2;
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
 .value-control {
   display: flex;
   align-items: center;
