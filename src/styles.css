@@ -731,6 +731,50 @@ button:disabled {
   font: 600 14px var(--mono);
   overflow-wrap: anywhere;
 }
+/* The variable name in the heading: boxed like the panel's other inputs, so it reads as editable. */
+.name-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin-left: 1px;
+  padding: 2px 6px;
+  /* An inline-flex box takes its baseline from the input, so the name lines up with `int *`. */
+  vertical-align: baseline;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: text;
+}
+/* The boxed name is taller than plain heading text; give the context line below room. */
+.inspector h4.renamable {
+  margin-bottom: 6px;
+}
+.name-box:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+.name-box:focus-within {
+  border-color: var(--ptr);
+  box-shadow: 0 0 0 2px #58a6ff33;
+  color: var(--text);
+}
+.inspector input.name-edit {
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+.inspector input.name-edit:focus-visible {
+  outline: none;
+}
+.name-box svg {
+  flex: none;
+}
 .inspector-type {
   color: var(--muted);
   font-weight: 400;

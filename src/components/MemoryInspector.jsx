@@ -229,6 +229,9 @@ export default function MemoryInspector({
   const targetName = sameFrame ? d.label : (d?.qualifiedLabel ?? d?.label);
   // Heading: the C declaration for a named variable, otherwise the label and its type.
   const declared = isRoot && a.storage.kind === 'stack' && a.name;
+  // A named variable is renamed in place: only the name token of its declaration is an input.
+  const renamable = declared && editable && a.alive;
+  const [declBefore, declAfter] = declared ? declarationToC(a.type, '\0').split('\0') : [];
   // After the address: size, member offset, then where the object lives.
   const context = [
     selected.onePast
@@ -459,22 +462,8 @@ export default function MemoryInspector({
   }
 
   const declaration =
-    editable && a.alive && (a.storage.kind === 'stack' || canEditType) ? (
+    editable && a.alive ? (
       <>
-        {a.storage.kind === 'stack' && (
-          <label className="field">
-            <span>Name</span>
-            <input
-              aria-label="Object name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              onBlur={commitName}
-              onKeyDown={e => {
-                if (e.key === 'Enter') e.currentTarget.blur();
-              }}
-            />
-          </label>
-        )}
         {canEditType ? (
           <>
             <div className="field">
@@ -603,8 +592,48 @@ export default function MemoryInspector({
     <aside className="inspector" aria-label={`Inspect ${allocationDisplayName(state, a)}`}>
       <div className="inspector-heading">
         <div>
-          <h4>
-            {declared ? (
+          <h4 className={renamable ? 'renamable' : undefined}>
+            {renamable ? (
+              <>
+                {/* The type is changed below, so it recedes and the name box leads the heading. */}
+                <span className="inspector-type">{declBefore}</span>
+                {/* A label, so a click anywhere in the box (pencil included) focuses the input. */}
+                <label className="name-box" title="Rename">
+                  <input
+                    className="name-edit"
+                    aria-label="Object name"
+                    spellCheck={false}
+                    autoComplete="off"
+                    value={name}
+                    // Monospace, so the input grows one character cell per typed character.
+                    style={{ width: `${Math.max(4, name.length)}ch` }}
+                    onChange={e => setName(e.target.value)}
+                    onBlur={commitName}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                      else if (e.key === 'Escape') {
+                        // Revert first so the blur that follows has nothing to commit.
+                        e.stopPropagation();
+                        setName(a.name ?? '');
+                        setNotice('');
+                        const input = e.currentTarget;
+                        setTimeout(() => input.blur());
+                      }
+                    }}
+                  />
+                  <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+                    <path
+                      d="M10.5 2.5l3 3L6 13H3v-3z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </label>
+                <span className="inspector-type">{declAfter}</span>
+              </>
+            ) : declared ? (
               declarationToC(a.type, a.name)
             ) : (
               <>
