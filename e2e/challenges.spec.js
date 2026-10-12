@@ -36,7 +36,8 @@ test('a diagram-to-code challenge rejects a wrong answer and accepts a correct o
   await result.getByRole('button', { name: 'Next challenge →' }).click();
   await expect(page.locator('.challenge-head strong')).toHaveText('Pointers move');
   await page.getByRole('button', { name: '← Challenges' }).click();
-  await expect(page.getByText(/^1 of \d+ completed$/)).toBeVisible();
+  await expect(page.locator('.lede')).toHaveText(/^1 of \d+ completed$/);
+  await expect(page.getByRole('region', { name: 'Basics' })).toContainText('1 of 5 completed');
   await expect(page.getByRole('button', { name: /Write the arrow/ })).toContainText('Completed');
 });
 
@@ -88,6 +89,7 @@ test('a wrong diagram is reported as an incorrect diagram', async ({ page }) => 
 test('level cards lay out from the top, whatever their height', async ({ page }) => {
   await openApp(page);
   await openTab(page, 'Challenges');
+  await expect(page.getByRole('region', { name: 'Basics' })).toContainText('0 of 5 completed');
   const tops = await page
     .locator('.level-card')
     .evaluateAll(cards =>
@@ -99,12 +101,18 @@ test('level cards lay out from the top, whatever their height', async ({ page })
 });
 
 test('the function-call level is solved by drawing what main() is left with', async ({ page }) => {
-  await openLevel(page, /A function call/);
-  await page.getByRole('button', { name: '+ Variable' }).click();
-  const name = page.getByRole('textbox', { name: 'Object name' });
-  await name.fill('value');
-  await name.press('Enter');
-  await page.getByRole('spinbutton', { name: 'Value of value' }).fill('25');
+  await openLevel(page, /Swap, or not/);
+  const variable = async (varName, value) => {
+    await page.getByRole('button', { name: '+ Variable' }).click();
+    const name = page.getByRole('textbox', { name: 'Object name' });
+    await name.fill(varName);
+    await name.press('Enter');
+    await page.getByRole('spinbutton', { name: `Value of ${varName}` }).fill(String(value));
+  };
+  // swap_values() worked on copies; only swap() changed main()'s variables.
+  await variable('a', 1);
+  await variable('b', 3);
+  await variable('c', 2);
   await page.getByRole('button', { name: 'Check answer' }).click();
   await expect(page.locator('.verdict')).toContainText('Challenge complete!');
 });
@@ -172,7 +180,16 @@ test.describe('course levels', () => {
   });
 
   test('published levels are listed and stored drafts are not', async ({ page }) => {
-    await openLevel(page, /Published level/);
+    await openApp(page);
+    await openTab(page, 'Challenges');
+    // Course levels without a section come last, under a generic heading.
+    const more = page.getByRole('region', { name: 'More challenges' });
+    await expect(more.getByRole('button', { name: /Published level/ })).toBeVisible();
+    await expect(page.locator('.level-section').last()).toHaveAttribute(
+      'aria-label',
+      'More challenges',
+    );
+    await more.getByRole('button', { name: /Published level/ }).click();
     await expect(page.locator('.challenge-head strong')).toHaveText('Published level');
     await page.getByRole('button', { name: '← Challenges' }).click();
     await expect(page.getByRole('button', { name: /Draft/ })).toHaveCount(0);

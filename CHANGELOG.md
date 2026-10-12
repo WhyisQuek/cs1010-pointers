@@ -2,6 +2,10 @@
 
 ## Unreleased — fixes
 
+### Fixed
+
+- A code → diagram level whose answer has a one-past-the-end pointer is reported as undrawable instead of being impossible to solve: the diagram editor's target picker cannot choose a one-past boundary.
+
 ### Internal
 
 - `setRefValue` writes through the location `resolveRef` already found instead of walking the path a second time.
@@ -9,6 +13,7 @@
 
 ### Added
 
+- Challenge sections. Levels have an optional `section`, set in the Level editor (which suggests the existing names), and the Challenges list groups cards under section headings. Each heading shows its completed count and a small progress bar beside it, both turning green when the section is finished; sections are separated by space rather than rules. Cards show their number, a small direction tag and a ✓ when completed (replacing the "✓ Completed" badge), and the list is at most 1300px wide so a section's cards stay together on wide screens. Sections keep the order they are first used in, so a course level can join a built-in section by its exact name; levels without one are listed last under **More challenges**. Numbering and **Next challenge** follow the grouped order. The built-in levels are in six sections: Basics, Arrays, Functions, Heap, Structs and Linked lists.
 - Separate student and instructor builds. The student app (`npm run build`) has Sandbox and Challenges and contains no Level editor code; the instructor app (`npm run build:instructor`, `npm run dev:instructor`) adds the Level editor. CI checks the student build with `npm run check:editions`. The instructor site must be hosted behind access control.
 - Course levels: `public/levels/course.json` (a pack exported from the Level editor) is loaded at startup and listed for every student after the built-in levels. Students no longer see levels saved in their own browser.
 - Saved levels can be edited in the Level editor instead of only deleted. Editing a level's code, direction or grading clears its completion.
@@ -16,6 +21,7 @@
 
 ### Changed
 
+- The built-in challenges were overhauled: 18 levels (was 12) in six tiers — basics, arrays, functions, heap, structs and linked lists — reaching list reversal, unlinking and freeing, `int **` out-parameters, pass-by-value, leaks, shallow struct copies and dangling pointers into returned frames. The two levels with little pointer content ("Choose a target", "Fill an array") were removed, and diagram → code levels now target memory that needs a particular mechanism (`free`, a returned frame, a one-past pointer, nameless heap nodes) rather than one that can be copied out as declarations. Reworked levels have new IDs, so completion of the old versions is not carried over; "Write the arrow", "Pointers move" and "Linked structure" are unchanged. See [docs/CHALLENGE_REVIEW.md](docs/CHALLENGE_REVIEW.md).
 - Challenge progress is completion only. Stars are gone: they could be farmed by leaving and re-entering a level, which reset the attempt count. Earlier star records are not carried over.
 - The Challenges list is tidier. Card content starts at the top (cards are buttons, which centred their content, so shorter cards sat lower). Each card shows its number and direction, the title, and a **topic** (what the level teaches) instead of the instructions; completed levels get a green **✓ Completed** badge, and the heading says how many are completed. Levels have a new optional `topic` field, set in the Level editor; the instruction moved to the challenge header, and a level without one gets a default for its direction. The built-in levels have topics, and their instructions no longer give hints away.
 - Grading feedback says where an answer is wrong without giving the answer away: `'x' has the wrong value`, `'p' points to the wrong place`, `Variable 'x' has the wrong type`, `The number of heap blocks is wrong`, instead of the expected value, target, type or count. Missing and unexpected variables are still named, since the level already shows those names.

@@ -24,13 +24,15 @@ test('a saved level appears in Challenges, can be edited, and can be deleted', a
   await openEditor(page);
   await page.getByLabel('title').fill('Smoke test level');
   await page.getByLabel(/^topic/).fill('Smoke testing');
+  // Joining a built-in section by name lists the level under it.
+  await page.getByRole('combobox', { name: /^section/ }).fill('Heap');
   await page.getByRole('button', { name: 'Save level' }).click();
   await expect(page.locator('.saved-row')).toContainText('Smoke test level');
 
   await openTab(page, 'Challenges');
-  await expect(page.getByRole('button', { name: /Smoke test level/ })).toContainText(
-    'Smoke testing',
-  );
+  await expect(
+    page.getByRole('region', { name: 'Heap' }).getByRole('button', { name: /Smoke test level/ }),
+  ).toContainText('Smoke testing');
 
   await openTab(page, 'Level editor');
   await page.getByRole('button', { name: 'edit', exact: true }).click();
@@ -88,7 +90,7 @@ test.describe('stored custom levels', () => {
       page.getByText(/reference code no longer runs: .*missing identifier.*Level editor/),
     ).toBeVisible();
     await page.getByRole('button', { name: '← Challenges' }).click();
-    await expect(page.getByRole('heading', { name: 'Challenges' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Challenges', exact: true })).toBeVisible();
   });
 
   test('levels stored with duplicate IDs both load and open independently', async ({ page }) => {

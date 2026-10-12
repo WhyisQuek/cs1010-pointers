@@ -60,6 +60,8 @@ export function normalizeLevel(raw) {
     id: text(raw.id, `custom-${Date.now()}`),
     kind: raw.kind,
     title: text(raw.title, 'Untitled level'),
+    // The Challenges heading the level is listed under; '' leaves it unsectioned.
+    section: text(raw.section, ''),
     // What the level teaches, shown on its card; '' shows no subtitle.
     topic: text(raw.topic, ''),
     // The instruction, shown in the challenge header.
@@ -127,6 +129,24 @@ export function availableLevels({ includeCustom }) {
   return [...seedLevels, ...course, ...custom.filter(l => !courseIds.has(l.id))];
 }
 
+/**
+ * Levels grouped for listing, as [{ section, levels }]. Sections appear in the order they
+ * are first used and keep their levels' order, so a course level can join a built-in
+ * section. Unsectioned levels come last, in a group whose section is ''. Flattening the
+ * groups gives the order the list is numbered and played in.
+ */
+export function groupLevels(levels) {
+  const groups = new Map();
+  for (const level of levels) {
+    if (!groups.has(level.section)) groups.set(level.section, []);
+    groups.get(level.section).push(level);
+  }
+  // A stable sort, so only the unsectioned group moves.
+  return [...groups]
+    .sort(([a], [b]) => (a === '') - (b === ''))
+    .map(([section, members]) => ({ section, levels: members }));
+}
+
 /** Returns false when the browser refused to persist the levels. */
 export function saveCustomLevels(levels) {
   return writeJson(LEVELS_KEY, levels);
@@ -163,21 +183,34 @@ export function clearProgress(levelId) {
    Target IRs are stored as plain code; the app interprets them at load
    time so the level format stays human-writable and versionable. They go
    through normalizeLevel like any other level, so a level that leaves out
-   its prompt gets the default instruction for its kind.               */
+   its prompt gets the default instruction for its kind.
+
+   Progress is keyed by ID: a level whose answer changes gets a new ID, so
+   an old completion mark never claims the new answer. Difficulty comes from
+   what the final memory is (grading sees nothing else), so diagram → code
+   levels target states that need a particular mechanism to produce. A
+   code → diagram answer must be drawable: see drawingIssues(). The design
+   rationale is in docs/CHALLENGE_REVIEW.md.                           */
 export const seedLevels = [
   {
-    id: 'seed-1',
+    id: 'seed-read-arrow',
+    section: 'Basics',
     kind: 'code-to-diagram',
     title: 'Read the arrow',
-    topic: 'Pointers and the address-of operator',
-    code: `int main() {\n    int a = 10;\n    int *b = &a;\n}`,
+    topic: 'Pointers, & and writing through *',
+    code: `int main(void) {
+    int a = 10;
+    int *b = &a;
+    *b = 20;
+}`,
     hints: [
       'Two boxes: one plain int, one pointer.',
-      "b's box holds an arrow, not a number — draw it from b to a.",
+      "*b = 20 writes into the box b points at — b's own arrow doesn't change.",
     ],
   },
   {
     id: 'seed-2',
+    section: 'Basics',
     kind: 'diagram-to-code',
     title: 'Write the arrow',
     topic: 'Pointers and the address-of operator',
@@ -186,6 +219,7 @@ export const seedLevels = [
   },
   {
     id: 'seed-3',
+    section: 'Basics',
     kind: 'code-to-diagram',
     title: 'Pointers move',
     topic: 'Reassigning a pointer and writing through it',
@@ -196,85 +230,226 @@ export const seedLevels = [
     ],
   },
   {
-    id: 'seed-4',
-    kind: 'diagram-to-code',
+    id: 'seed-copy',
+    section: 'Basics',
+    kind: 'code-to-diagram',
+    title: 'Copy the arrow or the value?',
+    topic: 'Copying through pointers versus copying pointers',
+    code: `int main(void) {
+    int a = 1;
+    int b = 2;
+    int *p = &a;
+    int *q = &b;
+    *p = *q;
+    q = p;
+    *q = 3;
+}`,
+    hints: [
+      '*p = *q copies a number; q = p copies an arrow.',
+      'After q = p, writing through q changes a.',
+    ],
+  },
+  {
+    id: 'seed-two-hops',
+    section: 'Basics',
+    kind: 'code-to-diagram',
     title: 'Two hops',
     topic: 'Pointers to pointers',
-    code: `int main() {\n    int a = 5;\n    int *p = &a;\n    int **pp = &p;\n}`,
-    hints: ['pp has type int ** — two stars.', 'Each & gives you exactly one arrow.'],
+    code: `int main(void) {
+    int a = 5;
+    int b = 6;
+    int *p = &a;
+    int **pp = &p;
+    *pp = &b;
+    **pp = 60;
+}`,
+    hints: ["*pp is p itself — assigning to it moves p's arrow.", '**pp follows both arrows.'],
   },
   {
-    id: 'seed-5',
+    id: 'seed-reverse-array',
+    section: 'Arrays',
     kind: 'code-to-diagram',
-    title: 'The nameless box',
-    topic: 'Heap memory from malloc',
-    code: `int main() {\n    int *p = malloc(sizeof(int));\n    *p = 42;\n    int *q = p;\n}`,
-    hints: [
-      "The malloc'd box lives in the heap region and has no name.",
-      'q = p copies the arrow — both point at the same heap box.',
-    ],
-  },
-  {
-    id: 'seed-6',
-    kind: 'diagram-to-code',
-    title: 'Use after free',
-    topic: 'Freeing memory and dangling pointers',
-    code: `int main() {\n    int *p = malloc(sizeof(int));\n    int *q = p;\n    free(p);\n}`,
-    hints: ['You need malloc AND free.', 'Freeing through one pointer dangles every alias.'],
-  },
-  {
-    id: 'seed-7',
-    kind: 'code-to-diagram',
-    title: 'Inside the array',
-    topic: 'Pointer arithmetic in an array',
-    code: `int main() {
-    int arr[3] = {10, 20, 30};
-    int *p = arr;
-    p++;
+    title: 'Meet in the middle',
+    topic: 'Two pointers walking an array',
+    code: `int main(void) {
+    int arr[5] = {1, 2, 3, 4, 5};
+    int *lo = arr;
+    int *hi = arr + 4;
+    while (lo < hi) {
+        int t = *lo;
+        *lo = *hi;
+        *hi = t;
+        lo++;
+        hi--;
+    }
 }`,
     hints: [
-      'An array name decays to a pointer to arr[0].',
-      'p++ moves by one int element, so the final arrow ends at arr[1].',
+      'Each pass swaps the two ends, then moves lo right and hi left.',
+      'The loop stops when lo is no longer below hi — where do they meet?',
     ],
   },
   {
-    id: 'seed-8',
+    id: 'seed-one-past',
+    section: 'Arrays',
     kind: 'diagram-to-code',
-    title: 'Heap array',
-    topic: 'Arrays on the heap',
-    code: `int main() {
-    int *p = malloc(3 * sizeof(int));
-    p[0] = 4;
-    p[1] = 5;
-    p[2] = 6;
+    title: 'Bounds of an array',
+    topic: 'Interior and one-past-the-end pointers',
+    code: `int main(void) {
+    int arr[5] = {5, 4, 3, 2, 1};
+    int *mid = &arr[2];
+    int *end = arr + 5;
+    long left = end - mid;
 }`,
     hints: [
-      'Allocate 3 * sizeof(int), not just sizeof(int).',
-      'Use p[index] to initialize each element.',
+      'end points just past the last element: arr + 5 is allowed, *end is not.',
+      'Subtracting two pointers into one array counts elements, not bytes.',
     ],
   },
   {
-    id: 'seed-9',
+    id: 'seed-swap',
+    section: 'Functions',
     kind: 'code-to-diagram',
-    title: 'A function call',
-    topic: 'Passing a pointer to a function',
-    prompt: 'Draw the memory left once set_value() has returned.',
-    code: `void set_value(int *p) {
-    *p = 25;
+    title: 'Swap, or not',
+    topic: 'Passing values versus passing pointers',
+    prompt: "Draw main()'s memory after both calls have returned.",
+    code: `void swap_values(int x, int y) {
+    int t = x;
+    x = y;
+    y = t;
+}
+
+void swap(int *x, int *y) {
+    int t = *x;
+    *x = *y;
+    *y = t;
 }
 
 int main(void) {
-    int value = 10;
-    set_value(&value);
+    int a = 1;
+    int b = 2;
+    int c = 3;
+    swap_values(a, b);
+    swap(&b, &c);
     return 0;
 }`,
     hints: [
-      "p is set_value()'s parameter: it points back into main()'s frame, and is gone once set_value() returns.",
-      "Writing through p changed main's value, so only value remains, holding 25.",
+      'swap_values() gets copies of a and b — its swap never reaches main().',
+      'swap() gets addresses, so it really exchanges the values it points at.',
+    ],
+  },
+  {
+    id: 'seed-out-param',
+    section: 'Functions',
+    kind: 'code-to-diagram',
+    title: 'Hand back an allocation',
+    topic: 'Pointer-to-pointer parameters',
+    prompt: 'Draw the memory left once both calls have returned, heap included.',
+    code: `void alloc_wrong(int *p) {
+    p = malloc(sizeof(int));
+    *p = 1;
+}
+
+void alloc_right(int **pp) {
+    *pp = malloc(sizeof(int));
+    **pp = 2;
+}
+
+int main(void) {
+    int *a = NULL;
+    int *b = NULL;
+    alloc_wrong(a);
+    alloc_right(&b);
+    return 0;
+}`,
+    hints: [
+      "alloc_wrong()'s p is a copy of a: pointing the copy elsewhere leaves a unchanged.",
+      'Every heap block still exists once its function returns, even one nothing points to.',
+    ],
+  },
+  {
+    id: 'seed-return-local',
+    section: 'Functions',
+    kind: 'diagram-to-code',
+    title: 'Returned too soon',
+    topic: 'Returning the address of a local variable',
+    prompt:
+      'Write C code that leaves p dangling like this. Show out-of-scope reveals where n lived.',
+    code: `int *make_local(void) {
+    int n = 5;
+    return &n;
+}
+
+int main(void) {
+    int *p = make_local();
+    return 0;
+}`,
+    hints: [
+      "n belonged to make_local()'s frame, which has ended.",
+      'A function can return the address of its own local — and should not.',
+    ],
+  },
+  {
+    id: 'seed-leak',
+    section: 'Heap',
+    kind: 'code-to-diagram',
+    title: 'Lost and leaked',
+    topic: 'Heap blocks nothing points to',
+    code: `int main(void) {
+    int *p = malloc(sizeof(int));
+    *p = 42;
+    int *q = p;
+    p = malloc(sizeof(int));
+    *p = *q + 1;
+    q = p;
+}`,
+    hints: [
+      "The second malloc makes a new box; the first one doesn't go away.",
+      'Draw every heap block, even one nothing points to any more.',
+    ],
+  },
+  {
+    id: 'seed-heap-arith',
+    section: 'Heap',
+    kind: 'code-to-diagram',
+    title: 'Heap arithmetic',
+    topic: 'Pointer arithmetic in a heap array',
+    code: `int main(void) {
+    int *p = malloc(4 * sizeof(int));
+    for (int i = 0; i < 4; i++) {
+        *(p + i) = i * i;
+    }
+    int *last = p + 3;
+    p[1] = *last - p[2];
+}`,
+    hints: [
+      '*(p + i) and p[i] name the same element.',
+      'The loop fills in the squares before p[1] is overwritten.',
+    ],
+  },
+  {
+    id: 'seed-dangling',
+    section: 'Heap',
+    kind: 'diagram-to-code',
+    title: 'Dangling aliases',
+    topic: 'Freeing memory and dangling pointers',
+    code: `int main(void) {
+    int *a = malloc(2 * sizeof(int));
+    int *b = malloc(sizeof(int));
+    a[0] = 1;
+    a[1] = 2;
+    *b = 3;
+    int *mid = a + 1;
+    free(a);
+    a = b;
+}`,
+    hints: [
+      'Freeing a block dangles every pointer into it — including one into its middle.',
+      'After the free, a itself can be pointed somewhere new.',
     ],
   },
   {
     id: 'seed-10',
+    section: 'Structs',
     kind: 'code-to-diagram',
     title: 'Linked structure',
     topic: 'Structs that point to structs',
@@ -291,40 +466,115 @@ int main(void) {
     hints: ['Each struct is one object with two fields.', 'b.next points to the whole struct a.'],
   },
   {
-    id: 'seed-11',
+    id: 'seed-shallow',
+    section: 'Structs',
     kind: 'code-to-diagram',
-    title: 'Choose a target',
-    topic: 'Pointers and if statements',
-    code: `int main(void) {
-    int a = 1;
-    int b = 2;
-    int *p = &a;
-    if (b > a) {
-        p = &b;
-    }
+    title: 'Shallow copy',
+    topic: 'Copying a struct that holds a pointer',
+    code: `struct Box {
+    int size;
+    int *data;
+};
+
+int main(void) {
+    struct Box a;
+    a.size = 2;
+    a.data = malloc(2 * sizeof(int));
+    a.data[0] = 7;
+    a.data[1] = 8;
+    struct Box b = a;
+    b.size = 1;
+    b.data[0] = 70;
     return 0;
 }`,
     hints: [
-      'Evaluate b > a before moving the pointer.',
-      'Only the branch whose condition is non-zero executes.',
+      'b = a copies the pointer inside a, not the array it points to.',
+      'How many heap arrays does this program allocate?',
     ],
   },
   {
-    id: 'seed-12',
-    kind: 'code-to-diagram',
-    title: 'Fill an array',
-    topic: 'Writing to an array in a loop',
-    code: `int main(void) {
-    int values[4] = {0, 0, 0, 0};
-    int i = 0;
-    for (i = 0; i < 4; i++) {
-        values[i] = i * 10;
+    id: 'seed-build-list',
+    section: 'Linked lists',
+    kind: 'diagram-to-code',
+    title: 'Build a list',
+    topic: 'Linked lists on the heap',
+    code: `typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+
+int main(void) {
+    Node *head = NULL;
+    for (int i = 3; i >= 1; i--) {
+        Node *n = malloc(sizeof(Node));
+        n->value = i;
+        n->next = head;
+        head = n;
     }
     return 0;
 }`,
     hints: [
-      'The loop runs for i = 0, 1, 2, 3.',
-      'Each iteration writes to values[i] before i is incremented.',
+      "Every node is a malloc'd struct with no name of its own.",
+      'Building from the back is easiest: each new node points at the old head.',
+    ],
+  },
+  {
+    id: 'seed-reverse-list',
+    section: 'Linked lists',
+    kind: 'code-to-diagram',
+    title: 'Reverse the links',
+    topic: 'Tracing pointers through a loop',
+    code: `struct Node {
+    int value;
+    struct Node *next;
+};
+
+int main(void) {
+    struct Node c = {3, NULL};
+    struct Node b = {2, &c};
+    struct Node a = {1, &b};
+    struct Node *prev = NULL;
+    struct Node *cur = &a;
+    while (cur != NULL) {
+        struct Node *next = cur->next;
+        cur->next = prev;
+        prev = cur;
+        cur = next;
+    }
+    return 0;
+}`,
+    hints: [
+      'Each pass turns one link around to point backwards.',
+      'next is local to the loop body, so it is gone at the end.',
+    ],
+  },
+  {
+    id: 'seed-unlink',
+    section: 'Linked lists',
+    kind: 'code-to-diagram',
+    title: 'Unlink and free',
+    topic: 'Removing a node from a list',
+    code: `typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+
+int main(void) {
+    Node *head = malloc(sizeof(Node));
+    head->value = 1;
+    head->next = malloc(sizeof(Node));
+    head->next->value = 2;
+    head->next->next = malloc(sizeof(Node));
+    head->next->next->value = 3;
+    head->next->next->next = NULL;
+    Node *doomed = head->next;
+    head->next = doomed->next;
+    free(doomed);
+    return 0;
+}`,
+    hints: [
+      'Unlinking only redirects head->next; the freed node keeps its old contents.',
+      "Freed blocks are read-only: fill in that node and draw doomed's arrow before marking it freed.",
     ],
   },
 ].map(normalizeLevel);

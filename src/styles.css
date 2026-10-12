@@ -803,6 +803,49 @@ button:disabled {
   margin: -8px 0 18px;
   color: var(--muted);
 }
+/* On wide screens the grid would spread a section's few cards across the whole window.
+   Wide enough for five 250px cards, the largest built-in section. */
+.challenge-list {
+  max-width: 1300px;
+}
+.level-section + .level-section {
+  margin-top: 32px;
+}
+/* Spacing, not rules, groups a heading with its cards; the count sits beside the heading. */
+.level-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.level-section-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.section-bar {
+  width: 56px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+.section-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ptr);
+}
+.section-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.level-section.done .section-bar > span {
+  background: var(--ok);
+}
+.level-section.done .section-count {
+  color: var(--ok);
+}
 .level-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -833,23 +876,27 @@ button:disabled {
 .level-card-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-height: 20px;
 }
-.level-card .kind {
+.level-number {
   color: var(--muted);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
-.level-badge {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(63, 185, 80, 0.15);
-  color: #7ee787;
+.level-kind {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
+}
+.level-done {
+  margin-left: auto;
+  color: var(--ok);
+  font-size: 14px;
+  line-height: 1;
 }
 .level-card h3 {
   margin: 0;

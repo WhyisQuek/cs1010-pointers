@@ -1,6 +1,6 @@
 /**
  * Instructor challenge editor. The target state is authored as C, previewed
- * once typing pauses, and saved as { title, kind, topic, prompt, code, hints, grading }: the target
+ * once typing pauses, and saved as { title, kind, section, topic, prompt, code, hints, grading }: the target
  * MemoryState is always derived from the code, never stored. Levels export and
  * import as JSON; an exported pack committed as public/levels/course.json is what
  * students see. Only the instructor build includes this page (see edition.js).
@@ -12,6 +12,7 @@ import { interpret } from '../pipeline/interpreter.js';
 import { drawingIssues } from '../pipeline/equivalence.js';
 import {
   DEFAULT_PROMPTS,
+  availableLevels,
   clearProgress,
   loadCustomLevels,
   mergeLevels,
@@ -52,6 +53,7 @@ export default function LevelEditor() {
   const [editingId, setEditingId] = useState(null);
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState('code-to-diagram');
+  const [section, setSection] = useState('');
   const [topic, setTopic] = useState('');
   const [prompt, setPrompt] = useState('');
   const [code, setCode] = useState(DEFAULT_CODE);
@@ -82,6 +84,7 @@ export default function LevelEditor() {
   const resetForm = () => {
     setEditingId(null);
     setTitle('');
+    setSection('');
     setTopic('');
     setPrompt('');
     setHints('');
@@ -91,6 +94,7 @@ export default function LevelEditor() {
     setEditingId(level.id);
     setTitle(level.title);
     setKind(level.kind);
+    setSection(level.section);
     setTopic(level.topic);
     // A default prompt stays blank, so changing the direction picks the new default.
     setPrompt(level.prompt === DEFAULT_PROMPTS[level.kind] ? '' : level.prompt);
@@ -115,6 +119,7 @@ export default function LevelEditor() {
       id: editingId ?? `custom-${Date.now()}`,
       title,
       kind,
+      section,
       topic,
       prompt,
       code,
@@ -169,6 +174,13 @@ export default function LevelEditor() {
     reader.readAsText(file);
   };
 
+  // Existing sections are suggested so a new level can join one by its exact name.
+  const sectionNames = [
+    ...new Set(
+      [...availableLevels({ includeCustom: false }), ...levels].map(l => l.section).filter(Boolean),
+    ),
+  ];
+
   return (
     <div className="page level-editor">
       <div className="editor-form">
@@ -193,6 +205,21 @@ export default function LevelEditor() {
           <option value="code-to-diagram">show code → student builds diagram</option>
           <option value="diagram-to-code">show diagram → student writes code</option>
         </select>
+
+        <label htmlFor="lv-section">section — the Challenges heading it is listed under</label>
+        <input
+          id="lv-section"
+          type="text"
+          list="lv-section-names"
+          value={section}
+          onChange={e => setSection(e.target.value)}
+          placeholder="e.g. Heap (blank lists it under More challenges)"
+        />
+        <datalist id="lv-section-names">
+          {sectionNames.map(name => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
 
         <label htmlFor="lv-topic">topic — shown on the challenge card</label>
         <input

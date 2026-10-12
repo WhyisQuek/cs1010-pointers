@@ -9,6 +9,7 @@ import { addAllocation, makeState, pointerValue, ref } from '../src/machine/memo
 import {
   DEFAULT_PROMPTS,
   availableLevels,
+  groupLevels,
   loadCourseLevels,
   loadCustomLevels,
   mergeLevels,
@@ -79,6 +80,7 @@ test('imported levels are normalized and malformed entries rejected', () => {
     kind: 'diagram-to-code',
     code: 'int main(){}',
     title: '  T  ',
+    section: ' Heap ',
     topic: ' Pointers ',
     hints: [' a ', 3, ''],
     grading: { compareNames: false, evil: true },
@@ -87,6 +89,7 @@ test('imported levels are normalized and malformed entries rejected', () => {
     id: 'x',
     kind: 'diagram-to-code',
     title: 'T',
+    section: 'Heap',
     topic: 'Pointers',
     prompt: DEFAULT_PROMPTS['diagram-to-code'],
     code: 'int main(){}',
@@ -96,14 +99,47 @@ test('imported levels are normalized and malformed entries rejected', () => {
   // A missing topic shows no subtitle; the default prompt follows the challenge direction.
   const bare = normalizeLevel({ kind: 'code-to-diagram', code: 'int main(){}' });
   assert.equal(bare.topic, '');
+  assert.equal(bare.section, '');
   assert.equal(bare.prompt, DEFAULT_PROMPTS['code-to-diagram']);
+  assert.equal(normalizeLevel({ ...bare, section: 7 }).section, '');
 });
 
-test('every seed level has a topic and an instruction', () => {
+test('every seed level has a section, a topic and an instruction', () => {
   for (const level of seedLevels) {
+    assert.ok(level.section, `${level.id} has no section`);
     assert.ok(level.topic, `${level.id} has no topic`);
     assert.ok(level.prompt, `${level.id} has no prompt`);
   }
+  // A section's seed levels are adjacent, so grouping leaves the built-in order unchanged.
+  const grouped = groupLevels(seedLevels).flatMap(g => g.levels);
+  assert.deepEqual(
+    grouped.map(l => l.id),
+    seedLevels.map(l => l.id),
+  );
+});
+
+test('levels group by section in first-use order, unsectioned last', () => {
+  const lv = (id, section) => ({ id, section });
+  const groups = groupLevels([
+    lv('a1', 'A'),
+    lv('x1', ''),
+    lv('b1', 'B'),
+    lv('a2', 'A'),
+    lv('x2', ''),
+  ]);
+  assert.deepEqual(
+    groups.map(g => [g.section, g.levels.map(l => l.id)]),
+    [
+      ['A', ['a1', 'a2']],
+      ['B', ['b1']],
+      ['', ['x1', 'x2']],
+    ],
+  );
+  assert.deepEqual(
+    groupLevels([lv('b1', 'B')]).map(g => g.section),
+    ['B'],
+  );
+  assert.deepEqual(groupLevels([]), []);
 });
 
 test('merging levels never produces duplicate IDs, including against seed levels', () => {

@@ -87,6 +87,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Generated files are excluded by `.gitign
 - [`docs/MEMORY_ADDRESSES_DESIGN.md`](docs/MEMORY_ADDRESSES_DESIGN.md) — simulated-address design, implementation scope, and remaining validation gates.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — GitHub Pages publishing, production preview and troubleshooting.
 - [`docs/CODE_AUDIT.md`](docs/CODE_AUDIT.md) — September 2026 code audit: issues found, fixes and follow-ups.
+- [`docs/CHALLENGE_REVIEW.md`](docs/CHALLENGE_REVIEW.md) — review of the built-in challenges, the design of the current set and constraints for level authors.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
 
 ## Core design rule

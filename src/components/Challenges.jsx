@@ -10,12 +10,21 @@ import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { drawingIssues, equivalent } from '../pipeline/equivalence.js';
 import { makeState } from '../machine/memory.js';
-import { availableLevels, loadProgress, isSolved, markSolved } from '../data/levels.js';
+import {
+  availableLevels,
+  groupLevels,
+  loadProgress,
+  isSolved,
+  markSolved,
+} from '../data/levels.js';
 import { INSTRUCTOR } from '../edition.js';
 
+const UNSECTIONED = 'More challenges';
 const kindLabel = kind => (kind === 'code-to-diagram' ? 'Code → diagram' : 'Diagram → code');
 // Only the instructor build has the Level editor, so only it lists browser-saved levels.
-const allLevels = () => availableLevels({ includeCustom: INSTRUCTOR });
+// Listed by section; numbering and "Next challenge" follow that order.
+const allLevels = () =>
+  groupLevels(availableLevels({ includeCustom: INSTRUCTOR })).flatMap(g => g.levels);
 const sameLevel = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // What to do about a level that can't be attempted depends on who is looking.
 const brokenLevelAdvice = editorAdvice =>
@@ -61,31 +70,58 @@ export default function Challenges({ shown = true }) {
       />
     );
   }
-  const completed = levels.filter(lv => isSolved(progress, lv.id)).length;
+  const solvedCount = list => list.filter(lv => isSolved(progress, lv.id)).length;
+  const card = lv => {
+    const solved = isSolved(progress, lv.id);
+    return (
+      <button
+        key={lv.id}
+        className={`level-card${solved ? ' solved' : ''}`}
+        onClick={() => setActive(lv)}
+      >
+        <div className="level-card-meta">
+          <span className="level-number">{String(levels.indexOf(lv) + 1).padStart(2, '0')}</span>
+          <span className="level-kind">{kindLabel(lv.kind)}</span>
+          {solved && (
+            <span className="level-done" title="Completed">
+              ✓<span className="sr-only"> Completed</span>
+            </span>
+          )}
+        </div>
+        <h3>{lv.title}</h3>
+        {lv.topic && <p>{lv.topic}</p>}
+      </button>
+    );
+  };
   return (
     <div className="page">
-      <h2>Challenges</h2>
-      <p className="lede">
-        {completed} of {levels.length} completed
-      </p>
-      <div className="level-grid">
-        {levels.map((lv, i) => {
-          const solved = isSolved(progress, lv.id);
+      <div className="challenge-list">
+        <h2>Challenges</h2>
+        <p className="lede">
+          {solvedCount(levels)} of {levels.length} completed
+        </p>
+        {groupLevels(levels).map(({ section, levels: members }) => {
+          const solved = solvedCount(members);
+          const done = solved === members.length;
           return (
-            <button
-              key={lv.id}
-              className={`level-card${solved ? ' solved' : ''}`}
-              onClick={() => setActive(lv)}
+            // Unsectioned levels (course or custom) are listed last, under a generic heading.
+            <section
+              className={`level-section${done ? ' done' : ''}`}
+              key={section}
+              aria-label={section || UNSECTIONED}
             >
-              <div className="level-card-meta">
-                <span className="kind">
-                  {String(i + 1).padStart(2, '0')} · {kindLabel(lv.kind)}
+              <div className="level-section-head">
+                <h3>{section || UNSECTIONED}</h3>
+                <span className="section-bar" aria-hidden="true">
+                  <span style={{ width: `${(100 * solved) / members.length}%` }} />
                 </span>
-                {solved && <span className="level-badge">✓ Completed</span>}
+                <span className="section-count">
+                  {solved} of {members.length}
+                  <span className="sr-only"> completed</span>
+                </span>
               </div>
-              <h3>{lv.title}</h3>
-              {lv.topic && <p>{lv.topic}</p>}
-            </button>
+              <div className="level-grid">{members.map(card)}</div>
+            </section>
           );
         })}
       </div>

@@ -59,7 +59,8 @@ export function gradedIds(state) {
 /**
  * Why a student could not draw the graded part of `state` in the diagram editor, or [] when
  * they can. Code→diagram answers are built there: live variables in main(), heap blocks
- * (freed or not), and objects of type [array of] pointer… to a primitive or a struct.
+ * (freed or not), and objects of type [array of] pointer… to a primitive or a struct, whose
+ * pointers target real objects rather than one-past boundaries.
  */
 export function drawingIssues(state) {
   const issues = new Set();
@@ -77,6 +78,9 @@ export function drawingIssues(state) {
       issues.add(`'${a.name}' in a function call that has not returned`);
     if (!drawable(a.type))
       issues.add(`'${allocationDisplayName(state, a)}' of type ${typeToString(a.type)}`);
+    // The editor's target picker offers only real objects, never a one-past boundary.
+    if (scalarSubobjects(a, state).some(s => pointerStatus(state, s.value) === 'one-past'))
+      issues.add(`a one-past-the-end pointer in '${allocationDisplayName(state, a)}'`);
   }
   return [...issues];
 }

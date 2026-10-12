@@ -136,6 +136,60 @@ test('answers the diagram editor cannot draw are reported', () => {
   assert.match(issues('int main(void) { int m[2][3]; return 0; }'), /'m' of type /);
   // A literal nothing points to any more is not part of the answer.
   assert.equal(issues('int main(void) { char *s = "hi"; s = NULL; return 0; }'), '');
+  // The editor's target picker cannot choose a one-past boundary.
+  assert.match(
+    issues('int main(void) { int a[2] = {1, 2}; int *end = a + 2; return 0; }'),
+    /one-past-the-end pointer in 'end'/,
+  );
+  assert.match(issues('int main(void) { int x = 1; int *p = &x + 1; return 0; }'), /one-past/);
+  assert.equal(issues('int main(void) { int a[2] = {1, 2}; int *p = a + 1; return 0; }'), '');
+});
+
+test('every seed level is accepted when answered with its own code', () => {
+  for (const level of seedLevels) {
+    const result = equivalent(interpret(level.code).state, interpret(level.code).state);
+    assert.ok(result.equal, `${level.title}: ${result.diffs.join('; ')}`);
+  }
+});
+
+test('seed levels reject the misconception each one targets', () => {
+  const rejects = (id, wrong) => {
+    const level = seedLevels.find(l => l.id === id);
+    const result = equivalent(interpret(level.code).state, interpret(wrong).state);
+    assert.equal(result.equal, false, `${level.title} accepted: ${wrong}`);
+  };
+  // Writing through a copy of the pointer changes main()'s variables.
+  rejects('seed-swap', 'int main(void) { int a = 2; int b = 3; int c = 1; return 0; }');
+  // alloc_wrong() "works", or its block is forgotten.
+  rejects(
+    'seed-out-param',
+    'int main(void) { int *a = NULL; int *b = malloc(sizeof(int)); *b = 2; }',
+  );
+  // A leaked block left out.
+  rejects('seed-leak', 'int main(void) { int *p = malloc(sizeof(int)); *p = 43; int *q = p; }');
+  // A struct copy treated as a deep copy.
+  rejects(
+    'seed-shallow',
+    `struct Box { int size; int *data; };
+     int main(void) {
+       struct Box a; a.size = 2; a.data = malloc(2 * sizeof(int)); a.data[0] = 7; a.data[1] = 8;
+       struct Box b; b.size = 1; b.data = malloc(2 * sizeof(int)); b.data[0] = 70; b.data[1] = 8;
+     }`,
+  );
+  // A block scope also leaves p dangling, but not into make_local()'s frame.
+  rejects('seed-return-local', 'int main(void) { int *p; { int n = 5; p = &n; } return 0; }');
+  // Unlinked but never freed.
+  rejects(
+    'seed-unlink',
+    `typedef struct Node { int value; struct Node *next; } Node;
+     int main(void) {
+       Node *head = malloc(sizeof(Node)); head->value = 1;
+       head->next = malloc(sizeof(Node)); head->next->value = 2;
+       head->next->next = malloc(sizeof(Node)); head->next->next->value = 3;
+       head->next->next->next = NULL;
+       Node *doomed = head->next; head->next = doomed->next;
+     }`,
+  );
 });
 
 test('a struct answer built with the diagram editing operations matches seed 10', () => {
