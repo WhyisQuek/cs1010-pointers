@@ -75,13 +75,15 @@ export function drawingIssues(state) {
   return [...issues];
 }
 
+/**
+ * Values, types and pointer targets are always compared. Storage needs no option: stack,
+ * literal and heap objects are only ever paired with their own kind. The two options are
+ * the ones the Level editor offers.
+ */
 export function equivalent(expected, actual, options = {}) {
   const config = {
     compareNames: options.compareNames ?? true,
-    compareStorage: options.compareStorage ?? true,
     compareLifetime: options.compareLifetime ?? true,
-    compareValues: options.compareValues ?? true,
-    comparePointerRelationships: options.comparePointerRelationships ?? true,
   };
 
   // Invalid diagrams should never sneak through comparison (duplicate names was
@@ -230,7 +232,6 @@ function scoreMappedAllocations(A, B, map, config, partial) {
       continue;
     }
     if (config.compareLifetime && a.alive !== b.alive) score += 5;
-    if (config.compareStorage && a.storage.kind !== b.storage.kind) score += 5;
 
     const as = scalarSubobjects(a, A),
       bs = scalarSubobjects(b, B);
@@ -250,13 +251,11 @@ function scoreMappedAllocations(A, B, map, config, partial) {
 }
 
 function scalarMismatchScore(A, B, a, b, map, config, partial) {
-  if (!config.compareValues && !config.comparePointerRelationships) return 0;
   const av = a.value,
     bv = b.value;
   if (av.kind !== bv.kind) return 2;
-  if (av.kind === 'scalar') return config.compareValues && av.value !== bv.value ? 1 : 0;
+  if (av.kind === 'scalar') return av.value !== bv.value ? 1 : 0;
   if (av.kind !== 'pointer') return 0; // null/uninit
-  if (!config.comparePointerRelationships) return 0;
 
   const mappedTarget = map.get(av.target.allocationId);
   if (!mappedTarget) return partial ? 0 : 2;
@@ -296,12 +295,12 @@ function collectDiffs(A, B, map, config) {
         badIds.add(b.id);
         continue;
       }
-      if (av.kind === 'scalar' && config.compareValues && av.value !== bv.value) {
+      if (av.kind === 'scalar' && av.value !== bv.value) {
         diffs.push(`${sublabel} has value ${bv.value}; expected ${av.value}`);
         badIds.add(b.id);
         continue;
       }
-      if (av.kind === 'pointer' && config.comparePointerRelationships) {
+      if (av.kind === 'pointer') {
         const mappedTarget = map.get(av.target.allocationId);
         if (mappedTarget !== bv.target.allocationId || !samePath(av.target.path, bv.target.path)) {
           diffs.push(`${sublabel} should point to ${targetLabel(A, av.target)}`);

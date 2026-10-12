@@ -17,6 +17,7 @@ This guide explains what each main file owns and where changes should be made.
 ```text
 src/
 ├── App.jsx                     application shell and page switching
+├── edition.js                  student or instructor build flag
 ├── main.jsx                    React entry point
 ├── styles.css
 ├── components/
@@ -25,11 +26,11 @@ src/
 │   ├── MemoryCanvas.jsx        interactive React Flow memory editor
 │   ├── MemoryInspector.jsx     object/member inspector and editor
 │   ├── Challenges.jsx          challenge browser and runner
-│   ├── LevelEditor.jsx         instructor level authoring
+│   ├── LevelEditor.jsx         instructor level authoring (instructor build only)
 │   └── ErrorBoundary.jsx       per-page render-failure fallback
 ├── data/
 │   ├── drafts.js               sandbox draft (code, edited diagram) saved across reloads
-│   └── levels.js               seed levels, custom-level validation, storage
+│   └── levels.js               seed and course levels, custom-level validation, storage
 ├── flow/
 │   ├── layout.js               MemoryState → nodes/edges (pure)
 │   ├── routing.js              pointer edge curves and detours (pure)
@@ -81,7 +82,15 @@ React entry point. Mounts `<App />` and imports global styles. It contains no C 
 
 ### `src/App.jsx`
 
-Application shell. Initializes Tree-sitter once, owns top-level navigation and renders Sandbox, Challenges or Level editor.
+Application shell. Initializes Tree-sitter and loads the course level pack once, owns top-level navigation and renders Sandbox, Challenges or (instructor build only) Level editor.
+
+### `src/edition.js`
+
+There are two builds of the same source. The **student** build (`npm run dev`, `npm run build` → `dist/`) has Sandbox and Challenges. The **instructor** build (`npm run dev:instructor`, `npm run build:instructor` → `dist-instructor/`, Vite mode `instructor`) adds the Level editor, and its Challenges tab also lists levels saved in that browser. `INSTRUCTOR` in `edition.js` tells components which build they are in.
+
+The student build must not contain the editor at all, not merely hide it. `App.jsx` therefore tests `import.meta.env.MODE === 'instructor'` inline and loads the editor with `lazy(() => import(…))`: Vite turns the condition into a constant, and the bundler drops the editor chunk only when the condition is written in that file (an imported constant is not folded). `npm run check:editions`, run in CI after both builds, fails if the student build contains Level editor strings, and also checks that the instructor build does, so the check cannot pass by accident.
+
+This is not access control: anyone who can load the instructor site can use it. The instructor site must be served behind the host's own login.
 
 ### `src/styles.css`
 
@@ -233,11 +242,11 @@ Bidirectional workbench. Owns source text, current state, snapshots and current 
 
 ### `src/components/Challenges.jsx`
 
-Student challenge runner. Both target and student answers are reduced to `MemoryState` and graded with `equivalent()`. A level whose reference code no longer runs shows an error instead of crashing the page.
+Student challenge runner. Both target and student answers are reduced to `MemoryState` and graded with `equivalent()`. A level whose reference code no longer runs shows an error instead of crashing the page. The page stays mounted across tab switches so an answer in progress survives; when the tab is shown again it re-reads levels and progress, and closes an open level that was deleted or edited meanwhile. Progress is completion only (no scores): it lives in the student's browser, where any score could be reset.
 
 ### `src/components/LevelEditor.jsx`
 
-Instructor challenge authoring. Reference C is interpreted live before a level can be saved.
+Instructor challenge authoring, present only in the instructor build (see `edition.js`). Reference C is interpreted for the preview once typing pauses, and again before a level can be saved. Saved levels can be loaded back into the form and edited in place; an edit that changes the answer (code, direction or grading) clears that level's completion.
 
 ### `src/components/ErrorBoundary.jsx`
 
@@ -245,7 +254,7 @@ Wraps the active page so a render error shows a message and a retry button inste
 
 ### `src/data/levels.js`
 
-Built-in levels plus browser persistence. Target states are kept as readable C and interpreted at runtime. Custom content/progress use `pointerviz.*` localStorage keys. Every stored or imported level passes through `normalizeLevel()`, and `mergeLevels()` keeps IDs unique. Storage access never throws: reads fall back to defaults and `saveCustomLevels()` returns `false` when the browser refuses to persist.
+Built-in levels plus browser persistence. Target states are kept as readable C and interpreted at runtime. Levels come from three places: `seedLevels` in source; the **course pack** `public/levels/course.json`, fetched at startup by `loadCourseLevels()` (a missing or malformed pack leaves only the seed levels); and, in the instructor build, custom levels saved in the browser. `availableLevels()` lists them in that order; a custom level with a course level's ID is the instructor's draft of it and replaces it in the list. Custom content/progress use `pointerviz.*` localStorage keys. Every stored or imported level passes through `normalizeLevel()`, and `mergeLevels()` keeps IDs unique. Storage access never throws: reads fall back to defaults and `saveCustomLevels()` returns `false` when the browser refuses to persist.
 
 ## 4. Common changes
 

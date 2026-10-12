@@ -1,7 +1,9 @@
 /**
  * Challenge content and browser-only persistence.
- * Seed levels are versioned in source; custom levels and progress are JSON in
- * localStorage so UI components stay independent of the storage mechanism.
+ * Seed levels are versioned in source. Course levels are a level pack published with the
+ * site (public/levels/course.json), so every student gets them. Custom levels (instructor
+ * build only) and progress are JSON in localStorage so UI components stay independent of
+ * the storage mechanism.
  */
 
 const LEVELS_KEY = 'pointerviz.levels';
@@ -56,6 +58,7 @@ export function normalizeLevel(raw) {
     prompt: text(raw.prompt, 'Recreate this memory state.'),
     code: raw.code,
     hints: Array.isArray(raw.hints) ? raw.hints.map(h => text(h, '')).filter(Boolean) : [],
+    // Only the options the Level editor offers; anything else in stored data is dropped.
     grading: Object.fromEntries(
       ['compareNames', 'compareLifetime']
         .filter(k => typeof grading[k] === 'boolean')
@@ -83,6 +86,39 @@ export function loadCustomLevels() {
   return Array.isArray(stored) ? mergeLevels([], stored.map(normalizeLevel).filter(Boolean)) : [];
 }
 
+let courseLevels = [];
+
+/**
+ * Fetch the published course pack once at startup. A missing or malformed pack, or
+ * entries that fail normalization, leave the seed levels usable; it never throws.
+ */
+export async function loadCourseLevels(url, fetchFn = globalThis.fetch) {
+  try {
+    // Revalidate so a redeployed pack reaches students without waiting out the cache.
+    const response = await fetchFn(url, { cache: 'no-cache' });
+    const data = response.ok ? await response.json() : [];
+    courseLevels = Array.isArray(data)
+      ? mergeLevels([], data.map(normalizeLevel).filter(Boolean))
+      : [];
+  } catch {
+    courseLevels = [];
+  }
+  return courseLevels;
+}
+
+/**
+ * Every level to list: seed, then course, then (instructor build) custom levels. A custom
+ * level with a course level's ID is the instructor's draft of it and takes its place, so
+ * importing course.json into the editor lets them edit and republish existing levels.
+ */
+export function availableLevels({ includeCustom }) {
+  const custom = includeCustom ? loadCustomLevels() : [];
+  const draft = new Map(custom.map(l => [l.id, l]));
+  const course = courseLevels.map(l => draft.get(l.id) ?? l);
+  const courseIds = new Set(courseLevels.map(l => l.id));
+  return [...seedLevels, ...course, ...custom.filter(l => !courseIds.has(l.id))];
+}
+
 /** Returns false when the browser refused to persist the levels. */
 export function saveCustomLevels(levels) {
   return writeJson(LEVELS_KEY, levels);
@@ -93,20 +129,26 @@ export function loadProgress() {
   return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
 }
 
-export function recordResult(levelId, { solved, attempts, usedHints }) {
+/**
+ * Progress is completion only. Attempt-based scores were dropped: progress lives in the
+ * student's own browser, so any score kept there can be reset or edited at will.
+ */
+export function isSolved(progress, levelId) {
+  return progress[levelId]?.solved === true;
+}
+
+export function markSolved(levelId) {
   const p = loadProgress();
-  const prev = p[levelId] ?? { stars: 0, attempts: 0 };
-  // 3★ first try no hints · 2★ solved with ≤3 attempts or hints · 1★ solved
-  const stars = !solved
-    ? prev.stars
-    : attempts === 1 && !usedHints
-      ? 3
-      : attempts <= 3
-        ? Math.max(prev.stars, 2)
-        : Math.max(prev.stars, 1);
-  p[levelId] = { stars, attempts: prev.attempts + 1 };
+  p[levelId] = { solved: true };
   writeJson(PROGRESS_KEY, p);
-  return p[levelId];
+}
+
+/** Forget completion, e.g. after an instructor changes the level's answer. */
+export function clearProgress(levelId) {
+  const p = loadProgress();
+  if (!(levelId in p)) return;
+  delete p[levelId];
+  writeJson(PROGRESS_KEY, p);
 }
 
 /* ── Seed levels ─────────────────────────────────────────────────────

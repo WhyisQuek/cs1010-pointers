@@ -62,56 +62,52 @@ test('the struct level is solved by drawing struct objects', async ({ page }) =>
   await expect(page.getByRole('status').filter({ hasText: 'Correct' })).toBeVisible();
 });
 
-test('the level editor refuses a code-to-diagram level students cannot draw', async ({ page }) => {
+test('the student build has no Level editor', async ({ page }) => {
   await openApp(page);
-  await openTab(page, 'Level editor');
-  await page.getByLabel('title').fill('Dangling local');
-  await page
-    .locator('.editor-code')
-    .getByRole('textbox', { name: 'C source code' })
-    .fill('int main(void) { int *p; { int x = 5; p = &x; } return 0; }');
-  await page.getByRole('button', { name: 'Save level' }).click();
-  await expect(page.getByRole('alert')).toContainText(
-    "students cannot draw this answer in the diagram editor: it needs the out-of-scope variable 'x'",
-  );
-  await expect(page.locator('.saved-row')).toHaveCount(0);
+  const sections = page.getByRole('navigation', { name: 'sections' });
+  await expect(sections.getByRole('button')).toHaveText(['Sandbox', 'Challenges']);
 });
 
-test.describe('stored custom levels', () => {
+test.describe('course levels', () => {
   test.beforeEach(async ({ page }) => {
+    await page.route('**/levels/course.json', route =>
+      route.fulfill({
+        json: [
+          {
+            id: 'week-1',
+            kind: 'diagram-to-code',
+            title: 'Published level',
+            code: 'int main() { int z = 3; }',
+          },
+          {
+            id: 'week-2',
+            kind: 'code-to-diagram',
+            title: 'Broken course level',
+            code: 'int x = ;',
+          },
+        ],
+      }),
+    );
+    // Levels saved in this browser are an instructor's drafts; students never see them.
     await page.addInitScript(() => {
       localStorage.setItem(
         'pointerviz.levels',
         JSON.stringify([
-          {
-            id: 'custom-1',
-            kind: 'code-to-diagram',
-            title: 'Broken level',
-            code: 'int main() { int x = ; }',
-          },
-          {
-            id: 'custom-1',
-            kind: 'code-to-diagram',
-            title: 'Duplicate id',
-            code: 'int main() { int y = 2; }',
-          },
+          { id: 'custom-1', kind: 'code-to-diagram', title: 'Draft', code: 'int main(){}' },
         ]),
       );
     });
   });
 
-  test('a level whose code no longer runs shows an error instead of crashing', async ({ page }) => {
-    await openLevel(page, /Broken level/);
-    await expect(
-      page.getByText(/reference code no longer runs: .*missing identifier/),
-    ).toBeVisible();
+  test('published levels are listed and stored drafts are not', async ({ page }) => {
+    await openLevel(page, /Published level/);
+    await expect(page.locator('.challenge-head strong')).toHaveText('Published level');
     await page.getByRole('button', { name: '← levels' }).click();
-    await expect(page.getByRole('heading', { name: 'Challenges' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Draft/ })).toHaveCount(0);
   });
 
-  test('levels stored with duplicate IDs both load and open independently', async ({ page }) => {
-    await openLevel(page, /Duplicate id/);
-    await expect(page.getByText('given code (read-only)')).toBeVisible();
-    await expect(page.locator('.challenge-head strong')).toHaveText('Duplicate id');
+  test('a broken course level tells the student to contact the instructor', async ({ page }) => {
+    await openLevel(page, /Broken course level/);
+    await expect(page.getByText(/no longer runs: .*let your instructor know/)).toBeVisible();
   });
 });

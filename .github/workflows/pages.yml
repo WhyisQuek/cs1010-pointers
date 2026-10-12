@@ -32,10 +32,22 @@ jobs:
         run: npm test
         env:
           POINTERVIZ_REQUIRE_NATIVE: '1'
-      - name: Build for the Pages URL
+      - name: Build the student site for the Pages URL
         run: npm run build -- --base "${PAGES_BASE_PATH}/"
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      # Built at the domain root; rebuild with --base for wherever it is hosted.
+      - name: Build the instructor site
+        run: npm run build:instructor
+      - name: Check the student site has no Level editor
+        run: npm run check:editions
+      # Only the student build is published. Until the instructor site has a host behind
+      # access control, its build is kept as a workflow artifact for repository members.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: instructor-site
+          path: dist-instructor
+          retention-days: 30
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

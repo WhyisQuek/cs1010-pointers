@@ -1,4 +1,5 @@
 dist/
+dist-instructor/
 coverage/
 node_modules/
 package-lock.json

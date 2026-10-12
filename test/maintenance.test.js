@@ -7,10 +7,15 @@ import { primitive } from '../src/language/types.js';
 import { scalarFromInput } from '../src/language/numeric.js';
 import { addAllocation, makeState, pointerValue, ref } from '../src/machine/memory.js';
 import {
+  availableLevels,
+  loadCourseLevels,
   loadCustomLevels,
   mergeLevels,
   normalizeLevel,
-  recordResult,
+  clearProgress,
+  isSolved,
+  loadProgress,
+  markSolved,
   saveCustomLevels,
   seedLevels,
 } from '../src/data/levels.js';
@@ -129,8 +134,86 @@ test('level persistence degrades gracefully when browser storage is unavailable'
   // Node has no localStorage, which behaves like blocked site data in a browser.
   assert.deepEqual(loadCustomLevels(), []);
   assert.equal(saveCustomLevels([]), false);
-  assert.deepEqual(recordResult('seed-1', { solved: true, attempts: 1, usedHints: false }), {
-    stars: 3,
-    attempts: 1,
+  assert.doesNotThrow(() => markSolved('seed-1'));
+  assert.doesNotThrow(() => clearProgress('seed-1'));
+});
+
+test('progress is completion only', t => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: key => store.get(key) ?? null,
+    setItem: (key, value) => store.set(key, value),
+  };
+  t.after(() => delete globalThis.localStorage);
+  assert.equal(isSolved(loadProgress(), 'seed-1'), false);
+  markSolved('seed-1');
+  assert.deepEqual(loadProgress()['seed-1'], { solved: true });
+  clearProgress('seed-1');
+  assert.equal(isSolved(loadProgress(), 'seed-1'), false);
+});
+
+const respond = body => async () => ({ ok: true, json: async () => body });
+
+test('the course pack is normalized, deduplicated and never throws', async () => {
+  const levels = await loadCourseLevels(
+    'course.json',
+    respond([
+      { id: 'week-1', kind: 'code-to-diagram', title: 'One', code: 'int main(){}' },
+      { id: 'week-1', kind: 'code-to-diagram', title: 'Two', code: 'int main(){}' },
+      { id: seedLevels[0].id, kind: 'diagram-to-code', code: 'int main(){}' },
+      { kind: 'bogus', code: 'int main(){}' },
+    ]),
+  );
+  assert.deepEqual(
+    levels.map(l => l.id),
+    ['week-1', 'week-1-2', `${seedLevels[0].id}-2`],
+  );
+  assert.deepEqual(await loadCourseLevels('x', respond({ not: 'an array' })), []);
+  assert.deepEqual(await loadCourseLevels('x', async () => ({ ok: false })), []);
+  assert.deepEqual(
+    await loadCourseLevels('x', async () => {
+      throw new Error('offline');
+    }),
+    [],
+  );
+  const malformed = async () => ({ ok: true, json: async () => JSON.parse('{') });
+  assert.deepEqual(await loadCourseLevels('x', malformed), []);
+});
+
+test('students see seed and course levels; an instructor draft replaces its course level', async t => {
+  await loadCourseLevels(
+    'course.json',
+    respond([{ id: 'week-1', kind: 'code-to-diagram', title: 'Published', code: 'int main(){}' }]),
+  );
+  t.after(() => loadCourseLevels('x', async () => ({ ok: false })));
+  const store = new Map([
+    [
+      'pointerviz.levels',
+      JSON.stringify([
+        { id: 'week-1', kind: 'code-to-diagram', title: 'Draft', code: 'int main(){}' },
+        { id: 'custom-9', kind: 'code-to-diagram', title: 'New', code: 'int main(){}' },
+      ]),
+    ],
+  ]);
+  globalThis.localStorage = {
+    getItem: key => store.get(key) ?? null,
+    setItem: (key, value) => store.set(key, value),
+  };
+  t.after(() => delete globalThis.localStorage);
+
+  const titles = opts =>
+    availableLevels(opts)
+      .slice(seedLevels.length)
+      .map(l => l.title);
+  assert.deepEqual(titles({ includeCustom: false }), ['Published']);
+  assert.deepEqual(titles({ includeCustom: true }), ['Draft', 'New']);
+});
+
+test('grading ignores options the level format does not support', () => {
+  const level = normalizeLevel({
+    kind: 'code-to-diagram',
+    code: 'int main(){}',
+    grading: { compareNames: true, compareValues: false, compareStorage: false },
   });
+  assert.deepEqual(level.grading, { compareNames: true });
 });

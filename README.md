@@ -15,7 +15,7 @@ It supports:
 - `if`/`else`, `while` and `for` control flow;
 - `break`, `continue` and common condition operators;
 - code-to-diagram and diagram-to-code challenges;
-- instructor-created challenge levels.
+- instructor-created challenge levels, authored in a separate instructor build.
 
 ## Run locally
 
@@ -27,6 +27,8 @@ npm run dev
 ```
 
 Open the **HTTP** URL printed by Vite, normally `http://127.0.0.1:3000/` with the supplied configuration.
+
+This is the student app. For the instructor app, which adds the Level editor, run `npm run dev:instructor`. Levels reach students through the course pack `public/levels/course.json`; see [publishing levels](docs/DEPLOYMENT.md#publishing-levels-to-students).
 
 ## Test and check
 
@@ -49,7 +51,8 @@ See [TESTING.md](docs/TESTING.md).
 ## Publish for testing
 
 PointerViz can run on GitHub Pages with no backend. The deployment workflow
-tests and builds the app before publishing on pushes to `main`. Enable
+tests and builds the app before publishing the student site on pushes to
+`main`; the instructor site must be hosted behind access control. Enable
 **Settings → Pages → GitHub Actions** in an eligible repository first.
 See [the deployment guide](docs/DEPLOYMENT.md) for the free-tier requirements,
 production preview, tester checklist, and moving to another host later.

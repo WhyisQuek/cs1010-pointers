@@ -8,7 +8,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:instructor": "vite --mode instructor",
     "build": "vite build",
+    "build:instructor": "vite build --mode instructor --outDir dist-instructor",
+    "check:editions": "node scripts/check-editions.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",

@@ -27,9 +27,12 @@ jobs:
         env:
           POINTERVIZ_REQUIRE_NATIVE: ${{ runner.os == 'Linux' && '1' || '' }}
       - run: npm run build
+      - run: npm run build:instructor
+      # The student build must not contain the Level editor.
+      - run: npm run check:editions
 
   e2e:
-    # Browser smoke tests against the production build under the Pages subpath.
+    # Browser smoke tests against both production builds under the Pages subpath.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

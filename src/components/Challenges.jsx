@@ -3,44 +3,68 @@
  * Reference C and student answers are both converted to MemoryState, then graded
  * with semantic graph equivalence rather than source-text comparison.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
 import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { drawingIssues, equivalent } from '../pipeline/equivalence.js';
 import { makeState } from '../machine/memory.js';
-import { seedLevels, loadCustomLevels, loadProgress, recordResult } from '../data/levels.js';
+import { availableLevels, loadProgress, isSolved, markSolved } from '../data/levels.js';
+import { INSTRUCTOR } from '../edition.js';
 
 const kindLabel = kind => (kind === 'code-to-diagram' ? 'code → diagram' : 'diagram → code');
+// Only the instructor build has the Level editor, so only it lists browser-saved levels.
+const allLevels = () => availableLevels({ includeCustom: INSTRUCTOR });
+const sameLevel = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// What to do about a level that can't be attempted depends on who is looking.
+const brokenLevelAdvice = editorAdvice =>
+  INSTRUCTOR ? editorAdvice : 'Please let your instructor know.';
 
-export default function Challenges() {
+/**
+ * Stays mounted while another tab is shown, so an answer in progress survives a tab switch.
+ * `shown` re-reads levels and progress whenever the tab comes back, since the Level editor
+ * (instructor build) may have changed them meanwhile.
+ */
+export default function Challenges({ shown = true }) {
   const [active, setActive] = useState(null);
-  const [levels, setLevels] = useState(() => [...seedLevels, ...loadCustomLevels()]);
+  const [levels, setLevels] = useState(allLevels);
   const [progress, setProgress] = useState(loadProgress);
+
+  const refresh = useCallback(() => {
+    const fresh = allLevels();
+    setLevels(fresh);
+    setProgress(loadProgress());
+    // A level deleted or edited meanwhile closes: the answer being built may no longer apply.
+    setActive(current =>
+      current && fresh.some(l => l.id === current.id && sameLevel(l, current)) ? current : null,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (shown) refresh();
+  }, [shown, refresh]);
 
   const exit = () => {
     setActive(null);
-    setLevels([...seedLevels, ...loadCustomLevels()]);
-    setProgress(loadProgress());
+    refresh();
   };
 
-  if (active) return <ChallengeRunner level={active} onExit={exit} />;
+  if (active) return <ChallengeRunner key={active.id} level={active} onExit={exit} />;
   return (
     <div className="page">
       <h2>Challenges</h2>
       <p className="lede">Select a challenge.</p>
       <div className="level-grid">
         {levels.map(lv => {
-          const stars = progress[lv.id]?.stars ?? 0;
+          const solved = isSolved(progress, lv.id);
           return (
             <button key={lv.id} className="level-card" onClick={() => setActive(lv)}>
               <span className="kind">{kindLabel(lv.kind)}</span>
               <h3>{lv.title}</h3>
               <p>{lv.prompt}</p>
-              <div className="stars" aria-label={`${stars} of 3 stars`}>
-                {'★'.repeat(stars)}
-                <span className="empty">{'★'.repeat(3 - stars)}</span>
+              <div className={`level-status${solved ? ' solved' : ''}`}>
+                {solved ? '✓ completed' : 'not completed'}
               </div>
             </button>
           );
@@ -51,7 +75,7 @@ export default function Challenges() {
 }
 
 function ChallengeRunner({ level, onExit }) {
-  // Custom levels can outlive grammar changes; a broken one must not crash the page.
+  // Course and custom levels can outlive grammar changes; a broken one must not crash the page.
   const target = useMemo(() => {
     try {
       return { state: interpret(level.code).state, error: null };
@@ -76,6 +100,20 @@ function ChallengeRunner({ level, onExit }) {
   const [messages, setMessages] = useState([]);
   const isC2D = level.kind === 'code-to-diagram';
   const say = m => setMessages(prev => [...prev.slice(-4), m]);
+  // Feedback from a Check describes the answer as it was then: drop the red markers, which
+  // could point at things already fixed, and flag the verdict as out of date.
+  const answerChanged = () => {
+    setBadIds(prev => (prev.size ? new Set() : prev));
+    setVerdict(v => (v && !v.stale ? { ...v, stale: true } : v));
+  };
+  const editDiagram = next => {
+    setStudentState(next);
+    answerChanged();
+  };
+  const editCode = next => {
+    setStudentCode(next);
+    answerChanged();
+  };
 
   if (undrawable.length) {
     return (
@@ -86,7 +124,8 @@ function ChallengeRunner({ level, onExit }) {
         <h2>{level.title}</h2>
         <p className="msgbar-inline err">
           This level&apos;s answer can&apos;t be drawn in the diagram editor: it needs{' '}
-          {undrawable.join('; ')}. Make it a diagram → code level in the Level editor.
+          {undrawable.join('; ')}.{' '}
+          {brokenLevelAdvice('Make it a diagram → code level in the Level editor.')}
         </p>
       </div>
     );
@@ -100,8 +139,8 @@ function ChallengeRunner({ level, onExit }) {
         </button>
         <h2>{level.title}</h2>
         <p className="msgbar-inline err">
-          This level&apos;s reference code no longer runs: {target.error}. Edit or delete it in the
-          Level editor.
+          This level&apos;s reference code no longer runs: {target.error}.{' '}
+          {brokenLevelAdvice('Edit or delete it in the Level editor.')}
         </p>
       </div>
     );
@@ -119,12 +158,8 @@ function ChallengeRunner({ level, onExit }) {
       return;
     }
     setBadIds(result.badIds ?? new Set());
-    const rec = recordResult(level.id, {
-      solved: result.equal,
-      attempts: n,
-      usedHints: hintIdx > 0,
-    });
-    setVerdict({ pass: result.equal, diffs: result.diffs, stars: rec.stars });
+    if (result.equal) markSolved(level.id);
+    setVerdict({ pass: result.equal, diffs: result.diffs });
   };
 
   const showHint = () => {
@@ -160,7 +195,7 @@ function ChallengeRunner({ level, onExit }) {
             <div className="panel-head">{isC2D ? 'given code (read-only)' : 'your code'}</div>
             <CodePanel
               code={isC2D ? level.code : studentCode}
-              onCode={isC2D ? undefined : setStudentCode}
+              onCode={isC2D ? undefined : editCode}
               readOnly={isC2D}
             />
           </section>
@@ -172,7 +207,7 @@ function ChallengeRunner({ level, onExit }) {
             </div>
             <MemoryCanvas
               state={isC2D ? studentState : target.state}
-              onChange={isC2D ? setStudentState : undefined}
+              onChange={isC2D ? editDiagram : undefined}
               editable={isC2D}
               badIds={badIds}
             />
@@ -191,10 +226,11 @@ function ChallengeRunner({ level, onExit }) {
       )}
       {verdict && (
         <div className={`verdict ${verdict.pass ? 'pass' : 'fail'}`} role="status">
+          {verdict.stale && (
+            <div className="verdict-stale">Your answer has changed since this check.</div>
+          )}
           {verdict.pass ? (
-            <>
-              Correct — memory states match. {'★'.repeat(verdict.stars ?? 1)} earned ({attemptText})
-            </>
+            <>Correct — memory states match. Challenge completed ({attemptText}).</>
           ) : (
             <>
               Not yet — {attemptText} so far:

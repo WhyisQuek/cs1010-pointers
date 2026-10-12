@@ -6,6 +6,8 @@
 npm ci
 npm run check   # ESLint + Prettier check + all tests
 npm run build
+npm run build:instructor
+npm run check:editions   # the student build must not contain the Level editor
 ```
 
 `npm test` runs every `test/*.test.js` file with Node's built-in test runner. Each suite can also be run alone:
@@ -20,7 +22,7 @@ npm run build
 | `npm run test:semantics` | C semantic, constraint, lifetime, bounds and round-trip tests |
 | `npm run test:addresses` | Simulated placement, LP64 offsets, provenance/status, history, atomic edits, view geometry, and address-independent grading/generation |
 | `npm run test:native` | Defined programs compared with a native LP64 C11 compiler |
-| `node --test test/maintenance.test.js` | Regressions from the [code audit](CODE_AUDIT.md): storage failures, level import, input range checks, labels, WASM paths |
+| `node --test test/maintenance.test.js` | Regressions from the [code audit](CODE_AUDIT.md): storage failures, level import, input range checks, labels, WASM paths; completion-only progress; course-pack loading and draft precedence |
 
 `npm run audit:n3088` runs the separate C-standard audit probes; it reports discrepancies and is not a pass/fail suite.
 
@@ -35,13 +37,13 @@ npx playwright install chromium   # once per machine
 npm run test:e2e
 ```
 
-`playwright.config.js` builds the app with the GitHub Pages base path (`/cs1010-pointers/`), serves it with `vite preview`, and runs `e2e/*.spec.js` in Chromium. Every test also fails on any console error, uncaught page error, or HTTP response of 400 or above, which catches base-path and WASM-loading regressions. On failure, traces are kept in `test-results/` (open with `npx playwright show-trace`).
+`playwright.config.js` builds the student and instructor apps with the GitHub Pages base path (`/cs1010-pointers/`), serves each with `vite preview` (ports 4173 and 4174), and runs the specs in Chromium: `*.instructor.spec.js` against the instructor build, the rest against the student build. Every test also fails on any console error, uncaught page error, or HTTP response of 400 or above, which catches base-path and WASM-loading regressions. On failure, traces are kept in `test-results/` (open with `npx playwright show-trace`).
 
 | Spec | Covers |
 | --- | --- |
 | `sandbox.spec.js` | Parser loading under the subpath; Run and step-through playback with addresses; adding an object, rejecting a fractional `int`, and generating matching C |
-| `challenges.spec.js` | Grading a wrong and a correct diagram-to-code answer; a stored level with broken code shows an error; stored duplicate IDs are repaired |
-| `level-editor.spec.js` | Reference code visible (editor overlay stays transparent); preview on first open; saving a level, seeing it in Challenges, deleting it |
+| `challenges.spec.js` (student) | Grading a wrong and a correct diagram-to-code answer; solving code-to-diagram levels; no Level editor tab; course-pack levels listed and browser-saved drafts not; a broken course level asks the student to tell the instructor |
+| `level-editor.instructor.spec.js` (instructor) | Reference code visible (editor overlay stays transparent); preview on first open; saving, editing and deleting a level, seen in Challenges; refusing an undrawable level; a stored level with broken code shows an error; stored duplicate IDs are repaired |
 
 These automate the core of the release checks. The drag, resize, routing and keyboard checks below still need a person.
 
@@ -53,7 +55,7 @@ Use [the address examples](../examples/memory-addresses.md). Verify all three mo
 
 Check wide and narrow panes, keyboard focus, toolbar wrapping, long names, mixed pointer/scalar rows, and 64-element arrays. Browser accessible labels must identify own and stored addresses separately. Check Sandbox, both challenge directions, and instructor previews. The full design also calls for 200% zoom, touch/screen-reader testing, performance comparisons, and novice learning checks; automated DOM checks alone do not establish those results.
 
-GitHub Actions runs lint, the format check, and the full test/build commands on Windows and Linux with Node 22 and 24, and the Playwright suite on Linux (the HTML report and traces are uploaded when it fails).
+GitHub Actions runs lint, the format check, the full test commands, both builds and the edition check on Windows and Linux with Node 22 and 24, and the Playwright suite on Linux (the HTML report and traces are uploaded when it fails).
 
 ## Browser regression checks
 

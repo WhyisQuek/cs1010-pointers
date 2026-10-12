@@ -1,17 +1,26 @@
 /**
  * Instructor challenge editor. The target state is authored as C, previewed
- * live, and saved as { title, kind, prompt, code, hints, grading }: the target
+ * once typing pauses, and saved as { title, kind, prompt, code, hints, grading }: the target
  * MemoryState is always derived from the code, never stored. Levels export and
- * import as JSON so a course pack can be shared.
+ * import as JSON; an exported pack committed as public/levels/course.json is what
+ * students see. Only the instructor build includes this page (see edition.js).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
 import { interpret } from '../pipeline/interpreter.js';
 import { drawingIssues } from '../pipeline/equivalence.js';
-import { loadCustomLevels, mergeLevels, normalizeLevel, saveCustomLevels } from '../data/levels.js';
+import {
+  clearProgress,
+  loadCustomLevels,
+  mergeLevels,
+  normalizeLevel,
+  saveCustomLevels,
+} from '../data/levels.js';
 
 const DEFAULT_CODE = 'int main() {\n    int a = 10;\n    int *b = &a;\n}';
+// The preview re-runs once typing pauses, not on every keystroke.
+const PREVIEW_DELAY_MS = 300;
 const kindLabel = kind => (kind === 'code-to-diagram' ? 'code → diagram' : 'diagram → code');
 
 function tryInterpret(code) {
@@ -22,8 +31,24 @@ function tryInterpret(code) {
   }
 }
 
+/** A preview result; `version` changes only when the interpreted state does. */
+function previewOf(code, previous = null) {
+  const result = tryInterpret(code);
+  const json = result.state && JSON.stringify(result.state);
+  if (json && json === previous?.json) return previous;
+  return { ...result, json, version: (previous?.version ?? 0) + 1 };
+}
+
+/** Whether an edit changed what students must produce, so earlier completions are void. */
+const answerChanged = (before, after) =>
+  before.code !== after.code ||
+  before.kind !== after.kind ||
+  JSON.stringify(before.grading) !== JSON.stringify(after.grading);
+
 export default function LevelEditor() {
   const [levels, setLevels] = useState(loadCustomLevels);
+  // The ID of the saved level loaded into the form, or null when creating a new one.
+  const [editingId, setEditingId] = useState(null);
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState('code-to-diagram');
   const [prompt, setPrompt] = useState('');
@@ -31,8 +56,17 @@ export default function LevelEditor() {
   const [hints, setHints] = useState('');
   const [compareNames, setCompareNames] = useState(true);
   const [compareLifetime, setCompareLifetime] = useState(true);
-  const [preview, setPreview] = useState(() => tryInterpret(DEFAULT_CODE).state);
+  const [preview, setPreview] = useState(() => previewOf(DEFAULT_CODE));
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPreview(previous => previewOf(code, previous));
+      // Editing the code replaces any earlier message with the code's own error, if any.
+      setError(null);
+    }, PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [code]);
 
   const persist = next => {
     setLevels(next);
@@ -43,11 +77,23 @@ export default function LevelEditor() {
     return true;
   };
 
-  const onCode = src => {
-    setCode(src);
-    const result = tryInterpret(src);
-    setPreview(result.state);
-    setError(result.error);
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle('');
+    setPrompt('');
+    setHints('');
+  };
+
+  const startEdit = level => {
+    setEditingId(level.id);
+    setTitle(level.title);
+    setKind(level.kind);
+    setPrompt(level.prompt);
+    setCode(level.code);
+    setHints(level.hints.join('\n'));
+    setCompareNames(level.grading.compareNames ?? true);
+    setCompareLifetime(level.grading.compareLifetime ?? true);
+    setError(null);
   };
 
   const save = () => {
@@ -61,7 +107,7 @@ export default function LevelEditor() {
         `students cannot draw this answer in the diagram editor: it needs ${issues.join('; ')}. Save it as diagram → code instead.`,
       );
     const level = normalizeLevel({
-      id: `custom-${Date.now()}`,
+      id: editingId ?? `custom-${Date.now()}`,
       title,
       kind,
       prompt,
@@ -69,13 +115,19 @@ export default function LevelEditor() {
       hints: hints.split('\n'),
       grading: { compareNames, compareLifetime },
     });
-    if (persist(mergeLevels(levels, [level]))) setError(null);
-    setTitle('');
-    setPrompt('');
-    setHints('');
+    const original = levels.find(l => l.id === editingId);
+    const next = original
+      ? levels.map(l => (l.id === editingId ? level : l))
+      : mergeLevels(levels, [level]);
+    if (persist(next)) setError(null);
+    if (original && answerChanged(original, level)) clearProgress(level.id);
+    resetForm();
   };
 
-  const remove = id => persist(levels.filter(l => l.id !== id));
+  const remove = id => {
+    if (id === editingId) resetForm();
+    persist(levels.filter(l => l.id !== id));
+  };
 
   const exportJson = () => {
     const url = URL.createObjectURL(
@@ -115,7 +167,11 @@ export default function LevelEditor() {
     <div className="page level-editor">
       <div className="editor-form">
         <h2>Level editor</h2>
-        <p className="lede">Create and preview a challenge.</p>
+        <p className="lede">
+          {editingId
+            ? `Editing “${levels.find(l => l.id === editingId)?.title}”.`
+            : 'Create and preview a challenge.'}
+        </p>
 
         <label htmlFor="lv-title">title</label>
         <input
@@ -143,7 +199,7 @@ export default function LevelEditor() {
 
         <label>target state (C code)</label>
         <div className="editor-code">
-          <CodePanel code={code} onCode={onCode} />
+          <CodePanel code={code} onCode={setCode} />
         </div>
 
         <label htmlFor="lv-hints">hints — one per line, revealed in order</label>
@@ -175,16 +231,21 @@ export default function LevelEditor() {
           </label>
         </div>
 
-        {error && (
+        {(error ?? preview.error) && (
           <p className="msgbar-inline err" role="alert">
-            {error}
+            {error ?? preview.error}
           </p>
         )}
 
         <div className="editor-actions">
           <button className="primary-btn" onClick={save}>
-            Save level
+            {editingId ? 'Save changes' : 'Save level'}
           </button>
+          {editingId && (
+            <button className="ghost-btn" onClick={resetForm}>
+              Cancel edit
+            </button>
+          )}
           <button className="ghost-btn" onClick={exportJson} disabled={!levels.length}>
             Export pack
           </button>
@@ -204,17 +265,25 @@ export default function LevelEditor() {
 
         <div className="saved-list">
           <h4>your levels ({levels.length})</h4>
-          {levels.length === 0 && (
-            <p className="lede">
-              No custom levels yet — saved levels appear in the Challenges tab immediately.
-            </p>
-          )}
+          <p className="lede">
+            {levels.length === 0 && 'No custom levels yet. '}
+            Saved levels appear in this browser&apos;s Challenges tab only. To publish them to
+            students, export the pack and commit it as <code>public/levels/course.json</code>;
+            import that file first to edit levels already published.
+          </p>
           {levels.map(l => (
-            <div className="saved-row" key={l.id}>
+            <div className={`saved-row${l.id === editingId ? ' editing' : ''}`} key={l.id}>
               <div className="saved-title">
                 <div>{l.title}</div>
                 <div className="saved-kind">{kindLabel(l.kind)}</div>
               </div>
+              <button
+                className="mini-btn"
+                onClick={() => startEdit(l)}
+                disabled={l.id === editingId}
+              >
+                edit
+              </button>
               <button className="mini-btn danger" onClick={() => remove(l.id)}>
                 delete
               </button>
@@ -226,8 +295,8 @@ export default function LevelEditor() {
       <div className="editor-preview">
         <div className="panel-head">target preview</div>
         <div className="editor-preview-body">
-          {preview ? (
-            <MemoryCanvas key={code} state={preview} editable={false} />
+          {preview.state ? (
+            <MemoryCanvas key={preview.version} state={preview.state} editable={false} />
           ) : (
             <div className="loading-screen">fix the code to see the preview</div>
           )}
