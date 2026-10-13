@@ -1,20 +1,37 @@
 /** Pointer offsets are only defined within one array (or one object as a one-element array). */
+import { INVALID, UNDEFINED } from '../../language/diagnostics.js';
 import { isArray, isStruct, resolveStructType } from '../../language/types.js';
 import { getAllocation, pointerValue, ref } from '../memory.js';
 import { semanticError } from './runtime.js';
 
 export function addToPointer(state, value, delta, node) {
-  if (!Number.isSafeInteger(delta)) throw semanticError(node, 'pointer offset must be an integer');
+  // A 64-bit offset beyond 2^53 is stored as a BigInt; it lies far outside any object.
+  if (typeof delta === 'bigint')
+    throw semanticError(node, `pointer arithmetic moves outside allocation bounds`, UNDEFINED);
+  if (!Number.isSafeInteger(delta))
+    throw semanticError(node, 'pointer offset must be an integer', INVALID);
   if (!getAllocation(state, value.target.allocationId).alive)
-    throw semanticError(node, 'pointer arithmetic on an object whose lifetime has ended');
+    throw semanticError(
+      node,
+      'pointer arithmetic on an object whose lifetime has ended',
+      UNDEFINED,
+    );
   const pos = arrayPosition(state, value.target);
   if (!pos) {
     if (delta === 0) return structuredClone(value);
-    throw semanticError(node, 'pointer arithmetic is only supported within arrays/malloc blocks');
+    throw semanticError(
+      node,
+      'pointer arithmetic is only supported within arrays/malloc blocks',
+      UNDEFINED,
+    );
   }
   const next = pos.index + delta;
   if (next < 0 || next > pos.length)
-    throw semanticError(node, `pointer arithmetic moves outside allocation bounds (index ${next})`);
+    throw semanticError(
+      node,
+      `pointer arithmetic moves outside allocation bounds (index ${next})`,
+      UNDEFINED,
+    );
   return pointerValue(
     ref(
       pos.allocationId,

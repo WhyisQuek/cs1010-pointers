@@ -21,12 +21,14 @@ npm run check:editions   # the student build must not contain the Level editor
 | `npm run test:playback` | Step snapshots, next-line tracking, typedefs and syntax-error locations |
 | `npm run test:semantics` | C semantic, constraint, lifetime, bounds and round-trip tests |
 | `npm run test:addresses` | Simulated placement, LP64 offsets, provenance/status, history, atomic edits, view geometry, and address-independent grading/generation |
-| `npm run test:native` | Defined programs compared with a native LP64 C11 compiler |
+| `npm run test:native` | Defined programs compared with a native LP64 C23 compiler |
 | `node --test test/maintenance.test.js` | Regressions from the [code audit](CODE_AUDIT.md): storage failures, level import, input range checks, labels, WASM paths; completion-only progress; course-pack loading and draft precedence |
 
-`npm run audit:n3088` runs the separate C-standard audit probes; it reports discrepancies and is not a pass/fail suite.
+`node --test test/diagnostics.test.js` checks that rejected programs carry the right [diagnostic category](SUPPORTED_C.md#diagnostics): not valid C, undefined behavior, not supported, or a PointerViz limit. `node --test test/c23.test.js` covers C23 behavior fixed after the [N3088 audit](C_SPEC_AUDIT_N3088.md): `bool` constants, integer constant types, `nullptr`, struct completeness, typedef scope, dangling temporary members, exact 64-bit integers, braced and empty initializers, `void *` and untyped `malloc` blocks, and `free` through a first member.
 
-The native suite first compiles and runs a small probe to check LP64 sizes, signed char, and the undefined-behavior sanitizer runtime. It skips with a reason when the compiler is missing or incompatible, including Windows compilers with 4-byte `long`. Linux CI sets `POINTERVIZ_REQUIRE_NATIVE=1`, which makes these conditions fail instead of skip. After the probe succeeds, fixture compilation, execution, and result mismatches always fail the test. Set `POINTERVIZ_CC` to a compatible compiler command or `POINTERVIZ_WSL_DISTRO` to an installed Linux distribution on Windows. See [the C semantics audit](C_SEMANTICS_AUDIT.md).
+`npm run audit:n3088` runs the separate C-standard audit probes; it reports discrepancies and is not a pass/fail suite. Its `--native` option needs a C23-capable compiler (GCC 13 or newer; on this Windows workspace, `POINTERVIZ_WSL_DISTRO=Ubuntu-24.04`).
+
+The native suite first checks for C23 support (`-std=c23`, or `-std=c2x` on GCC 13), then compiles and runs a small probe to check LP64 sizes, signed char, and the undefined-behavior sanitizer runtime. It skips with a reason when the compiler is missing or incompatible, including compilers older than GCC 13 and Windows compilers with 4-byte `long`. On this Windows workspace use `POINTERVIZ_WSL_DISTRO=Ubuntu-24.04`. Linux CI sets `POINTERVIZ_REQUIRE_NATIVE=1`, which makes these conditions fail instead of skip. After the probe succeeds, fixture compilation, execution, and result mismatches always fail the test. Set `POINTERVIZ_CC` to a compatible compiler command or `POINTERVIZ_WSL_DISTRO` to an installed Linux distribution on Windows. See [the C semantics audit](C_SEMANTICS_AUDIT.md).
 
 Layout tests use the same adapter as the canvas and verify its output without a browser. They cannot replace interaction checks.
 

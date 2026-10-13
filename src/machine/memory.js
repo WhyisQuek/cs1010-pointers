@@ -6,12 +6,15 @@
  * remain anonymous source-level objects. Dead stack frames and freed heap
  * allocations remain in snapshots so dangling-pointer provenance is visible.
  */
+import { UNDEFINED, diagnostic } from '../language/diagnostics.js';
 import {
   isArray,
+  isBlock,
   isPointer,
   isPrimitive,
   isStruct,
   resolveStructType,
+  sizeOf,
   typeEquals,
   typeToString,
   validateObjectType,
@@ -76,7 +79,7 @@ export function endFrame(state, frameId) {
 }
 
 export function makeDefaultValue(type, structTypes = {}) {
-  if (isPrimitive(type) || isPointer(type)) return { kind: 'uninit' };
+  if (isPrimitive(type) || isPointer(type) || isBlock(type)) return { kind: 'uninit' };
   if (isArray(type))
     return {
       kind: 'aggregate',
@@ -152,7 +155,7 @@ export function resolveRef(state, targetRef, { allowDead = true } = {}) {
   if (!targetRef || !Array.isArray(targetRef.path ?? [])) throw new Error('invalid reference path');
   const allocation = getAllocation(state, targetRef.allocationId);
   if (!allowDead && !allocation.alive)
-    throw new Error('reference points to an object whose lifetime has ended');
+    throw diagnostic(UNDEFINED, 'reference points to an object whose lifetime has ended');
   let type = allocation.type;
   let value = allocation.value;
   let label = allocationDisplayName(state, allocation);
@@ -221,9 +224,9 @@ export function setRefValue(state, targetRef, nextValue) {
   const { allocation, invalid, onePast, container, key } = resolveRef(state, targetRef, {
     allowDead: false,
   });
-  if (invalid || onePast) throw new Error('write outside object bounds');
+  if (invalid || onePast) throw diagnostic(UNDEFINED, 'write outside object bounds');
   if (allocation.storage.kind === 'static')
-    throw new Error('cannot modify a string literal (undefined behavior)');
+    throw diagnostic(UNDEFINED, 'cannot modify a string literal (undefined behavior)');
   if (container) container[key] = structuredClone(nextValue);
   else allocation.value = structuredClone(nextValue);
 }
@@ -303,6 +306,49 @@ export const heapAllocationType = (elementType, count) =>
   count === 1
     ? structuredClone(elementType)
     : { kind: 'array', of: structuredClone(elementType), length: count };
+
+/**
+ * Give an untyped malloc block its effective type (C23 6.5p6): as many whole `elementType`
+ * objects as fit. Returns a reference to the first, or null when not even one fits.
+ */
+export function typeHeapBlock(state, allocation, elementType) {
+  const count = Math.floor(allocation.type.bytes / sizeOf(elementType, state.structTypes));
+  if (count < 1) return null;
+  const type = heapAllocationType(elementType, count);
+  validateObjectType(type, state.structTypes);
+  allocation.requestedBytes = allocation.type.bytes;
+  allocation.type = type;
+  allocation.value = makeDefaultValue(type, state.structTypes);
+  return ref(allocation.id, count === 1 ? [] : [0]);
+}
+
+/**
+ * A void * records only an address, so it designates the outermost object there (the whole
+ * array or struct rather than its first element). Equal addresses then get equal targets.
+ */
+export function outermostRefAtAddress(state, target) {
+  const allocation = getAllocation(state, target.allocationId);
+  const offset = referenceOffset(state, target).offset;
+  return (
+    addressableSubobjects(allocation, state).find(
+      s => referenceOffset(state, s.ref).offset === offset,
+    )?.ref ?? target
+  );
+}
+
+/**
+ * The subobject of `allocation` at the same address as `target` whose type is `type`, if
+ * any. A pointer converted through void * designates that object (C23 6.3.2.3p1, p7).
+ */
+export function refAtSameAddress(state, target, type) {
+  const allocation = getAllocation(state, target.allocationId);
+  const offset = referenceOffset(state, target).offset;
+  return (
+    addressableSubobjects(allocation, state).find(
+      s => typeEquals(s.type, type) && referenceOffset(state, s.ref).offset === offset,
+    )?.ref ?? null
+  );
+}
 export const cloneState = state => structuredClone(state);
 export const refType = (state, r) => resolveRef(state, r).type;
 
@@ -310,11 +356,12 @@ export function pointerCanTarget(state, pointerType, targetRef) {
   if (!isPointer(pointerType)) return false;
   try {
     const resolved = resolveRef(state, targetRef);
+    // A void * may point at any object (C23 6.3.2.3p1).
     return (
       resolved.allocation.alive &&
       !resolved.invalid &&
       !resolved.onePast &&
-      typeEquals(pointerType.to, resolved.type)
+      (pointerType.to.kind === 'void' || typeEquals(pointerType.to, resolved.type))
     );
   } catch {
     return false;

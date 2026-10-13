@@ -9,6 +9,8 @@ import { useEffect, useState } from 'react';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
 import { interpret } from '../pipeline/interpreter.js';
+import { describeError } from '../language/diagnostics.js';
+import { toJSON } from '../data/json.js';
 import { drawingIssues } from '../pipeline/equivalence.js';
 import {
   DEFAULT_PROMPTS,
@@ -29,14 +31,14 @@ function tryInterpret(code) {
   try {
     return { state: interpret(code).state, error: null };
   } catch (e) {
-    return { state: null, error: e.message };
+    return { state: null, error: describeError(e) };
   }
 }
 
 /** A preview result; `version` changes only when the interpreted state does. */
 function previewOf(code, previous = null) {
   const result = tryInterpret(code);
-  const json = result.state && JSON.stringify(result.state);
+  const json = result.state && toJSON(result.state);
   if (json && json === previous?.json) return previous;
   return { ...result, json, version: (previous?.version ?? 0) + 1 };
 }

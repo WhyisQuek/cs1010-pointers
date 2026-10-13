@@ -2,6 +2,7 @@
  * printf format strings (C 7.21.6.1): parsing, argument type rules and formatting.
  * Output follows glibc: exact decimal expansion of doubles, round-half-even, `(nil)` for %p NULL.
  */
+import { UNDEFINED, UNSUPPORTED, diagnostic } from './diagnostics.js';
 import { isPointer, typeToString } from './types.js';
 import { promote } from './numeric.js';
 
@@ -28,20 +29,26 @@ export function parseFormat(codes) {
     i += whole.length;
     if (conversion === '%') {
       if (whole !== '%%')
-        throw new Error(`invalid conversion '${whole}'; write %% for a percent sign`);
+        throw diagnostic(UNDEFINED, `invalid conversion '${whole}'; write %% for a percent sign`);
       text += '%';
       continue;
     }
-    if (!conversion) throw new Error(`incomplete conversion '${whole}' at the end of the format`);
-    if (conversion === 'n') throw new Error('%n is not supported');
+    if (!conversion)
+      throw diagnostic(UNDEFINED, `incomplete conversion '${whole}' at the end of the format`);
+    if (conversion === 'n') throw diagnostic(UNSUPPORTED, '%n is not supported');
     if (!`${INTEGER}${FLOATING}csp`.includes(conversion))
-      throw new Error(`unsupported conversion '%${conversion}'`);
+      // C23 7.23.6.1 defines %a, %A and %b; any other conversion is undefined.
+      throw diagnostic(
+        'aAbB'.includes(conversion) ? UNSUPPORTED : UNDEFINED,
+        `unsupported conversion '%${conversion}'`,
+      );
     const lengthOk =
       !length ||
       (['hh', 'h', 'z'].includes(length) && INTEGER.includes(conversion)) ||
       (length === 'l' && (INTEGER.includes(conversion) || FLOATING.includes(conversion)));
     if (!lengthOk)
-      throw new Error(
+      throw diagnostic(
+        ['ll', 'j', 't', 'L'].includes(length) ? UNSUPPORTED : UNDEFINED,
         ['ll', 'j', 't', 'L'].includes(length)
           ? `length modifier '${length}' is not supported (no long long, intmax_t, ptrdiff_t or long double)`
           : `length modifier '${length}' cannot be used with %${conversion}`,
@@ -94,7 +101,9 @@ export function argumentTypeError({ spec, role }, type) {
     );
   }
   if (FLOATING.includes(conversion)) return name === 'double' ? null : expect('double');
-  if (conversion === 'p') return isPointer(promoted) ? null : expect('a pointer');
+  // C23 7.16.1.1p2 lets a nullptr_t argument be read as a pointer.
+  if (conversion === 'p')
+    return isPointer(promoted) || promoted?.kind === 'nullptr_t' ? null : expect('a pointer');
   if (conversion === 's')
     return type === STRING_LITERAL ||
       (isPointer(promoted) && promoted.to.kind === 'primitive' && promoted.to.name === 'char')
@@ -123,10 +132,13 @@ export function integerArgument(spec, type, value) {
   const signedConversion = 'di'.includes(spec.conversion);
   const unsignedType = type.name.startsWith('unsigned');
   if (signedConversion && unsignedType && n >= 1n << BigInt(bits - 1))
-    throw new Error(`${n} does not fit the signed type that ${spec.text} prints`);
+    throw diagnostic(UNDEFINED, `${n} does not fit the signed type that ${spec.text} prints`);
   const narrowed = spec.conversion === 'c' || spec.length === 'hh' || spec.length === 'h';
   if (!signedConversion && !narrowed && !unsignedType && n < 0n)
-    throw new Error(`negative value ${n} does not fit the unsigned type that ${spec.text} prints`);
+    throw diagnostic(
+      UNDEFINED,
+      `negative value ${n} does not fit the unsigned type that ${spec.text} prints`,
+    );
   if (spec.conversion === 'c') return BigInt.asUintN(8, n);
   if (spec.length === 'hh' || spec.length === 'h') {
     const width = spec.length === 'hh' ? 8 : 16;

@@ -3,10 +3,13 @@ import {
   CHAR,
   INT,
   LIBRARY_NAMES,
+  NULLPTR_T,
   array,
   declarationToC,
   isArray,
+  isNullptrType,
   isPointer,
+  isVoidPointer,
   isPrimitive,
   isStruct,
   pointer,
@@ -26,23 +29,77 @@ import {
 } from './numeric.js';
 import { decodeCharLiteral, stringInitializerLiteral } from './literals.js';
 import { STRING_LITERAL, argumentTypeError, formatArguments, parseFormat } from './format.js';
+import {
+  INVALID,
+  LIMIT,
+  UNDEFINED,
+  UNSUPPORTED,
+  diagnostic,
+  diagnosticKind,
+} from './diagnostics.js';
 import { MAX_ARRAY_LENGTH } from './limits.js';
+
+/** Standard names a valid C23 program may use that PointerViz does not provide. */
+const UNPROVIDED_STANDARD_NAMES = new Set([
+  'abort',
+  'abs',
+  'aligned_alloc',
+  'assert',
+  'calloc',
+  'exit',
+  'free_sized',
+  'memcpy',
+  'memset',
+  'putchar',
+  'puts',
+  'realloc',
+  'scanf',
+  'static_assert',
+  'strcmp',
+  'strcpy',
+  'strlen',
+  'unreachable',
+]);
 
 export function checkProgram(program) {
   const structs = Object.fromEntries((program.structs ?? []).map(t => [t.name, t]));
   const functions = new Map(program.functions.map(f => [f.name, f]));
   const visibleFunctions = new Set();
-  if (functions.size !== program.functions.length) throw new Error('duplicate function definition');
+  if (functions.size !== program.functions.length)
+    throw diagnostic(INVALID, 'duplicate function definition');
   if (!functions.has('main'))
-    throw new Error('no main() function found — wrap your entry code in int main() { ... }');
-  // C11 7.1.3 reserves these; a definition would also be silently bypassed by the built-ins.
+    throw diagnostic(
+      INVALID,
+      'no main() function found — wrap your entry code in int main() { ... }',
+    );
+  // C23 7.1.3 reserves these: defining one is undefined, and the built-ins would bypass it.
   for (const name of LIBRARY_NAMES)
     if (name !== 'NULL' && functions.has(name))
-      throw new Error(`cannot define '${name}': it is a standard library function`);
+      throw diagnostic(UNDEFINED, `cannot define '${name}': it is a standard library function`);
   const decay = t => (isArray(t) ? pointer(t.of) : t);
-  const scalar = t => isPrimitive(t) || isPointer(t) || t.kind === 'null-pointer-constant';
-  const fail = (e, message) => {
-    throw new Error(`${message}${e.loc?.startLine ? ` (line ${e.loc.startLine})` : ''}`);
+  const scalar = t => isPrimitive(t) || isPointer(t) || isNullptrType(t);
+  /** C23 6.3.2.3p3: an integer constant expression with the value 0, or nullptr. */
+  const nullPointerConstant = (t, e, env) =>
+    isNullptrType(t) || (isIntegerType(t) && constant(e, env) === 0);
+  // Parsed programs record where each struct is defined; hand-built test programs do not.
+  const structPositions = program.structPositions;
+  /** The incomplete type that `type` is or contains at `e`'s position in the source, or null. */
+  function incompleteAt(type, e) {
+    if (type.kind === 'void') return 'void';
+    if (isArray(type)) return incompleteAt(type.of, e);
+    if (!isStruct(type)) return null;
+    if (structPositions && !(type.name in structPositions)) return typeToString(type);
+    if (structPositions?.[type.name] > (e.loc?.offset ?? Infinity)) return typeToString(type);
+    return null;
+  }
+  /** Pointer arithmetic needs a complete object type to scale by (C23 6.5.6p2). */
+  function requireCompletePointee(type, e) {
+    const incomplete = incompleteAt(type.to, e);
+    if (incomplete) fail(e, `arithmetic on a pointer to incomplete type ${incomplete}`);
+  }
+  // Most checker errors are constraint violations; callers name the other categories.
+  const fail = (e, message, kind = INVALID) => {
+    throw diagnostic(kind, `${message}${e.loc?.startLine ? ` (line ${e.loc.startLine})` : ''}`);
   };
   function lookup(env, name, e) {
     if (name === 'NULL') return INT;
@@ -53,14 +110,20 @@ export function checkProgram(program) {
   const scope = parent => ({ parent, names: new Map() });
   function declare(env, name, type, e) {
     if (name === 'NULL') fail(e, 'NULL is a predefined macro in PointerViz');
-    if (LIBRARY_NAMES.has(name)) fail(e, `'${name}' is reserved for the standard library`);
+    // Valid for a block-scope name in C; PointerViz reserves them so states regenerate as C.
+    if (LIBRARY_NAMES.has(name))
+      fail(e, `'${name}' is reserved for the standard library`, UNSUPPORTED);
     if (env.names.has(name)) fail(e, `redeclaration of '${name}'`);
     env.names.set(name, type);
   }
   function constant(e, env) {
-    if (e.kind === 'IntLiteral') return e.value;
+    // true and false are predefined constants, not integer constants (C23 6.6p8), so an
+    // expression using them is not an integer constant expression or a null pointer constant.
+    if (e.kind === 'IntLiteral') return isBoolType(e.type) ? undefined : e.value;
     if (e.kind === 'CharLiteral') return decodeCharLiteral(e.raw);
-    if ((e.kind === 'Identifier' && e.name === 'NULL') || e.kind === 'NullLiteral') return 0;
+    // nullptr is a null pointer constant but not an integer constant expression.
+    if (e.kind === 'NullLiteral') return e.nullptr ? undefined : 0;
+    if (e.kind === 'Identifier' && e.name === 'NULL') return 0;
     if (e.kind === 'SizeofType') return sizeOf(e.type, structs);
     if (e.kind === 'SizeofExpression') return sizeOf(expression(e.expression, env), structs);
     if (e.kind === 'Unary') {
@@ -72,6 +135,15 @@ export function checkProgram(program) {
           : convertNumber(e.operator === '-' ? -n : n, expression(e, env), { arithmetic: true });
     }
     if (e.kind === 'Binary') {
+      // C23 6.6p3, 6.5.13: the unevaluated operand of && or || must still have constant
+      // form, but its value (which might divide by zero or overflow) is never computed.
+      if (['&&', '||'].includes(e.operator)) {
+        const a = constant(e.left, env);
+        if (a === undefined || !constantForm(e.right)) return undefined;
+        if (e.operator === '&&' ? !a : a) return Number(e.operator === '||');
+        const b = constant(e.right, env);
+        return b === undefined ? undefined : Number(Boolean(b));
+      }
       const a = constant(e.left, env),
         b = constant(e.right, env);
       if (a === undefined || b === undefined) return undefined;
@@ -93,22 +165,30 @@ export function checkProgram(program) {
         '<=': () => Number(x <= y),
         '>': () => Number(x > y),
         '>=': () => Number(x >= y),
-        '&&': () => Number(Boolean(x) && Boolean(y)),
-        '||': () => Number(Boolean(x) || Boolean(y)),
       };
       return operations[e.operator]?.();
     }
     return undefined;
   }
+  /** Whether `e` has the shape of an integer constant expression, without evaluating it. */
+  function constantForm(e) {
+    if (e.kind === 'IntLiteral') return !isBoolType(e.type);
+    if (e.kind === 'NullLiteral') return !e.nullptr;
+    if (['CharLiteral', 'SizeofType', 'SizeofExpression'].includes(e.kind)) return true;
+    if (e.kind === 'Identifier') return e.name === 'NULL';
+    if (e.kind === 'Unary') return constantForm(e.expression);
+    if (e.kind === 'Binary') return constantForm(e.left) && constantForm(e.right);
+    return false;
+  }
   function compatible(to, from, e, env) {
     from = decay(from);
     if (isPrimitive(to) && isPrimitive(from)) return;
-    if (isBoolType(to) && (isPointer(from) || from.kind === 'null-pointer-constant')) return;
+    if (isBoolType(to) && (isPointer(from) || isNullptrType(from))) return;
     if (isStruct(to) && typeEquals(to, from)) return;
     if (isPointer(to)) {
-      if (typeEquals(to, from) || from.kind === 'null-pointer-constant') return;
-      if (isIntegerType(from) && constant(e, env) === 0) return;
-      if (e.kind === 'Call' && e.name === 'malloc') return;
+      if (typeEquals(to, from) || nullPointerConstant(from, e, env)) return;
+      // Any object pointer converts to and from void * (C23 6.5.16.1p1).
+      if (isPointer(from) && (isVoidPointer(to) || isVoidPointer(from))) return;
       if (isPointer(from)) fail(e, 'incompatible pointer types');
     }
     fail(e, `cannot assign ${typeToString(from)} to ${typeToString(to)}`);
@@ -132,29 +212,37 @@ export function checkProgram(program) {
     if (['==', '!=', '<', '<=', '>', '>='].includes(op)) {
       if (isPrimitive(a) && isPrimitive(b)) return INT;
       if (isPointer(a) && isPointer(b) && typeEquals(a, b)) return INT;
+      // Equality also accepts a pointer and a void * (C23 6.5.9p2); ordering does not.
+      if (['==', '!='].includes(op) && isPointer(a) && isPointer(b))
+        if (isVoidPointer(a) || isVoidPointer(b)) return INT;
+      // C23 6.5.9p2: a pointer or nullptr_t may be compared with a null pointer constant.
       if (['==', '!='].includes(op)) {
+        const aNull = nullPointerConstant(a, e.left, env),
+          bNull = nullPointerConstant(b, e.right, env);
         if (
-          isPointer(a) &&
-          (b.kind === 'null-pointer-constant' || (isIntegerType(b) && constant(e.right, env) === 0))
+          ((isPointer(a) || isNullptrType(a)) && bNull) ||
+          ((isPointer(b) || isNullptrType(b)) && aNull)
         )
           return INT;
-        if (
-          isPointer(b) &&
-          (a.kind === 'null-pointer-constant' || (isIntegerType(a) && constant(e.left, env) === 0))
-        )
-          return INT;
-        if (a.kind === 'null-pointer-constant' && b.kind === 'null-pointer-constant') return INT;
       }
       fail(e, 'cannot compare incompatible operand types');
     }
     if (['+', '-'].includes(op)) {
-      if (isPointer(a) && isIntegerType(b)) return a;
-      if (op === '+' && isIntegerType(a) && isPointer(b)) return b;
-      if (op === '-' && isPointer(a) && typeEquals(a, b))
+      if (isPointer(a) && isIntegerType(b)) {
+        requireCompletePointee(a, e);
+        return a;
+      }
+      if (op === '+' && isIntegerType(a) && isPointer(b)) {
+        requireCompletePointee(b, e);
+        return b;
+      }
+      if (op === '-' && isPointer(a) && typeEquals(a, b)) {
+        requireCompletePointee(a, e);
         return { kind: 'primitive', name: 'long' };
+      }
     }
     if (!['+', '-', '*', '/', '%'].includes(op))
-      fail(e, `binary operator '${op}' is not supported`);
+      fail(e, `binary operator '${op}' is not supported`, UNSUPPORTED);
     if (!isPrimitive(a) || !isPrimitive(b))
       fail(e, 'arithmetic requires numbers or a pointer and integer offset');
     if (op === '%' && (!isIntegerType(a) || !isIntegerType(b)))
@@ -172,7 +260,7 @@ export function checkProgram(program) {
         decodeCharLiteral(e.raw);
         return INT;
       case 'NullLiteral':
-        return INT;
+        return e.nullptr ? NULLPTR_T : INT;
       case 'AddressOf':
         return pointer(lvalue(e.expression, env, false));
       case 'Dereference': {
@@ -183,10 +271,11 @@ export function checkProgram(program) {
       case 'Subscript': {
         const a = decay(expression(e.array, env)),
           b = decay(expression(e.index, env));
-        if (isPointer(a) && isIntegerType(b)) return a.to;
-        if (isPointer(b) && isIntegerType(a)) return b.to;
-        fail(e, 'subscript requires pointer and integer');
-        break;
+        const base =
+          isPointer(a) && isIntegerType(b) ? a : isPointer(b) && isIntegerType(a) ? b : null;
+        if (!base) fail(e, 'subscript requires pointer and integer');
+        requireCompletePointee(base, e);
+        return base.to;
       }
       case 'Member': {
         let t = expression(e.object, env);
@@ -196,6 +285,8 @@ export function checkProgram(program) {
           t = t.to;
         }
         if (!isStruct(t)) fail(e, 'member access requires struct');
+        // Members are only known once the struct is complete (C23 6.5.2.3p1).
+        if (incompleteAt(t, e)) fail(e, `${typeToString(t)} is incomplete at this point`);
         const field = resolveStructType(t, structs).fields?.find(f => f.name === e.field);
         if (!field) fail(e, `struct ${t.name} has no field '${e.field}'`);
         return field.type;
@@ -213,6 +304,7 @@ export function checkProgram(program) {
       case 'Update': {
         const type = lvalue(e.expression, env);
         if (!scalar(type)) fail(e, 'update requires scalar lvalue');
+        if (isPointer(type)) requireCompletePointee(type, e);
         return type;
       }
       case 'Unary': {
@@ -227,11 +319,13 @@ export function checkProgram(program) {
       case 'Binary':
         return binary(e.operator, expression(e.left, env), expression(e.right, env), e, env);
       case 'SizeofType':
-        sizeOf(e.type, structs);
-        return SIZE_T;
       case 'SizeofExpression': {
-        const type = expression(e.expression, env);
+        const type = e.kind === 'SizeofType' ? e.type : expression(e.expression, env);
         if (isArray(type) && type.length === null) fail(e, 'sizeof requires a complete array type');
+        // C23 6.5.3.4p1: sizeof needs a type that is complete where sizeof appears.
+        const incomplete = incompleteAt(type, e);
+        if (incomplete && incomplete !== 'void')
+          fail(e, `sizeof requires a complete type; ${incomplete} is incomplete at this point`);
         sizeOf(type, structs);
         return SIZE_T;
       }
@@ -245,19 +339,21 @@ export function checkProgram(program) {
         if (e.name === 'malloc' || e.name === 'free') {
           if (args.length !== 1) fail(e, `${e.name} expects exactly one argument`);
           if (e.name === 'malloc') {
-            if (!isIntegerType(args[0])) fail(e, 'malloc size must be integer');
+            // The size converts to size_t like any prototyped argument (C23 6.5.2.2p7).
+            if (!isPrimitive(args[0])) fail(e, 'malloc size must be a number');
             return pointer({ kind: 'void' });
           }
-          if (
-            !isPointer(decay(args[0])) &&
-            args[0].kind !== 'null-pointer-constant' &&
-            !(isIntegerType(args[0]) && constant(e.arguments[0], env) === 0)
-          )
+          if (!isPointer(decay(args[0])) && !nullPointerConstant(args[0], e.arguments[0], env))
             fail(e, 'free expects a pointer or NULL');
           return { kind: 'void' };
         }
         const fn = functions.get(e.name);
-        if (!fn) fail(e, `call to unknown function '${e.name}'`);
+        if (!fn)
+          fail(
+            e,
+            `call to unknown function '${e.name}'`,
+            UNPROVIDED_STANDARD_NAMES.has(e.name) ? UNSUPPORTED : INVALID,
+          );
         if (!visibleFunctions.has(e.name))
           fail(e, `function '${e.name}' must be defined before use; prototypes are not supported`);
         if (args.length !== fn.params.length)
@@ -266,31 +362,32 @@ export function checkProgram(program) {
         return fn.returnType;
       }
       default:
-        fail(e, `unsupported expression ${e.kind}`);
+        fail(e, `unsupported expression ${e.kind}`, UNSUPPORTED);
     }
   }
   function printf(e, env) {
     const [format, ...rest] = e.arguments;
     if (format?.kind !== 'StringLiteral')
-      fail(e, 'printf requires a string literal as its format argument');
+      fail(e, 'printf requires a string literal as its format argument', UNSUPPORTED);
     let needed;
     try {
       needed = formatArguments(parseFormat(format.value));
     } catch (error) {
-      fail(format, `printf format: ${error.message}`);
+      fail(format, `printf format: ${error.message}`, diagnosticKind(error));
     }
     const types = rest.map(a => (a.kind === 'StringLiteral' ? STRING_LITERAL : expression(a, env)));
     if (types.length < needed.length)
-      fail(e, `printf format needs ${needed.length} argument(s), got ${types.length}`);
+      fail(e, `printf format needs ${needed.length} argument(s), got ${types.length}`, UNDEFINED);
     needed.forEach((n, i) => {
       const message = argumentTypeError(n, decay(types[i]));
-      if (message) fail(rest[i], message);
+      // A missing or mismatched printf argument is undefined behavior (C23 7.23.6.1p2, p9).
+      if (message) fail(rest[i], message, UNDEFINED);
     });
     return INT;
   }
   function stringLiteralType(e) {
     if (e.value.length + 1 > MAX_ARRAY_LENGTH)
-      fail(e, `string literal must be shorter than ${MAX_ARRAY_LENGTH} characters`);
+      fail(e, `string literal must be shorter than ${MAX_ARRAY_LENGTH} characters`, LIMIT);
     return array(CHAR, e.value.length + 1);
   }
   /** C 6.7.9p14: a char array may be initialized by a string literal, optionally in braces. */
@@ -311,7 +408,13 @@ export function checkProgram(program) {
       compatible(type, expression(e, env), e, env);
       return;
     }
-    if (!e.elements.length) fail(e, 'empty initializer lists are not supported in the C11 subset');
+    // C23 6.7.10p4: {} initializes any complete object as if it were static (to zero), but
+    // an array of unknown size cannot take its length from an empty list.
+    if (!e.elements.length) {
+      if (isArray(type) && type.length === null)
+        fail(e, 'an empty initializer cannot size an array of unknown size');
+      return;
+    }
     if (!isArray(type) && !isStruct(type) && e.elements.length > 1) {
       // A scalar takes one value; a list of several usually means an array was intended.
       const count = e.elements.length;
@@ -359,7 +462,7 @@ export function checkProgram(program) {
       }
       if (inferLength) {
         if (cursor.i < elements.length)
-          fail(e, `array size must be between 1 and ${MAX_ARRAY_LENGTH}`);
+          fail(e, `array size must be between 1 and ${MAX_ARRAY_LENGTH}`, LIMIT);
         t.length = count;
       }
     }
@@ -416,14 +519,14 @@ export function checkProgram(program) {
         return;
       }
       default:
-        fail(s, `unsupported statement ${s.kind}`);
+        fail(s, `unsupported statement ${s.kind}`, UNSUPPORTED);
     }
   }
   for (const fn of program.functions) {
     visibleFunctions.add(fn.name);
     const env = scope(null);
     if (fn.name === 'main' && (!typeEquals(fn.returnType, INT) || fn.params.length))
-      fail(fn, 'PointerViz requires int main(void)');
+      fail(fn, 'PointerViz requires int main(void)', UNSUPPORTED);
     fn.params.forEach(p => declare(env, p.name, p.type, p));
     fn.statements.forEach(s => statement(s, env, fn));
   }

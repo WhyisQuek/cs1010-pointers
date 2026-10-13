@@ -1,17 +1,17 @@
 /** Function invocation with explicit call frames, and the malloc/free/printf built-ins. */
-import { MAX_CALL_DEPTH, MAX_HEAP_ELEMENTS } from '../../language/limits.js';
-import { INT, isArray, isPointer, sizeOf, typeToString } from '../../language/types.js';
+import { INVALID, LIMIT, UNDEFINED, diagnostic } from '../../language/diagnostics.js';
+import { MAX_CALL_DEPTH, MAX_HEAP_BYTES } from '../../language/limits.js';
+import { SIZE_T, convertNumber, isFloatingType } from '../../language/numeric.js';
+import { VOID, block, isPointer, pointer } from '../../language/types.js';
+import { referenceOffset } from '../addresses.js';
 import {
   addAllocation,
   addFrame,
-  decayRef,
   endFrame,
   freshFrameId,
   getAllocation,
-  heapAllocationType,
   pointerValue,
   ref,
-  samePath,
 } from '../memory.js';
 import { evalExpression } from './expressions.js';
 import { assignToRef, coerceRValue } from './lvalues.js';
@@ -22,7 +22,7 @@ import {
   makeScope,
   markNext,
   pushTrace,
-  requireInteger,
+  requireNumber,
   semanticError,
   snapshot,
 } from './runtime.js';
@@ -30,9 +30,12 @@ import { execEmbeddedStatement } from './statements.js';
 
 export function callFunction(ctx, fn, args, callerFrame, entry = false) {
   if (ctx.callDepth >= MAX_CALL_DEPTH)
-    throw new Error(`maximum call depth (${MAX_CALL_DEPTH}) exceeded`);
+    throw diagnostic(LIMIT, `maximum call depth (${MAX_CALL_DEPTH}) exceeded`);
   if (args.length !== fn.params.length)
-    throw new Error(`${fn.name} expects ${fn.params.length} argument(s), got ${args.length}`);
+    throw diagnostic(
+      INVALID,
+      `${fn.name} expects ${fn.params.length} argument(s), got ${args.length}`,
+    );
   ctx.callDepth++;
   const frameId = entry ? 'main' : freshFrameId(ctx.state, fn.name);
   const frame = addFrame(ctx.state, {
@@ -73,7 +76,7 @@ export function callFunction(ctx, fn, args, callerFrame, entry = false) {
       break;
     }
     if (result?.control === 'break' || result?.control === 'continue') {
-      throw semanticError(stmt, `${result.control} used outside a loop`);
+      throw semanticError(stmt, `${result.control} used outside a loop`, INVALID);
     }
   }
 
@@ -88,59 +91,50 @@ export function callFunction(ctx, fn, args, callerFrame, entry = false) {
   if (fn.returnType?.kind === 'void') return { type: { kind: 'void' }, value: { kind: 'void' } };
   if (!returnValue) {
     if (entry) return { type: fn.returnType, value: { kind: 'scalar', value: 0 } };
-    throw new Error(
-      `function '${fn.name}' reached the end without returning ${typeToString(fn.returnType)}`,
-    );
+    // Only using the missing value is undefined (C23 6.9.1p12); evalExpression decides.
+    return { type: fn.returnType, value: { kind: 'uninit' }, missingReturn: fn.name };
   }
-  return coerceRValue(fn.returnType, returnValue, fn);
+  return coerceRValue(fn.returnType, returnValue, fn, ctx);
 }
 
-export function evalCall(expr, ctx, env, frame, expectedType) {
+export function evalCall(expr, ctx, env, frame) {
   if (expr.name === 'malloc') {
-    if (!expectedType || !isPointer(expectedType))
-      throw semanticError(expr, 'malloc result must be assigned where a pointer type is known');
-    if (isArray(expectedType.to))
-      throw semanticError(
-        expr,
-        'malloc of array types is not supported; use a pointer to the element type',
-      );
     if (expr.arguments.length !== 1)
-      throw semanticError(expr, 'malloc expects exactly one argument');
-    const sizeRv = evalExpression(expr.arguments[0], ctx, env, frame, INT);
-    requireInteger(sizeRv, expr.arguments[0]);
-    const bytes = sizeRv.value.value;
-    const elemBytes = sizeOf(expectedType.to, ctx.state.structTypes);
-    if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes % elemBytes !== 0)
+      throw semanticError(expr, 'malloc expects exactly one argument', INVALID);
+    const sizeRv = evalExpression(expr.arguments[0], ctx, env, frame, SIZE_T);
+    requireNumber(sizeRv, expr.arguments[0]);
+    // The argument converts to size_t like any prototyped parameter (C23 6.5.2.2p7).
+    const bytes = convertNumber(sizeRv.value.value, SIZE_T, {
+      fromFloat: isFloatingType(sizeRv.type),
+    });
+    // Implementation-defined for a zero size (C23 7.24.3p1): PointerViz returns NULL.
+    if (bytes === 0) return { type: pointer(VOID), value: { kind: 'null' } };
+    if (typeof bytes === 'bigint' || bytes > MAX_HEAP_BYTES)
       throw semanticError(
         expr,
-        `malloc size ${bytes} is not a positive multiple of sizeof(${typeToString(expectedType.to)}) (${elemBytes})`,
+        `malloc(${bytes}) exceeds PointerViz's limit of ${MAX_HEAP_BYTES} bytes per block`,
+        LIMIT,
       );
-    const count = bytes / elemBytes;
-    if (count > MAX_HEAP_ELEMENTS)
-      throw semanticError(
-        expr,
-        `malloc would create ${count} elements; PointerViz limits one allocation to ${MAX_HEAP_ELEMENTS}`,
-      );
+    // The block has no type until a pointer to it is converted to T * (lvalues.js).
     const allocation = addAllocation(ctx.state, {
-      type: heapAllocationType(expectedType.to, count),
+      type: block(bytes),
       storage: { kind: 'heap' },
       alive: true,
     });
-    const target = decayRef(allocation);
     pushTrace(ctx, {
       kind: 'Allocate',
       allocationId: allocation.id,
       bytes,
-      count,
       line: expr.loc?.startLine ?? null,
     });
-    return { type: expectedType, value: pointerValue(target) };
+    return { type: pointer(VOID), value: pointerValue(ref(allocation.id, [])) };
   }
 
   if (expr.name === 'printf') return evalPrintf(expr, ctx, env, frame);
 
   if (expr.name === 'free') {
-    if (expr.arguments.length !== 1) throw semanticError(expr, 'free expects exactly one argument');
+    if (expr.arguments.length !== 1)
+      throw semanticError(expr, 'free expects exactly one argument', INVALID);
     let rv;
     ctx.allowDanglingRead = true;
     try {
@@ -150,17 +144,20 @@ export function evalCall(expr, ctx, env, frame, expectedType) {
     }
     if (isNullLike(rv)) return { type: { kind: 'void' }, value: { kind: 'void' } };
     if (!isPointer(rv.type) || rv.value.kind !== 'pointer')
-      throw semanticError(expr, 'free expects a pointer or NULL');
+      throw semanticError(expr, 'free expects a pointer or NULL', INVALID);
     const target = rv.value.target,
       allocation = getAllocation(ctx.state, target.allocationId);
     if (allocation.storage.kind !== 'heap')
-      throw semanticError(expr, 'free() requires heap memory');
-    if (!allocation.alive) throw semanticError(expr, 'double free');
-    const basePath = isArray(allocation.type) ? [0] : [];
-    if (!samePath(target.path, basePath))
+      throw semanticError(expr, 'free() requires heap memory', UNDEFINED);
+    if (!allocation.alive) throw semanticError(expr, 'double free', UNDEFINED);
+    // Any pointer to the block's first byte compares equal to the one malloc returned
+    // (C23 6.7.2.1p17, 7.24.3.3), such as a pointer to a struct's first member.
+    const { offset, onePast } = referenceOffset(ctx.state, target);
+    if (offset !== 0 || onePast)
       throw semanticError(
         expr,
         'free() requires the original allocation pointer, not an interior pointer',
+        UNDEFINED,
       );
     allocation.alive = false;
     pushTrace(ctx, {
@@ -172,7 +169,7 @@ export function evalCall(expr, ctx, env, frame, expectedType) {
   }
 
   const fn = ctx.functions.get(expr.name);
-  if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`);
+  if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`, INVALID);
   // The checker rejects a wrong argument count; callFunction re-asserts it for every call.
   const argumentAccesses = [];
   const args = expr.arguments.map((arg, i) => {

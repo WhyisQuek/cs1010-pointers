@@ -6,7 +6,9 @@ test('a runtime error opens playback at the step where execution stopped', async
   await openApp(page);
   await code(page).fill('int main(void) {\n    int a = 1;\n    int *p = NULL;\n    *p = 2;\n}');
   await page.getByRole('button', { name: 'Run', exact: true }).click();
-  await expect(page.getByText(/^Stopped at step 4: cannot dereference null pointer/)).toBeVisible();
+  await expect(
+    page.getByText(/^Stopped at step 4\. Undefined behavior: cannot dereference null pointer/),
+  ).toBeVisible();
   await expect(page.getByText('4/4', { exact: true })).toBeVisible();
   await expect(page.getByText('Stopped by an error')).toBeVisible();
   await expect(page.locator('.next-line-number.error-line')).toHaveText('4');

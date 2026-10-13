@@ -1,4 +1,5 @@
 /** Struct definitions and typedef aliases, collected before functions are parsed. */
+import { INVALID, LIMIT, diagnostic } from '../diagnostics.js';
 import { MAX_STRUCT_FIELDS } from '../limits.js';
 import { structType } from '../types.js';
 import { parseBaseType, parseDeclarator, requireCompleteAt } from './declarations.js';
@@ -7,6 +8,7 @@ import {
   semanticChildren,
   structBody,
   structName,
+  invalidAt,
   unsupported,
   walkNodes,
 } from './syntaxTree.js';
@@ -39,6 +41,7 @@ export function collectStructs(root) {
       : null);
   // Pass 1 reserves every named definition so fields may refer to themselves or
   // to a struct whose body appears later in the translation unit.
+  const anonymous = new Set();
   for (const node of walkNodes(root)) {
     if (node.type !== 'struct_specifier' || !structBody(node)) continue;
     const owner = ['declaration', 'type_definition'].includes(node.parent?.type)
@@ -48,7 +51,14 @@ export function collectStructs(root) {
       throw unsupported(node, 'struct definitions must be at file scope');
     const name = definitionName(node);
     if (!name) throw unsupported(node, 'anonymous struct definitions are not supported');
-    if (structs[name]) throw unsupported(node, `duplicate or shadowed struct tag '${name}'`);
+    if (structs[name]) {
+      // An anonymous typedef'd struct is stored under its alias, which C keeps apart from
+      // tags; that collision is a subset limitation (audit B3), not a C redefinition.
+      if (!structName(node) || anonymous.has(name))
+        throw unsupported(node, `struct tag '${name}' collides with a typedef name`);
+      throw invalidAt(node, `redefinition of struct tag '${name}'`);
+    }
+    if (!structName(node)) anonymous.add(name);
     structs[name] = structType(name, []);
     definitionPositions.set(name, node.startIndex);
   }
@@ -71,12 +81,14 @@ export function collectStructs(root) {
       }
     }
     if (fields.length > MAX_STRUCT_FIELDS)
-      throw new Error(
+      throw diagnostic(
+        LIMIT,
         `struct ${name} has ${fields.length} fields; PointerViz limits structs to ${MAX_STRUCT_FIELDS}`,
       );
     const seen = new Set();
     for (const f of fields) {
-      if (seen.has(f.name)) throw new Error(`duplicate field '${f.name}' in struct ${name}`);
+      if (seen.has(f.name))
+        throw diagnostic(INVALID, `duplicate field '${f.name}' in struct ${name}`);
       seen.add(f.name);
     }
     structs[name] = structType(name, fields);
@@ -90,9 +102,11 @@ export function collectStructs(root) {
   function checkComplete(type, visiting = new Set()) {
     if (type.kind === 'array') return checkComplete(type.of, visiting);
     if (type.kind !== 'struct') return;
-    if (visiting.has(type.name)) throw new Error(`recursive by-value struct '${type.name}'`);
+    if (visiting.has(type.name))
+      throw diagnostic(INVALID, `recursive by-value struct '${type.name}'`);
     const def = structs[type.name];
-    if (!def?.fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
+    if (!def?.fields?.length)
+      throw diagnostic(INVALID, `incomplete or empty struct '${type.name}'`);
     for (const field of def.fields) checkComplete(field.type, new Set([...visiting, type.name]));
   }
   for (const def of Object.values(structs)) checkComplete(def);

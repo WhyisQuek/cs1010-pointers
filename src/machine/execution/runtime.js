@@ -1,4 +1,5 @@
 /** Execution-context helpers: lexical scopes, trace/snapshot recording, safety guards and runtime checks. */
+import { INVALID, LIMIT, diagnostic } from '../../language/diagnostics.js';
 import { MAX_LOOP_ITERATIONS, MAX_TRACE_STEPS } from '../../language/limits.js';
 import { isFloatingType, isIntegerType } from '../../language/numeric.js';
 import { INT, typeToString } from '../../language/types.js';
@@ -9,7 +10,7 @@ export function makeScope(parent = null) {
 }
 
 export function declareBinding(scope, name, targetRef, node) {
-  if (scope.bindings.has(name)) throw semanticError(node, `redeclaration of '${name}'`);
+  if (scope.bindings.has(name)) throw semanticError(node, `redeclaration of '${name}'`, INVALID);
   scope.bindings.set(name, targetRef);
 }
 
@@ -37,6 +38,7 @@ export function guardLoopIteration(iterations, stmt) {
     throw semanticError(
       stmt,
       `loop exceeded ${MAX_LOOP_ITERATIONS} iterations; possible infinite loop`,
+      LIMIT,
     );
   }
 }
@@ -54,7 +56,7 @@ export function markNext(ctx, node, frame) {
 export function snapshot(ctx, stmt, frame) {
   ctx.steps++;
   if (ctx.steps > MAX_TRACE_STEPS)
-    throw new Error(`execution exceeded ${MAX_TRACE_STEPS} visualized statements`);
+    throw diagnostic(LIMIT, `execution exceeded ${MAX_TRACE_STEPS} visualized statements`);
   ctx.snapshots.push({
     line: stmt.loc?.startLine ?? null,
     nextLine: null,
@@ -70,7 +72,8 @@ export function snapshot(ctx, stmt, frame) {
 
 export function pushTrace(ctx, event) {
   ctx.trace.push(event);
-  if (ctx.trace.length > MAX_TRACE_STEPS * 8) throw new Error('execution trace is too large');
+  if (ctx.trace.length > MAX_TRACE_STEPS * 8)
+    throw diagnostic(LIMIT, 'execution trace is too large');
 }
 
 export function intResult(value) {
@@ -79,7 +82,7 @@ export function intResult(value) {
 
 export function requireInteger(rv, node) {
   if (!isIntegerRuntime(rv))
-    throw semanticError(node, `expected integer, got ${typeToString(rv.type)}`);
+    throw semanticError(node, `expected integer, got ${typeToString(rv.type)}`, INVALID);
 }
 
 export function isIntegerRuntime(rv) {
@@ -92,10 +95,11 @@ export function isNumberRuntime(rv) {
 
 export function requireNumber(rv, node) {
   if (!isNumberRuntime(rv))
-    throw semanticError(node, `expected number, got ${typeToString(rv.type)}`);
+    throw semanticError(node, `expected number, got ${typeToString(rv.type)}`, INVALID);
 }
 
-export function semanticError(node, message) {
+/** `kind` is a category from language/diagnostics.js. */
+export function semanticError(node, message, kind) {
   const line = node?.loc?.startLine;
-  return new Error(line ? `${message} (line ${line})` : message);
+  return diagnostic(kind, line ? `${message} (line ${line})` : message);
 }

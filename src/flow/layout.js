@@ -10,6 +10,7 @@ import {
   scalarSubobjects,
   staticAllocations,
 } from '../machine/memory.js';
+import { toJSON } from '../data/json.js';
 import { describePointer } from './addressPresentation.js';
 import { curvePointer } from './routing.js';
 
@@ -96,7 +97,7 @@ export function stateToFlow(
         const key = JSON.stringify(s.ref.path);
         const prior = oldRows.get(key);
         if (
-          JSON.stringify(prior?.value) !== JSON.stringify(s.value) ||
+          toJSON(prior?.value) !== toJSON(s.value) ||
           (prior && locationKey(previousState, prior) !== locationKey(state, s))
         )
           changedPaths.add(key);

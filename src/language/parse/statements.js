@@ -5,6 +5,7 @@ import {
   parseDeclaration,
   parseDeclarator,
   referenceSafeType,
+  requireCompleteAt,
 } from './declarations.js';
 import { parseExpression } from './expressions.js';
 import {
@@ -18,7 +19,7 @@ import {
 
 export function parseFunction(node, structTypes) {
   const typeNode = node.childForFieldName('type') ?? semanticChildren(node)[0];
-  let returnType = parseBaseType(typeNode, structTypes, { allowVoid: true });
+  let returnType = parseBaseType(typeNode, structTypes);
   let declarator = node.childForFieldName('declarator');
   // Return-type stars wrap the function declarator in Tree-sitter's C tree.
   while (
@@ -58,8 +59,11 @@ export function parseFunction(node, structTypes) {
     const info = parseDeclarator(pDecl, base, structTypes, { parameter: true });
     // C adjusts array parameters to pointers.
     const type = info.type.kind === 'array' ? pointer(info.type.of) : info.type;
+    // Parameters and the return type of a definition must be complete (C23 6.9.1p3, p7).
+    requireCompleteAt(type, pDecl, structTypes);
     params.push({ name: info.name, type, loc: locOf(p) });
   }
+  if (returnType.kind !== 'void') requireCompleteAt(returnType, nameNode, structTypes);
   const body = node.childForFieldName('body');
   return withLoc(
     {

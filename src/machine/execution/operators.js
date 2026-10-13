@@ -1,9 +1,16 @@
 /** Binary, compound-assignment, comparison and logical operators, plus unsequenced-access checks. */
-import { arithmeticType, convertNumber, numericOperation } from '../../language/numeric.js';
+import { INVALID, UNDEFINED, UNSUPPORTED } from '../../language/diagnostics.js';
+import {
+  arithmeticType,
+  compareValues,
+  convertNumber,
+  numericOperation,
+} from '../../language/numeric.js';
 import {
   isPointer,
   isPrimitive,
   isStruct,
+  isVoidPointer,
   typeEquals,
   typeToString,
 } from '../../language/types.js';
@@ -64,7 +71,7 @@ export function evalBinary(expr, ctx, env, frame) {
   if (['+', '-'].includes(expr.operator)) {
     if (isPointer(left.type) && isIntegerRuntime(right)) {
       if (left.value.kind !== 'pointer')
-        throw semanticError(expr, 'pointer arithmetic requires a concrete pointer');
+        throw semanticError(expr, 'pointer arithmetic requires a concrete pointer', UNDEFINED);
       return {
         type: left.type,
         value: addToPointer(
@@ -77,7 +84,7 @@ export function evalBinary(expr, ctx, env, frame) {
     }
     if (expr.operator === '+' && isIntegerRuntime(left) && isPointer(right.type)) {
       if (right.value.kind !== 'pointer')
-        throw semanticError(expr, 'pointer arithmetic requires a concrete pointer');
+        throw semanticError(expr, 'pointer arithmetic requires a concrete pointer', UNDEFINED);
       return {
         type: right.type,
         value: addToPointer(ctx.state, right.value, left.value.value, expr),
@@ -93,11 +100,15 @@ export function evalBinary(expr, ctx, env, frame) {
       typeEquals(left.type, right.type)
     ) {
       if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer')
-        throw semanticError(expr, 'pointer subtraction requires concrete pointers');
+        throw semanticError(expr, 'pointer subtraction requires concrete pointers', UNDEFINED);
       const a = arrayPosition(ctx.state, left.value.target),
         b = arrayPosition(ctx.state, right.value.target);
       if (!a || !b || a.allocationId !== b.allocationId || !samePath(a.prefix, b.prefix))
-        throw semanticError(expr, 'pointer subtraction requires pointers into the same array');
+        throw semanticError(
+          expr,
+          'pointer subtraction requires pointers into the same array',
+          UNDEFINED,
+        );
       return {
         type: { kind: 'primitive', name: 'long' },
         value: { kind: 'scalar', value: a.index - b.index },
@@ -110,7 +121,7 @@ export function evalBinary(expr, ctx, env, frame) {
     requireNumber(right, expr.right);
     return numericOperation(expr.operator, left, right);
   }
-  throw semanticError(expr, `binary operator '${expr.operator}' is not supported yet`);
+  throw semanticError(expr, `binary operator '${expr.operator}' is not supported yet`, UNSUPPORTED);
 }
 
 export function evalCompoundAssignment(operator, left, right, ctx, node) {
@@ -118,7 +129,11 @@ export function evalCompoundAssignment(operator, left, right, ctx, node) {
   if ((op === '+' || op === '-') && isPointer(left.type)) {
     requireInteger(right, node);
     if (left.value.kind !== 'pointer')
-      throw semanticError(node, 'pointer compound assignment requires a concrete pointer');
+      throw semanticError(
+        node,
+        'pointer compound assignment requires a concrete pointer',
+        UNDEFINED,
+      );
     return {
       type: left.type,
       value: addToPointer(
@@ -138,7 +153,11 @@ export function truthy(rv, node) {
   if (isPrimitive(rv.type) && rv.value.kind === 'scalar') return rv.value.value !== 0;
   if (rv.value.kind === 'null') return false;
   if (isPointer(rv.type) && rv.value.kind === 'pointer') return true;
-  throw semanticError(node, `condition requires a scalar value, got ${typeToString(rv.type)}`);
+  throw semanticError(
+    node,
+    `condition requires a scalar value, got ${typeToString(rv.type)}`,
+    INVALID,
+  );
 }
 
 function scalarEquals(left, right, ctx, node) {
@@ -146,10 +165,17 @@ function scalarEquals(left, right, ctx, node) {
     const type = arithmeticType(left.type, right.type);
     return convertNumber(left.value.value, type) === convertNumber(right.value.value, type);
   }
-  if (isPointer(left.type) && isPointer(right.type) && !typeEquals(left.type, right.type)) {
+  if (
+    isPointer(left.type) &&
+    isPointer(right.type) &&
+    !typeEquals(left.type, right.type) &&
+    !isVoidPointer(left.type) &&
+    !isVoidPointer(right.type)
+  ) {
     throw semanticError(
       node,
       `comparison of incompatible pointer types ${typeToString(left.type)} and ${typeToString(right.type)}`,
+      INVALID,
     );
   }
 
@@ -163,7 +189,11 @@ function scalarEquals(left, right, ctx, node) {
     if (left.value.kind === 'null' || right.value.kind === 'null')
       return left.value.kind === right.value.kind;
     if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer')
-      throw semanticError(node, 'pointer comparison requires initialized pointer values');
+      throw semanticError(
+        node,
+        'pointer comparison requires initialized pointer values',
+        UNDEFINED,
+      );
     return (
       left.value.target.allocationId === right.value.target.allocationId &&
       addressOffset(ctx.state, left.value.target) === addressOffset(ctx.state, right.value.target)
@@ -172,19 +202,25 @@ function scalarEquals(left, right, ctx, node) {
   throw semanticError(
     node,
     `cannot compare ${typeToString(left.type)} and ${typeToString(right.type)}`,
+    INVALID,
   );
 }
 
 function compareScalars(left, right, ctx, node) {
   if (isNumberRuntime(left) && isNumberRuntime(right)) {
     const type = arithmeticType(left.type, right.type);
-    return Math.sign(
-      convertNumber(left.value.value, type) - convertNumber(right.value.value, type),
+    return compareValues(
+      convertNumber(left.value.value, type),
+      convertNumber(right.value.value, type),
     );
   }
   if (isPointer(left.type) && isPointer(right.type) && typeEquals(left.type, right.type)) {
     if (left.value.kind !== 'pointer' || right.value.kind !== 'pointer')
-      throw semanticError(node, 'relational pointer comparison requires concrete pointers');
+      throw semanticError(
+        node,
+        'relational pointer comparison requires concrete pointers',
+        UNDEFINED,
+      );
     const a = arrayPosition(ctx.state, left.value.target),
       b = arrayPosition(ctx.state, right.value.target);
     if (!a || !b || a.allocationId !== b.allocationId || !samePath(a.prefix, b.prefix)) {
@@ -199,6 +235,7 @@ function compareScalars(left, right, ctx, node) {
       throw semanticError(
         node,
         'relational pointer comparison requires pointers into the same array',
+        UNDEFINED,
       );
     }
     return Math.sign(a.index - b.index);
@@ -206,6 +243,7 @@ function compareScalars(left, right, ctx, node) {
   throw semanticError(
     node,
     `relational comparison requires numbers or pointers into the same array`,
+    INVALID,
   );
 }
 
@@ -230,7 +268,7 @@ export function checkUnsequenced(left, right, ctx, node) {
         (a.write || b.write) &&
         overlap
       ) {
-        throw semanticError(node, 'unsequenced read/modification of the same object');
+        throw semanticError(node, 'unsequenced read/modification of the same object', UNDEFINED);
       }
     }
 }

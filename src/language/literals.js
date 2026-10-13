@@ -1,11 +1,13 @@
 /** Character constants for the documented ASCII, signed-char implementation. */
+import { INVALID, UNSUPPORTED, diagnostic } from './diagnostics.js';
+
 export function decodeCharLiteral(raw) {
   if (!raw.startsWith("'") || !raw.endsWith("'"))
-    throw new Error('wide character constants are not supported');
+    throw diagnostic(UNSUPPORTED, 'wide character constants are not supported');
   const body = raw.slice(1, -1);
   if (!body.startsWith('\\')) {
     if (body.length !== 1 || body.charCodeAt(0) > 127)
-      throw new Error('only single ASCII character literals are supported');
+      throw diagnostic(UNSUPPORTED, 'only single ASCII character literals are supported');
     return body.charCodeAt(0);
   }
   const escapes = {
@@ -28,19 +30,22 @@ export function decodeCharLiteral(raw) {
     : /^\\[0-7]{1,3}$/.test(body)
       ? Number.parseInt(body.slice(1), 8)
       : NaN;
-  if (!Number.isInteger(n) || n < 0 || n > 255)
-    throw new Error(`unsupported character escape '${raw}'`);
+  // A numeric escape must fit unsigned char (C23 6.4.4.4); other escapes are outside the subset.
+  if (Number.isInteger(n) && n > 255)
+    throw diagnostic(INVALID, `character escape '${raw}' is out of range for char`);
+  if (!Number.isInteger(n) || n < 0)
+    throw diagnostic(UNSUPPORTED, `unsupported character escape '${raw}'`);
   return n >= 128 ? n - 256 : n;
 }
 
 /** A narrow string literal's characters as char values, without the terminating '\0'. */
 export function decodeStringLiteral(raw) {
   if (!raw.startsWith('"') || !raw.endsWith('"') || raw.length < 2)
-    throw new Error('only narrow "..." string literals are supported');
+    throw diagnostic(UNSUPPORTED, 'only narrow "..." string literals are supported');
   const body = raw.slice(1, -1);
   const codes = [];
   for (const [part] of body.matchAll(/\\(?:x[0-9a-fA-F]+|[0-7]{1,3}|.)|[^\\]/gs)) {
-    if (part === '\n') throw new Error('string literal contains a newline');
+    if (part === '\n') throw diagnostic(INVALID, 'string literal contains a newline');
     codes.push(decodeCharLiteral(`'${part}'`));
   }
   return codes;

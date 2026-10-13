@@ -1,6 +1,8 @@
 /** Safety limits for the browser teaching machine. Keep these small and explicit. */
 export const MAX_ARRAY_LENGTH = 64;
 export const MAX_HEAP_ELEMENTS = 64;
+/** Bytes one malloc call may request; the block is typed later (at most MAX_HEAP_ELEMENTS). */
+export const MAX_HEAP_BYTES = 16384;
 export const MAX_STRUCT_FIELDS = 32;
 export const MAX_CALL_DEPTH = 32;
 export const MAX_LOOP_ITERATIONS = 256;

@@ -14,14 +14,9 @@ const command = (exe, args) =>
     ? spawnSync('wsl', ['-d', distro, '--', exe, ...args], { encoding: 'utf8', timeout: 60000 })
     : spawnSync(exe, args, { encoding: 'utf8', timeout: 60000 });
 const available = command(compiler, ['--version']).status === 0;
-const compilerFlags = [
-  '-std=c11',
-  '-O0',
-  '-fsanitize=undefined',
-  '-fno-sanitize-recover=undefined',
-];
+const sanitizerFlags = ['-O0', '-fsanitize=undefined', '-fno-sanitize-recover=undefined'];
 test(
-  'defined programs match a native LP64 C11 compiler with undefined-behavior sanitizer',
+  'defined programs match a native LP64 C23 compiler with undefined-behavior sanitizer',
   {
     skip:
       !available && !process.env.POINTERVIZ_REQUIRE_NATIVE
@@ -38,6 +33,19 @@ test(
     const relative = name =>
       path.relative(process.cwd(), path.join(scratch, name)).split(path.sep).join('/');
     try {
+      // PointerViz targets C23. Older compilers accept -std=c2x with only partial support,
+      // so require the C23 features the fixtures rely on before trusting either flag.
+      writeFileSync(
+        path.join(scratch, 'c23.c'),
+        'int main(void){bool b=true;int *p=nullptr;static_assert(sizeof(true)==1);' +
+          'constexpr int k=1;return !b||p||k!=1;}\n',
+      );
+      const standard = ['-std=c23', '-std=c2x'].find(
+        flag =>
+          command(compiler, [flag, '-pedantic-errors', '-fsyntax-only', relative('c23.c')])
+            .status === 0,
+      );
+      const compilerFlags = [standard, ...sanitizerFlags];
       // A compiler can exist but target a different data model (for example, Windows LLP64).
       // Check both the model and the sanitizer runtime before compiling all fixtures.
       writeFileSync(
@@ -51,16 +59,14 @@ int main(void) {
 `,
       );
       const probeOutput = relative(process.platform === 'win32' && !distro ? 'probe.exe' : 'probe');
-      const probeBuilt = command(compiler, [
-        ...compilerFlags,
-        relative('probe.c'),
-        '-o',
-        probeOutput,
-      ]);
-      const probeRun = probeBuilt.status === 0 ? command(`./${probeOutput}`, []) : null;
-      const unsupported =
-        probeBuilt.status !== 0
-          ? `C11 compiler with undefined-behavior sanitizer unavailable: ${probeBuilt.stderr || probeBuilt.error}`
+      const probeBuilt = standard
+        ? command(compiler, [...compilerFlags, relative('probe.c'), '-o', probeOutput])
+        : null;
+      const probeRun = probeBuilt?.status === 0 ? command(`./${probeOutput}`, []) : null;
+      const unsupported = !standard
+        ? 'C23 compiler unavailable (GCC 13 or newer is required)'
+        : probeBuilt.status !== 0
+          ? `C23 compiler with undefined-behavior sanitizer unavailable: ${probeBuilt.stderr || probeBuilt.error}`
           : probeRun.status !== 0
             ? `LP64 signed-char compiler/runtime unavailable: ${probeRun.stdout || ''} ${probeRun.stderr || probeRun.error || ''}`
             : '';

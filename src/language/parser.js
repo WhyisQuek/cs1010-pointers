@@ -16,6 +16,7 @@
  * No module outside ./parse/ and this file may depend on Tree-sitter node names.
  */
 import { Language, Parser } from 'web-tree-sitter';
+import { INVALID, diagnostic } from './diagnostics.js';
 import { parseFunction } from './parse/statements.js';
 import { collectStructs } from './parse/structs.js';
 import {
@@ -46,7 +47,7 @@ export function parseMiniC(source) {
   parser.setLanguage(C);
   const tree = parser.parse(source);
   try {
-    if (tree.rootNode.hasError) throw syntaxError(firstError(tree.rootNode));
+    if (tree.rootNode.hasError) throw syntaxError(firstError(tree.rootNode), source);
 
     // Never erase syntax whose semantics the machine does not implement.
     for (const node of walkNodes(tree.rootNode)) {
@@ -91,10 +92,19 @@ export function parseMiniC(source) {
         }
       }
     }
+    // Typedef and function names share the file-scope ordinary namespace (C23 6.2.3, 6.7p3).
+    const clash = functions.find(fn => structTypes.aliases.has(fn.name));
+    if (clash)
+      throw diagnostic(
+        INVALID,
+        `'${clash.name}' is declared as both a typedef and a function (line ${clash.loc?.startLine})`,
+      );
     // Duplicate functions and a missing main() are semantic rules, checked by the checker.
     return {
       kind: 'Program',
       structs: Object.values(structTypes),
+      // Where each struct's body starts: before it, the struct is incomplete (C23 6.7.2.3).
+      structPositions: Object.fromEntries(structTypes.definitionPositions),
       functions,
       source,
     };

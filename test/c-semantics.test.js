@@ -81,7 +81,6 @@ const errors = [
   ['heap allocation bound', 'int *p=malloc(65*sizeof(int));', /limits one allocation/],
   ['static storage is explicitly unsupported', 'static int x;', /not supported/],
   ['const qualification is explicitly unsupported', 'const int x=1;', /not supported/],
-  ['unsafe integer precision is rejected', 'long x=9007199254740993L;', /safe-integer/],
   ['floating array size is rejected', 'int a[2.5];', /integer literal/],
   ['multi-character constant is rejected', "int x='AB';", /single ASCII/],
   ['unsequenced increment and read', 'int i=0;int x=i++ + i;', /unsequenced/],

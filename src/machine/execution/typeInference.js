@@ -1,10 +1,13 @@
 /** Static expression types, used where C needs a type without evaluating (sizeof, initializers). */
+import { INVALID, UNSUPPORTED } from '../../language/diagnostics.js';
 import { arithmeticType, isIntegerType, promote, SIZE_T } from '../../language/numeric.js';
 import {
   CHAR,
   INT,
+  NULLPTR_T,
   array,
   isArray,
+  isNullptrType,
   isPointer,
   isPrimitive,
   isStruct,
@@ -21,12 +24,12 @@ export function inferExpressionType(expr, ctx, env, frame) {
   if (expr.kind === 'Identifier') {
     if (expr.name === 'NULL') return INT;
     const r = lookupBinding(env, expr.name);
-    if (!r) throw semanticError(expr, `use of undeclared variable '${expr.name}'`);
+    if (!r) throw semanticError(expr, `use of undeclared variable '${expr.name}'`, INVALID);
     return refType(ctx.state, r);
   }
   if (expr.kind === 'Dereference') {
     const t = decay(infer(expr.expression));
-    if (!isPointer(t)) throw semanticError(expr, 'cannot dereference non-pointer');
+    if (!isPointer(t)) throw semanticError(expr, 'cannot dereference non-pointer', INVALID);
     return t.to;
   }
   if (expr.kind === 'AddressOf') return pointer(infer(expr.expression));
@@ -35,24 +38,26 @@ export function inferExpressionType(expr, ctx, env, frame) {
       b = decay(infer(expr.index));
     if (isPointer(a) && isIntegerType(b)) return a.to;
     if (isPointer(b) && isIntegerType(a)) return b.to;
-    throw semanticError(expr, 'subscripted expression has no element type');
+    throw semanticError(expr, 'subscripted expression has no element type', INVALID);
   }
   if (expr.kind === 'Member') {
     let type = infer(expr.object);
     if (expr.viaPointer) {
       type = decay(type);
-      if (!isPointer(type)) throw semanticError(expr, "'->' requires a pointer to struct");
+      if (!isPointer(type)) throw semanticError(expr, "'->' requires a pointer to struct", INVALID);
       type = type.to;
     }
-    if (!isStruct(type)) throw semanticError(expr, 'member access requires a struct');
+    if (!isStruct(type)) throw semanticError(expr, 'member access requires a struct', INVALID);
     const field = resolveStructType(type, ctx.state.structTypes).fields?.find(
       f => f.name === expr.field,
     );
-    if (!field) throw semanticError(expr, `struct ${type.name} has no field '${expr.field}'`);
+    if (!field)
+      throw semanticError(expr, `struct ${type.name} has no field '${expr.field}'`, INVALID);
     return field.type;
   }
   if (expr.kind === 'IntLiteral' || expr.kind === 'FloatLiteral') return expr.type ?? INT;
-  if (expr.kind === 'CharLiteral' || expr.kind === 'NullLiteral') return INT;
+  if (expr.kind === 'NullLiteral') return expr.nullptr ? NULLPTR_T : INT;
+  if (expr.kind === 'CharLiteral') return INT;
   if (expr.kind === 'StringLiteral') return array(CHAR, expr.value.length + 1);
   if (expr.kind === 'SizeofType' || expr.kind === 'SizeofExpression') return SIZE_T;
   if (expr.kind === 'Call') {
@@ -60,7 +65,7 @@ export function inferExpressionType(expr, ctx, env, frame) {
     if (expr.name === 'malloc') return pointer({ kind: 'void' });
     if (expr.name === 'printf') return INT;
     const fn = ctx.functions.get(expr.name);
-    if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`);
+    if (!fn) throw semanticError(expr, `call to unknown function '${expr.name}'`, INVALID);
     return fn.returnType;
   }
   if (expr.kind === 'Assignment') return infer(expr.left);
@@ -68,11 +73,11 @@ export function inferExpressionType(expr, ctx, env, frame) {
   if (expr.kind === 'Unary') {
     const type = decay(infer(expr.expression));
     if (expr.operator === '!') {
-      if (!isPrimitive(type) && !isPointer(type))
-        throw semanticError(expr, 'logical operator requires scalar');
+      if (!isPrimitive(type) && !isPointer(type) && !isNullptrType(type))
+        throw semanticError(expr, 'logical operator requires scalar', INVALID);
       return INT;
     }
-    if (!isPrimitive(type)) throw semanticError(expr, 'unary arithmetic requires number');
+    if (!isPrimitive(type)) throw semanticError(expr, 'unary arithmetic requires number', INVALID);
     return promote(type);
   }
   if (expr.kind === 'Binary') {
@@ -87,10 +92,14 @@ export function inferExpressionType(expr, ctx, env, frame) {
     }
     if (isPrimitive(a) && isPrimitive(b)) {
       if (expr.operator === '%' && (!isIntegerType(a) || !isIntegerType(b)))
-        throw semanticError(expr, 'remainder requires integers');
+        throw semanticError(expr, 'remainder requires integers', INVALID);
       return arithmeticType(a, b);
     }
-    throw semanticError(expr, 'invalid binary operand types');
+    throw semanticError(expr, 'invalid binary operand types', INVALID);
   }
-  throw semanticError(expr, `cannot determine type of ${expr.kind} without evaluation`);
+  throw semanticError(
+    expr,
+    `cannot determine type of ${expr.kind} without evaluation`,
+    UNSUPPORTED,
+  );
 }

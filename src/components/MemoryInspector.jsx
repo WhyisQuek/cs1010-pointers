@@ -438,7 +438,8 @@ export default function MemoryInspector({
           <input
             type="number"
             aria-label={`Value of ${label}`}
-            value={selected.value.kind === 'scalar' ? selected.value.value : ''}
+            // String() keeps 64-bit values exact; they may be stored as BigInt.
+            value={selected.value.kind === 'scalar' ? String(selected.value.value) : ''}
             placeholder="uninitialized"
             onChange={e =>
               onEdit(

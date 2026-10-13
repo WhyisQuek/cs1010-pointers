@@ -2,14 +2,18 @@
 import { encodeStringLiteral } from '../language/literals.js';
 import {
   CHAR,
+  VOID,
   containsPrimitive,
   declarationToC,
   isArray,
+  isBlock,
   isPointer,
   isPrimitive,
   isStruct,
+  isVoidPointer,
   pointer,
   resolveStructType,
+  sizeOf,
   typeEquals,
   typeToString,
   validateObjectType,
@@ -94,7 +98,8 @@ export function validate(state) {
       if (tgt.invalid) errors.push(`${src.label} points outside object bounds`);
       if (!isPointer(src.type))
         errors.push(`${src.label} contains a pointer edge but has type ${typeToString(src.type)}`);
-      else if (!typeEquals(src.type.to, tgt.type))
+      // A void * may point at any object, and any pointer at an untyped malloc block.
+      else if (!typeEquals(src.type.to, tgt.type) && !isVoidPointer(src.type) && !isBlock(tgt.type))
         errors.push(
           `type error: ${typeToString(src.type)} ${src.label} cannot point to ${typeToString(tgt.type)} ${tgt.label}`,
         );
@@ -116,7 +121,10 @@ function validateValueShape(type, value, label, errors, structs) {
       errors.push(`${label} is ${typeToString(type)} but stores ${value.kind}`);
     if (value.kind === 'scalar') {
       try {
-        if (typeof value.value !== 'number' || convertNumber(value.value, type) !== value.value)
+        if (
+          !['number', 'bigint'].includes(typeof value.value) ||
+          convertNumber(value.value, type) !== value.value
+        )
           errors.push(`${label} stores a value not representable as ${typeToString(type)}`);
       } catch (e) {
         errors.push(`${label}: ${e.message}`);
@@ -127,6 +135,11 @@ function validateValueShape(type, value, label, errors, structs) {
   if (isPointer(type)) {
     if (!['pointer', 'null', 'uninit'].includes(value.kind))
       errors.push(`${label} is ${typeToString(type)} but stores ${value.kind}`);
+    return;
+  }
+  // An untyped malloc block holds no values until it is given a type.
+  if (isBlock(type)) {
+    if (value.kind !== 'uninit') errors.push(`${label} is an untyped block but stores a value`);
     return;
   }
   if (isArray(type)) {
@@ -315,7 +328,7 @@ function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
     );
     return true;
   }
-  if (!ctx.heapAnchor.has(target.id) && !typeEquals(pointerType, heapBasePointerType(target))) {
+  if (!ctx.heapAnchor.has(target.id) && !canAllocateThrough(target, pointerType)) {
     ctx.deferred.push({ lhs, type: pointerType, value, owner });
     return false;
   }
@@ -335,7 +348,7 @@ function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
 function ensureHeapAllocated(heap, lhs, targetPath, ctx, owner) {
   if (ctx.heapAnchor.has(heap.id)) return;
   ctx.anchorOwner.set(heap.id, owner);
-  ctx.lines.push(`${lhs} = ${mallocExpr(heap)};`);
+  ctx.lines.push(`${lhs} = ${mallocExpr(heap, ctx.state)};`);
   if (targetPath.length === 1 && targetPath[0] === '$onePast') {
     ctx.lines.push(`${lhs} = ${lhs} + 1;`);
     ctx.heapAnchor.set(heap.id, `(${lhs} - 1)`);
@@ -396,6 +409,8 @@ function pointerExprForHeapTarget(heap, path, anchor, state) {
 }
 function numberToC(value, type) {
   if (type.name === 'bool') return value ? 'true' : 'false';
+  // 9223372036854775808 has no type (C23 6.4.4.1), so LONG_MIN needs an expression.
+  if (type.name === 'long' && BigInt(value) === -(1n << 63n)) return '(-9223372036854775807L - 1)';
   let text = String(value);
   if (type.name === 'float' || type.name === 'double') {
     if (!/[.eE]/.test(text)) text += '.0';
@@ -413,9 +428,18 @@ function numberToC(value, type) {
   );
 }
 function heapBasePointerType(heap) {
+  if (isBlock(heap.type)) return pointer(VOID);
   return pointer(isArray(heap.type) ? heap.type.of : heap.type);
 }
-function mallocExpr(heap) {
+/** Any pointer can receive an untyped block; a typed block needs its element type. */
+function canAllocateThrough(heap, pointerType) {
+  return isBlock(heap.type) || typeEquals(pointerType, heapBasePointerType(heap));
+}
+function mallocExpr(heap, state) {
+  // Untyped blocks, and typed blocks with trailing bytes, keep their exact request.
+  if (isBlock(heap.type)) return `malloc(${heap.type.bytes})`;
+  if (heap.requestedBytes && heap.requestedBytes !== sizeOf(heap.type, state.structTypes))
+    return `malloc(${heap.requestedBytes})`;
   return isArray(heap.type)
     ? `malloc(${heap.type.length} * sizeof(${typeToString(heap.type.of)}))`
     : `malloc(sizeof(${typeToString(heap.type)}))`;

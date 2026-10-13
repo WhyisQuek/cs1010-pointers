@@ -1,4 +1,5 @@
 /** Expression evaluation to runtime values: { type, value }. */
+import { INVALID, UNDEFINED, UNSUPPORTED } from '../../language/diagnostics.js';
 import { decodeCharLiteral, encodeStringLiteral } from '../../language/literals.js';
 import {
   convertNumber,
@@ -7,7 +8,16 @@ import {
   promote,
   SIZE_T,
 } from '../../language/numeric.js';
-import { CHAR, INT, array, isArray, isPointer, pointer, sizeOf } from '../../language/types.js';
+import {
+  CHAR,
+  INT,
+  NULLPTR_T,
+  array,
+  isArray,
+  isPointer,
+  pointer,
+  sizeOf,
+} from '../../language/types.js';
 import { addAllocation, pointerValue, ref, sameRef, staticAllocations } from '../memory.js';
 import { evalCall } from './calls.js';
 import {
@@ -16,19 +26,36 @@ import {
   evalSubscriptPointer,
   isLValueExpression,
   loadLValue,
+  requireUsablePointerValue,
 } from './lvalues.js';
 import { checkUnsequenced, evalBinary, evalCompoundAssignment, truthy } from './operators.js';
 import { addToPointer } from './pointerArithmetic.js';
 import { intResult, requireNumber, semanticError } from './runtime.js';
 import { inferExpressionType } from './typeInference.js';
 
-export function evalExpression(expr, ctx, env, frame, expectedType = null) {
+/** `discard` marks an expression statement, whose value is never used. */
+export function evalExpression(
+  expr,
+  ctx,
+  env,
+  frame,
+  expectedType = null,
+  { discard = false } = {},
+) {
   const result = evaluateExpression(expr, ctx, env, frame, expectedType);
+  if (result.missingReturn && !discard)
+    throw semanticError(
+      expr,
+      `the value of ${result.missingReturn}() is used, but it ended without a return statement`,
+      UNDEFINED,
+    );
   result.integerConstant = isIntegerType(result.type) && isConstantExpression(expr);
   return result;
 }
 
 function isConstantExpression(expr) {
+  // true and false are not integer constants (C23 6.6p8); see checker.js.
+  if (expr.kind === 'IntLiteral' && expr.type?.name === 'bool') return false;
   if (
     ['IntLiteral', 'CharLiteral', 'SizeofType', 'SizeofExpression', 'NullLiteral'].includes(
       expr.kind,
@@ -36,6 +63,9 @@ function isConstantExpression(expr) {
   )
     return true;
   if (expr.kind === 'Identifier') return expr.name === 'NULL';
+  // A braced scalar initializer keeps the classification of its single expression (6.7.10p12).
+  if (expr.kind === 'InitializerList')
+    return expr.elements.length === 1 && isConstantExpression(expr.elements[0]);
   if (expr.kind === 'Unary') return isConstantExpression(expr.expression);
   if (expr.kind === 'Binary')
     return isConstantExpression(expr.left) && isConstantExpression(expr.right);
@@ -50,7 +80,7 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
     case 'CharLiteral':
       return { type: INT, value: { kind: 'scalar', value: decodeCharLiteral(expr.raw) } };
     case 'NullLiteral':
-      return intResult(0);
+      return expr.nullptr ? { type: NULLPTR_T, value: { kind: 'null' } } : intResult(0);
     case 'StringLiteral':
       // Like any array, the literal decays to a pointer to its first char.
       return {
@@ -66,7 +96,7 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
       if (expr.expression.kind === 'Dereference') {
         const rv = evalExpression(expr.expression.expression, ctx, env, frame);
         if (!isPointer(rv.type))
-          throw semanticError(expr, 'address/dereference requires a pointer');
+          throw semanticError(expr, 'address/dereference requires a pointer', INVALID);
         return rv;
       }
       if (expr.expression.kind === 'Subscript')
@@ -82,10 +112,15 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
         const object = evalExpression(expr.object, ctx, env, frame);
         const type = inferExpressionType(expr, ctx, env, frame);
         if (isArray(type))
-          throw semanticError(expr, 'array members of temporary structs are not supported');
+          throw semanticError(
+            expr,
+            'array members of temporary structs are not supported',
+            UNSUPPORTED,
+          );
         const value = object.value.fields?.[expr.field];
         if (!value || value.kind === 'uninit')
-          throw semanticError(expr, 'read of uninitialized struct member');
+          throw semanticError(expr, 'read of uninitialized struct member', UNDEFINED);
+        requireUsablePointerValue(value, ctx, expr);
         return { type, value: structuredClone(value) };
       }
       return loadLValue(evalLValue(expr, ctx, env, frame), ctx, expr);
@@ -94,14 +129,18 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
       const lhsStart = ctx.accesses.length;
       const lhs = evalLValue(expr.left, ctx, env, frame);
       const lhsAccesses = ctx.accesses.slice(lhsStart);
-      if (isArray(lhs.type)) throw semanticError(expr, 'arrays are not assignable');
+      if (isArray(lhs.type)) throw semanticError(expr, 'arrays are not assignable', INVALID);
       if (expr.operator === '=') {
         const rhsStart = ctx.accesses.length;
         const rhs = evalExpression(expr.right, ctx, env, frame, lhs.type);
         const rhsAccesses = ctx.accesses.slice(rhsStart);
         checkUnsequenced(lhsAccesses, rhsAccesses, ctx, expr);
         if (rhsAccesses.some(a => a.depth === ctx.callDepth && a.update && sameRef(a.ref, lhs.ref)))
-          throw semanticError(expr, 'unsequenced modifications of the assignment target');
+          throw semanticError(
+            expr,
+            'unsequenced modifications of the assignment target',
+            UNDEFINED,
+          );
         const value = assignToRef(lhs.ref, lhs.type, rhs, ctx, expr);
         return { type: lhs.type, value };
       }
@@ -116,10 +155,14 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
         const value = assignToRef(lhs.ref, lhs.type, result, ctx, expr);
         return { type: lhs.type, value };
       }
-      throw semanticError(expr, `assignment operator '${expr.operator}' is not supported yet`);
+      throw semanticError(
+        expr,
+        `assignment operator '${expr.operator}' is not supported yet`,
+        UNSUPPORTED,
+      );
     }
     case 'Call':
-      return evalCall(expr, ctx, env, frame, expectedType);
+      return evalCall(expr, ctx, env, frame);
     case 'Unary': {
       if (expr.operator === '!') {
         const rv = evalExpression(expr.expression, ctx, env, frame, null);
@@ -140,7 +183,7 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
       let next;
       if (isPointer(current.type)) {
         if (current.value.kind !== 'pointer')
-          throw semanticError(expr, 'pointer update requires a concrete pointer');
+          throw semanticError(expr, 'pointer update requires a concrete pointer', UNDEFINED);
         next = {
           type: current.type,
           value: addToPointer(ctx.state, current.value, expr.operator === '++' ? 1 : -1, expr),
@@ -173,11 +216,11 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
       };
     case 'InitializerList': {
       if (!expectedType || expr.elements.length !== 1)
-        throw semanticError(expr, 'scalar initializer requires exactly one element');
+        throw semanticError(expr, 'scalar initializer requires exactly one element', INVALID);
       return evalExpression(expr.elements[0], ctx, env, frame, expectedType);
     }
     default:
-      throw semanticError(expr, `unsupported expression ${expr.kind}`);
+      throw semanticError(expr, `unsupported expression ${expr.kind}`, UNSUPPORTED);
   }
 }
 

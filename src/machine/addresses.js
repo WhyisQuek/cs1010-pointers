@@ -1,4 +1,5 @@
 /** Simulated address placement. References retain allocation/subobject provenance. */
+import { LIMIT, diagnostic } from '../language/diagnostics.js';
 import { isArray, isStruct, layoutOf, sizeOf, validateObjectType } from '../language/types.js';
 
 export const ADDRESS_PROFILE = 'pointerviz-lp64-sparse-v1';
@@ -37,7 +38,7 @@ export function checkAddressCapacity(type, structs = {}) {
   validateObjectType(type, structs);
   const size = sizeOf(type, structs);
   if (!Number.isSafeInteger(size) || size < 1 || size + 1 > RESERVATION_BYTES)
-    throw new Error('object exceeds simulated address reservation');
+    throw diagnostic(LIMIT, 'object exceeds simulated address reservation');
   return size;
 }
 
@@ -50,7 +51,7 @@ export function nextAddress(space, storage, type, structs = {}) {
   const slot = cursorOf(space, region);
   const baseAddress = region.start + slot * RESERVATION_BYTES;
   if (baseAddress >= region.end)
-    throw new Error(`simulated ${storage.kind} address space exhausted`);
+    throw diagnostic(LIMIT, `simulated ${storage.kind} address space exhausted`);
   return { baseAddress, addressSpace: { ...space, [region.cursor]: slot + 1 } };
 }
 

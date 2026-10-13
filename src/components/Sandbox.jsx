@@ -4,6 +4,7 @@ import { CodePanel } from './CodePanel.jsx';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
+import { describeError } from '../language/diagnostics.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../machine/memory.js';
 import { loadDraft, saveDraft } from '../data/drafts.js';
@@ -34,7 +35,7 @@ export default function Sandbox() {
   const reportError = e =>
     setNotice({
       kind: 'err',
-      text: e instanceof ValidationError ? e.errors.join('\n') : e.message,
+      text: e instanceof ValidationError ? e.errors.join('\n') : describeError(e),
     });
   useEffect(() => {
     if (notice?.kind !== 'ok') return;
@@ -64,7 +65,7 @@ export default function Sandbox() {
       loadPlayback(e.playback, steps);
       setNotice({
         kind: 'err',
-        text: `Stopped at step ${steps}: ${e.message}. Select Previous to see how it got there.`,
+        text: `Stopped at step ${steps}. ${describeError(e)}. Select Previous to see how it got there.`,
       });
     }
   };

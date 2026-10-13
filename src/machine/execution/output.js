@@ -1,4 +1,5 @@
 /** printf: argument evaluation, conversion and the program's standard output. */
+import { LIMIT, UNDEFINED, diagnostic, diagnosticKind } from '../../language/diagnostics.js';
 import {
   STRING_LITERAL,
   formatConversion,
@@ -40,26 +41,27 @@ export function evalPrintf(expr, ctx, env, frame) {
     }
     const spec = { ...item };
     if (spec.width === '*') {
-      const width = take().rv.value.value;
+      // Widths and precisions are ints, so Number() is exact.
+      const width = Number(take().rv.value.value);
       // A negative '*' width is a '-' flag plus a positive width.
       if (width < 0) spec.flags += '-';
       spec.width = Math.abs(width);
     }
     if (spec.precision === '*') {
-      const precision = take().rv.value.value;
+      const precision = Number(take().rv.value.value);
       spec.precision = precision < 0 ? null : precision;
     }
     const { rv, node } = take();
     try {
       text += formatConversion(spec, conversionArgument(spec, rv, ctx, node));
     } catch (error) {
-      throw semanticError(node, `printf: ${error.message}`);
+      throw semanticError(node, `printf: ${error.message}`, diagnosticKind(error));
     }
   }
 
   ctx.output += text;
   if (ctx.output.length > MAX_OUTPUT_CHARS)
-    throw semanticError(expr, `program output exceeded ${MAX_OUTPUT_CHARS} characters`);
+    throw semanticError(expr, `program output exceeded ${MAX_OUTPUT_CHARS} characters`, LIMIT);
   pushTrace(ctx, { kind: 'Output', text, line: expr.loc?.startLine ?? null });
   return intResult(text.length);
 }
@@ -71,7 +73,7 @@ function conversionArgument(spec, rv, ctx, node) {
   if (conversion === 'p')
     return rv.value.kind === 'null' ? null : referenceLocation(ctx.state, rv.value.target).address;
   if (rv.type === STRING_LITERAL) return rv.value.codes;
-  if (rv.value.kind === 'null') throw new Error(`${spec.text} received a null pointer`);
+  if (rv.value.kind === 'null') throw diagnostic(UNDEFINED, `${spec.text} received a null pointer`);
   return readString(ctx, rv.value, spec.precision, node);
 }
 
@@ -81,11 +83,12 @@ function readString(ctx, pointer, limit, node) {
   let current = pointer;
   while (limit === null || codes.length < limit) {
     const resolved = resolveRef(ctx.state, current.target, { allowDead: true });
-    if (!resolved.allocation.alive) throw new Error('%s reads an object whose lifetime has ended');
+    if (!resolved.allocation.alive)
+      throw diagnostic(UNDEFINED, '%s reads an object whose lifetime has ended');
     if (resolved.onePast || resolved.invalid)
-      throw new Error("%s argument has no terminating '\\0' within its array");
+      throw diagnostic(UNDEFINED, "%s argument has no terminating '\\0' within its array");
     if (resolved.value.kind === 'uninit')
-      throw new Error(`%s reads uninitialized ${resolved.label}`);
+      throw diagnostic(UNDEFINED, `%s reads uninitialized ${resolved.label}`);
     if (resolved.value.value === 0) break;
     codes.push(resolved.value.value);
     current = addToPointer(ctx.state, current, 1, node);

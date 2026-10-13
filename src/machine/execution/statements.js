@@ -3,6 +3,7 @@
  * control signal ({ control: 'return' | 'break' | 'continue' }) that loops and
  * function calls consume.
  */
+import { INVALID, UNSUPPORTED } from '../../language/diagnostics.js';
 import { stringInitializerLiteral } from '../../language/literals.js';
 import {
   CHAR,
@@ -37,12 +38,12 @@ function execStatement(stmt, ctx, env, frame, fn, loopDepth = 0) {
       for (const decl of stmt.declarations) execDeclaration(decl, ctx, env, frame);
       return null;
     case 'ExpressionStatement':
-      evalExpression(stmt.expression, ctx, env, frame, null);
+      evalExpression(stmt.expression, ctx, env, frame, null, { discard: true });
       return null;
     case 'Return': {
       if (fn.returnType?.kind === 'void') {
         if (stmt.expression)
-          throw semanticError(stmt, `void function '${fn.name}' cannot return a value`);
+          throw semanticError(stmt, `void function '${fn.name}' cannot return a value`, INVALID);
         pushTrace(ctx, { kind: 'Return', frameId: frame.id, line: stmt.loc?.startLine ?? null });
         return { control: 'return', value: null };
       }
@@ -50,17 +51,18 @@ function execStatement(stmt, ctx, env, frame, fn, loopDepth = 0) {
         throw semanticError(
           stmt,
           `function '${fn.name}' must return ${typeToString(fn.returnType)}`,
+          INVALID,
         );
       const rv = evalExpression(stmt.expression, ctx, env, frame, fn.returnType);
       pushTrace(ctx, { kind: 'Return', frameId: frame.id, line: stmt.loc?.startLine ?? null });
-      return { control: 'return', value: coerceRValue(fn.returnType, rv, stmt) };
+      return { control: 'return', value: coerceRValue(fn.returnType, rv, stmt, ctx) };
     }
     case 'Break':
-      if (loopDepth <= 0) throw semanticError(stmt, 'break used outside a loop');
+      if (loopDepth <= 0) throw semanticError(stmt, 'break used outside a loop', INVALID);
       pushTrace(ctx, { kind: 'Break', frameId: frame.id, line: stmt.loc?.startLine ?? null });
       return { control: 'break' };
     case 'Continue':
-      if (loopDepth <= 0) throw semanticError(stmt, 'continue used outside a loop');
+      if (loopDepth <= 0) throw semanticError(stmt, 'continue used outside a loop', INVALID);
       pushTrace(ctx, { kind: 'Continue', frameId: frame.id, line: stmt.loc?.startLine ?? null });
       return { control: 'continue' };
     case 'Block':
@@ -184,7 +186,7 @@ function execFor(stmt, ctx, parentEnv, frame, fn, loopDepth) {
       // In C, continue in a for loop still executes the update expression.
       if (stmt.update) {
         markNext(ctx, stmt.update, frame);
-        evalExpression(stmt.update, ctx, loopEnv, frame, null);
+        evalExpression(stmt.update, ctx, loopEnv, frame, null, { discard: true });
         snapshot(ctx, { kind: 'ForUpdate', loc: stmt.update.loc ?? stmt.loc }, frame);
       }
     }
@@ -238,8 +240,19 @@ function execDeclaration(decl, ctx, env, frame) {
     initializeAggregate(ref(allocation.id), decl.type, decl.initializer, ctx, env, frame, decl);
     return;
   }
-  const rv = evalExpression(decl.initializer, ctx, env, frame, decl.type);
-  assignToRef(ref(allocation.id), decl.type, rv, ctx, decl);
+  initializeScalar(ref(allocation.id), decl.type, decl.initializer, ctx, env, frame, decl);
+}
+
+/** `= {}` gives a scalar the value a static object would have: 0 or a null pointer. */
+function initializeScalar(targetRef, type, initializer, ctx, env, frame, node) {
+  if (initializer.kind === 'InitializerList' && !initializer.elements.length) {
+    const zero = isPointer(type)
+      ? { type, value: { kind: 'null' } }
+      : { type, value: { kind: 'scalar', value: 0 } };
+    assignToRef(targetRef, type, zero, ctx, node);
+    return;
+  }
+  assignToRef(targetRef, type, evalExpression(initializer, ctx, env, frame, type), ctx, node);
 }
 
 function initializeAggregate(targetRef, type, initializer, ctx, env, frame, node) {
@@ -251,12 +264,16 @@ function initializeAggregate(targetRef, type, initializer, ctx, env, frame, node
       assignToRef(targetRef, type, rv, ctx, node);
       return;
     }
-    throw semanticError(node, `${typeToString(type)} initialization currently requires { ... }`);
+    throw semanticError(
+      node,
+      `${typeToString(type)} initialization currently requires { ... }`,
+      UNSUPPORTED,
+    );
   }
   const cursor = { index: 0 };
   initializeMembers(targetRef, type, initializer.elements, cursor, ctx, env, frame, node);
   if (cursor.index < initializer.elements.length)
-    throw semanticError(node, `too many initializers for ${typeToString(type)}`);
+    throw semanticError(node, `too many initializers for ${typeToString(type)}`, INVALID);
 }
 
 function initializeMembers(targetRef, type, elements, cursor, ctx, env, frame, node) {
@@ -290,13 +307,7 @@ function initializeMembers(targetRef, type, elements, cursor, ctx, env, frame, n
       } else initializeMembers(childRef, member.type, elements, cursor, ctx, env, frame, node);
     } else {
       cursor.index++;
-      assignToRef(
-        childRef,
-        member.type,
-        evalExpression(child, ctx, env, frame, member.type),
-        ctx,
-        node,
-      );
+      initializeScalar(childRef, member.type, child, ctx, env, frame, node);
     }
   }
 }
@@ -306,7 +317,7 @@ function initializeFromString(targetRef, type, initializer, ctx, node) {
   const literal = stringInitializerLiteral(initializer);
   if (!literal || !isArray(type) || !typeEquals(type.of, CHAR)) return false;
   if (literal.value.length > type.length)
-    throw semanticError(node, `initializer-string is too long for ${typeToString(type)}`);
+    throw semanticError(node, `initializer-string is too long for ${typeToString(type)}`, INVALID);
   for (let i = 0; i < type.length; i++) {
     const rv = { type: CHAR, value: { kind: 'scalar', value: literal.value[i] ?? 0 } };
     assignToRef(ref(targetRef.allocationId, [...targetRef.path, i]), CHAR, rv, ctx, node);

@@ -158,7 +158,6 @@ export const values = [
   ['bool promotes to int', 'bool b=true;int result=sizeof(b+b)+b+b;', 6],
   ['bool increment saturates', 'bool b=true;b++;int result=b;', 1],
   ['bool decrement toggles false to true', 'bool b=false;b--;int result=b;', 1],
-  ['false is a null pointer constant', 'int *p=false;int result=p==NULL;', 1],
   [
     'bool conditions and logical results',
     'bool done=false;int result=0;while(!done){result++;done=result==3;}',

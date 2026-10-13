@@ -5,6 +5,7 @@
  */
 import { stateToFlow } from '../flow/layout.js';
 import { validateAddressSpace } from '../machine/addresses.js';
+import { fromJSON, toJSON } from './json.js';
 
 const DRAFT_KEY = 'pointerviz.sandbox.v1';
 
@@ -23,7 +24,7 @@ function usableDiagram(diagram) {
 /** { code, diagram } or null. Storage can be unavailable, and stored data can be malformed. */
 export function loadDraft() {
   try {
-    const stored = JSON.parse(localStorage.getItem(DRAFT_KEY));
+    const stored = fromJSON(localStorage.getItem(DRAFT_KEY));
     if (typeof stored?.code !== 'string') return null;
     return { code: stored.code, diagram: usableDiagram(stored.diagram) };
   } catch {
@@ -33,7 +34,7 @@ export function loadDraft() {
 
 export function saveDraft(code, diagram) {
   try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ code, diagram }));
+    localStorage.setItem(DRAFT_KEY, toJSON({ code, diagram }));
   } catch {
     /* private browsing or full storage: the draft lasts for this session only */
   }

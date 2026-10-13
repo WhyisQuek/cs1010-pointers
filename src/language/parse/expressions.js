@@ -1,9 +1,12 @@
 /** Expressions -> Mini-C AST. */
+import { INVALID, diagnosticKind } from '../diagnostics.js';
 import { decodeStringLiteral } from '../literals.js';
-import { INT, primitive } from '../types.js';
+import { primitive } from '../types.js';
 import { parseAbstractDeclarator, parseBaseType } from './declarations.js';
 import { parseNumberLiteral } from './numberLiterals.js';
 import {
+  hidesTypedef,
+  invalidAt,
   isDeclaratorLike,
   operatorOf,
   operatorToken,
@@ -39,19 +42,27 @@ export function parseExpression(node, structTypes) {
           node,
         );
       } catch (e) {
-        throw unsupported(node, e.message);
+        throw diagnosticKind(e) === INVALID
+          ? invalidAt(node, e.message)
+          : unsupported(node, e.message);
       }
     }
     case 'identifier':
       return withLoc({ kind: 'Identifier', name: node.text }, node);
     case 'null':
-      return withLoc({ kind: 'NullLiteral' }, node);
+      // Tree-sitter's `null` covers both NULL (the integer constant 0 here) and C23 nullptr.
+      return withLoc({ kind: 'NullLiteral', nullptr: node.text === 'nullptr' }, node);
     case 'true':
     case 'false':
-      // <stdbool.h> (C11) defines these as the integer constants 1 and 0.
+      // C23 6.4.4.5p3: constants of type bool; they promote to int in arithmetic.
       if (node.text !== node.type) throw unsupported(node);
       return withLoc(
-        { kind: 'IntLiteral', type: INT, value: node.type === 'true' ? 1 : 0, raw: node.text },
+        {
+          kind: 'IntLiteral',
+          type: primitive('bool'),
+          value: node.type === 'true' ? 1 : 0,
+          raw: node.text,
+        },
         node,
       );
     case 'pointer_expression':
@@ -171,6 +182,19 @@ export function parseExpression(node, structTypes) {
             node,
           );
         }
+        // sizeof(S) names a local object when one hides the typedef S.
+        if (
+          baseNode.type === 'type_identifier' &&
+          !typeDesc.childForFieldName('declarator') &&
+          hidesTypedef(baseNode, baseNode.text)
+        )
+          return withLoc(
+            {
+              kind: 'SizeofExpression',
+              expression: withLoc({ kind: 'Identifier', name: baseNode.text }, baseNode),
+            },
+            node,
+          );
         let t = parseBaseType(baseNode, structTypes);
         const declarator =
           typeDesc.childForFieldName('declarator') ??
@@ -185,9 +209,13 @@ export function parseExpression(node, structTypes) {
       // Tree-sitter reads the `_Bool` keyword as an identifier inside sizeof(...).
       if (name.type === 'identifier' && name.text === '_Bool')
         return withLoc({ kind: 'SizeofType', type: primitive('bool') }, node);
-      if (name.type === 'identifier' && structTypes.aliases?.has(name.text)) {
+      if (
+        name.type === 'identifier' &&
+        structTypes.aliases?.has(name.text) &&
+        !hidesTypedef(name, name.text)
+      ) {
         if (name.startIndex < structTypes.aliasPositions.get(name.text))
-          throw unsupported(name, `typedef '${name.text}' is not declared yet`);
+          throw invalidAt(name, `typedef '${name.text}' is not declared yet`);
         const def = structTypes[structTypes.aliases.get(name.text)];
         return withLoc({ kind: 'SizeofType', type: { ...def, alias: name.text } }, node);
       }

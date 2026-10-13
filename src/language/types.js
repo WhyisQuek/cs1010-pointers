@@ -5,6 +5,7 @@
  * struct without embedding the whole definition recursively. Program/state
  * registries retain the complete struct definitions.
  */
+import { INVALID, LIMIT, diagnostic } from './diagnostics.js';
 import { MAX_ARRAY_LENGTH, MAX_OBJECT_SCALARS } from './limits.js';
 
 /**
@@ -18,7 +19,10 @@ export const primitive = name =>
 export const pointer = to => ({ kind: 'pointer', to: structuredClone(to) });
 export const array = (of, length) => {
   if (!Number.isSafeInteger(length) || length < 1 || length > MAX_ARRAY_LENGTH) {
-    throw new Error(`array length must be between 1 and ${MAX_ARRAY_LENGTH}`);
+    throw diagnostic(
+      Number.isSafeInteger(length) && length < 1 ? INVALID : LIMIT,
+      `array length must be between 1 and ${MAX_ARRAY_LENGTH}`,
+    );
   }
   return { kind: 'array', of: structuredClone(of), length };
 };
@@ -31,6 +35,19 @@ export const structType = (name, fields) => ({
 
 export const INT = primitive('int');
 export const CHAR = primitive('char');
+export const VOID = Object.freeze({ kind: 'void' });
+export const isVoidPointer = type => type?.kind === 'pointer' && type.to?.kind === 'void';
+/**
+ * Heap storage from malloc that has no effective type yet (C23 6.5p6): only its size is
+ * known. Converting a pointer to it into a T * gives it type T (see execution/lvalues.js).
+ */
+export const block = bytes => ({ kind: 'block', bytes });
+export const isBlock = type => type?.kind === 'block';
+/** The alignment of every malloc block: the largest fundamental alignment under LP64. */
+export const MALLOC_ALIGNMENT = 16;
+/** The type of nullptr (C23 7.21.2): a scalar that is neither arithmetic nor a pointer. */
+export const NULLPTR_T = Object.freeze({ kind: 'nullptr_t' });
+export const isNullptrType = type => type?.kind === 'nullptr_t';
 
 /** Arithmetic types supported by the Mini-C subset, in editor display order. */
 export const PRIMITIVE_NAMES = Object.freeze([
@@ -49,22 +66,27 @@ export const PRIMITIVE_NAMES = Object.freeze([
 /** Bound the total storage of nested aggregates, not just each array dimension. */
 export function validateObjectType(type, structs = {}, visiting = new Set()) {
   if (isPointer(type) || isPrimitive(type)) return 1;
+  if (isBlock(type)) {
+    if (!Number.isInteger(type.bytes) || type.bytes < 1) throw new Error('invalid block size');
+    return 1;
+  }
   let count;
   if (isArray(type)) {
     if (!Number.isInteger(type.length) || type.length < 1 || type.length > MAX_ARRAY_LENGTH)
       throw new Error('invalid array length');
     count = type.length * validateObjectType(type.of, structs, visiting);
   } else if (isStruct(type)) {
-    if (visiting.has(type.name)) throw new Error(`recursive by-value struct '${type.name}'`);
+    if (visiting.has(type.name))
+      throw diagnostic(INVALID, `recursive by-value struct '${type.name}'`);
     const fields = resolveStructType(type, structs).fields;
-    if (!fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
+    if (!fields?.length) throw diagnostic(INVALID, `incomplete or empty struct '${type.name}'`);
     count = fields.reduce(
       (n, f) => n + validateObjectType(f.type, structs, new Set([...visiting, type.name])),
       0,
     );
   } else throw new Error('unsupported object type');
   if (count > MAX_OBJECT_SCALARS)
-    throw new Error(`object exceeds ${MAX_OBJECT_SCALARS} scalar subobjects`);
+    throw diagnostic(LIMIT, `object exceeds ${MAX_OBJECT_SCALARS} scalar subobjects`);
   return count;
 }
 
@@ -75,6 +97,8 @@ export function typeEquals(a, b) {
   if (a.kind === 'array') return a.length === b.length && typeEquals(a.of, b.of);
   // C named-struct compatibility is based on the tag, not a deep recursive comparison.
   if (a.kind === 'struct') return a.name === b.name;
+  if (a.kind === 'void' || a.kind === 'nullptr_t') return true;
+  if (a.kind === 'block') return a.bytes === b.bytes;
   return false;
 }
 
@@ -118,15 +142,18 @@ export function layoutOf(type, structTypes = {}, visiting = new Set()) {
         throw new Error(`sizeof(${type.name}) is not defined in PointerViz Mini-C`);
     }
   }
-  if (type.kind === 'pointer') return { size: 8, alignment: 8 };
+  // nullptr_t has the size and alignment of a pointer to char (C23 7.21.2p2).
+  if (type.kind === 'pointer' || type.kind === 'nullptr_t') return { size: 8, alignment: 8 };
+  if (type.kind === 'block') return { size: type.bytes, alignment: MALLOC_ALIGNMENT };
   if (type.kind === 'array') {
     const element = layoutOf(type.of, structTypes, visiting);
     return { size: type.length * element.size, alignment: element.alignment };
   }
   if (type.kind === 'struct') {
     const def = resolveStructType(type, structTypes);
-    if (!def.fields?.length) throw new Error(`incomplete or empty struct '${type.name}'`);
-    if (visiting.has(type.name)) throw new Error(`recursive by-value struct '${type.name}'`);
+    if (!def.fields?.length) throw diagnostic(INVALID, `incomplete or empty struct '${type.name}'`);
+    if (visiting.has(type.name))
+      throw diagnostic(INVALID, `recursive by-value struct '${type.name}'`);
     let offset = 0,
       alignment = 1;
     const fields = [];
@@ -139,7 +166,8 @@ export function layoutOf(type, structTypes = {}, visiting = new Set()) {
     }
     return { size: alignUp(offset, alignment), alignment, fields };
   }
-  throw new Error(`sizeof unsupported type ${JSON.stringify(type)}`);
+  // Reached for sizeof(void) and other incomplete types (C23 6.5.3.4p1).
+  throw diagnostic(INVALID, `sizeof unsupported type ${JSON.stringify(type)}`);
 }
 
 const alignUp = (n, alignment) => Math.ceil(n / alignment) * alignment;
@@ -154,6 +182,8 @@ export function typeToString(type) {
   if (type.kind === 'array') return `${typeToString(type.of)} [${type.length}]`;
   if (type.kind === 'struct') return type.alias ?? `struct ${type.name ?? '<anonymous>'}`;
   if (type.kind === 'void') return 'void';
+  if (type.kind === 'nullptr_t') return 'nullptr_t';
+  if (type.kind === 'block') return `${type.bytes}-byte block`;
   return '<unknown>';
 }
 

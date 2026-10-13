@@ -1,4 +1,5 @@
 /** Explicit LP64 arithmetic; never silently round a 64-bit integer in JavaScript. */
+import { INVALID, LIMIT, UNDEFINED, diagnostic } from './diagnostics.js';
 import { INT, primitive } from './types.js';
 
 const bits = {
@@ -40,40 +41,55 @@ function integerRange(type) {
   };
 }
 
+/**
+ * Integer values are stored exactly: as a number while that is exact, otherwise as a
+ * BigInt (64-bit values beyond 2^53). Each value has one representation, so `===` works.
+ */
+export function exactInteger(n) {
+  return n >= BigInt(Number.MIN_SAFE_INTEGER) && n <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(n)
+    : n;
+}
+
+/** Compare two stored numeric values, which may mix numbers and BigInts. */
+export function compareValues(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Parse an edited diagram value without silently truncating or wrapping it. */
 export function scalarFromInput(text, type) {
-  const n = Number(text);
-  if (!String(text).trim() || !Number.isFinite(n)) throw new Error(`'${text}' is not a number`);
+  const trimmed = String(text).trim();
+  const n = Number(trimmed);
+  if (!trimmed || !Number.isFinite(n)) throw new Error(`'${text}' is not a number`);
   if (isFloatingType(type)) return convertNumber(n, type);
-  if (!Number.isInteger(n)) throw new Error(`${type.name} values must be whole numbers`);
+  if (!/^[+-]?\d+$/.test(trimmed)) throw new Error(`${type.name} values must be whole numbers`);
+  // Parse digits exactly: Number() would round values beyond 2^53.
+  const exact = BigInt(trimmed);
   const { min, max } = integerRange(type);
-  if (BigInt(n) < min || BigInt(n) > max)
-    throw new Error(`${n} is outside the range of ${type.name}`);
-  return convertNumber(n, type);
+  if (exact < min || exact > max)
+    throw new Error(`${trimmed} is outside the range of ${type.name}`);
+  return convertNumber(exact, type);
 }
 
 export function convertNumber(value, type, { arithmetic = false, fromFloat = false } = {}) {
   if (isFloatingType(type)) {
     const n = type.name === 'float' ? Math.fround(Number(value)) : Number(value);
     if (!Number.isFinite(n))
-      throw new Error('floating-point result outside the supported finite range');
+      throw diagnostic(LIMIT, 'floating-point result outside the supported finite range');
     return n;
   }
   if (!isIntegerType(type)) throw new Error(`unsupported numeric type ${type.name}`);
   // C 6.3.1.2: any scalar converts to bool as "compares unequal to 0", never by truncation.
   if (isBoolType(type)) return Number(value) === 0 ? 0 : 1;
-  if (
-    typeof value !== 'bigint' &&
-    (!Number.isFinite(value) || !Number.isSafeInteger(Math.trunc(value)))
-  ) {
-    throw new Error(
-      'integer exceeds the exact JavaScript safe-integer range supported by PointerViz',
-    );
-  }
+  // Only a floating value can be non-finite; converting it to an integer is undefined.
+  if (typeof value !== 'bigint' && !Number.isFinite(value))
+    throw diagnostic(UNDEFINED, 'floating-to-integer conversion outside destination range');
+  // A number here is either exact or a double, whose integral part BigInt converts exactly.
   let n = typeof value === 'bigint' ? value : BigInt(Math.trunc(value));
   const { unsigned, width, min, max } = integerRange(type);
   if ((fromFloat || (arithmetic && !unsigned)) && (n < min || n > max)) {
-    throw new Error(
+    throw diagnostic(
+      UNDEFINED,
       fromFloat
         ? 'floating-to-integer conversion outside destination range'
         : `signed integer overflow in ${type.name}`,
@@ -81,21 +97,16 @@ export function convertNumber(value, type, { arithmetic = false, fromFloat = fal
   }
   // Choose the common two's-complement result for implementation-defined signed narrowing.
   n = unsigned ? BigInt.asUintN(Number(width), n) : BigInt.asIntN(Number(width), n);
-  if (n < BigInt(Number.MIN_SAFE_INTEGER) || n > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error(
-      'integer exceeds the exact JavaScript safe-integer range supported by PointerViz',
-    );
-  }
-  return Number(n);
+  return exactInteger(n);
 }
 
 export function numericOperation(op, left, right) {
   const type = arithmeticType(left.type, right.type);
   const floating = isFloatingType(type);
-  if (op === '%' && floating) throw new Error('remainder requires integer operands');
+  if (op === '%' && floating) throw diagnostic(INVALID, 'remainder requires integer operands');
   let a = convertNumber(left.value.value, type),
     b = convertNumber(right.value.value, type);
-  if ((op === '/' || op === '%') && b === 0) throw new Error('division by zero');
+  if ((op === '/' || op === '%') && b === 0) throw diagnostic(UNDEFINED, 'division by zero');
   if (!floating) {
     a = BigInt(a);
     b = BigInt(b);
@@ -107,7 +118,7 @@ export function numericOperation(op, left, right) {
     a === -(1n << BigInt(bits[type.name] - 1)) &&
     b === -1n
   )
-    throw new Error('signed integer overflow in division');
+    throw diagnostic(UNDEFINED, 'signed integer overflow in division');
   const n =
     op === '+' ? a + b : op === '-' ? a - b : op === '*' ? a * b : op === '/' ? a / b : a % b;
   return { type, value: { kind: 'scalar', value: convertNumber(n, type, { arithmetic: true }) } };

@@ -8,6 +8,7 @@ import MemoryCanvas from './MemoryCanvas.jsx';
 import { CodePanel } from './CodePanel.jsx';
 import Workbench from './Workbench.jsx';
 import { interpret } from '../pipeline/interpreter.js';
+import { describeError } from '../language/diagnostics.js';
 import { drawingIssues, equivalent } from '../pipeline/equivalence.js';
 import { makeState } from '../machine/memory.js';
 import {
@@ -147,7 +148,7 @@ function ChallengeRunner({ level, onExit, onNext }) {
     try {
       return { state: interpret(level.code).state, error: null };
     } catch (e) {
-      return { state: null, error: e.message };
+      return { state: null, error: describeError(e) };
     }
   }, [level]);
   // The student's diagram knows the level's struct types, so struct objects can be drawn.
@@ -223,7 +224,7 @@ function ChallengeRunner({ level, onExit, onNext }) {
       student = isC2D ? studentState : interpret(studentCode).state;
     } catch (e) {
       setBadIds(new Set());
-      setVerdict({ pass: false, failure: 'crash', diffs: [e.message], attempt });
+      setVerdict({ pass: false, failure: 'crash', diffs: [describeError(e)], attempt });
       return;
     }
     // equivalent() throws only when the level's own target is invalid, not the answer.
