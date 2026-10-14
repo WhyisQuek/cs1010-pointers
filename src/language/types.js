@@ -304,7 +304,7 @@ export function validIdentifier(name) {
 }
 
 /** Names PointerViz implements itself; programs and diagrams may not redefine them. */
-export const LIBRARY_NAMES = Object.freeze(new Set(['NULL', 'malloc', 'free', 'printf']));
+export const LIBRARY_NAMES = Object.freeze(new Set(['NULL', 'malloc', 'calloc', 'free', 'printf']));
 
 /** Why `name` cannot name a variable, or null. Struct typedef names are taken too. */
 export function variableNameError(name, structTypes = {}) {

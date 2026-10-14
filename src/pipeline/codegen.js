@@ -436,8 +436,10 @@ function canAllocateThrough(heap, pointerType) {
   return isBlock(heap.type) || typeEquals(pointerType, heapBasePointerType(heap));
 }
 function mallocExpr(heap, state) {
-  // Untyped blocks, and typed blocks with trailing bytes, keep their exact request.
-  if (isBlock(heap.type)) return `malloc(${heap.type.bytes})`;
+  // Untyped blocks, and typed blocks with trailing bytes, keep their exact request. An untyped
+  // calloc block stays zero-filled; a typed one's values are assigned like any other block's.
+  if (isBlock(heap.type))
+    return heap.zeroFilled ? `calloc(${heap.type.bytes}, 1)` : `malloc(${heap.type.bytes})`;
   if (heap.requestedBytes && heap.requestedBytes !== sizeOf(heap.type, state.structTypes))
     return `malloc(${heap.requestedBytes})`;
   return isArray(heap.type)

@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 import { initParser, interpret } from '../src/pipeline/interpreter.js';
 import { generate } from '../src/pipeline/codegen.js';
 import { fromJSON, toJSON } from '../src/data/json.js';
-import { INVALID, UNDEFINED, UNSUPPORTED, diagnosticKind } from '../src/language/diagnostics.js';
+import {
+  INVALID,
+  LIMIT,
+  UNDEFINED,
+  UNSUPPORTED,
+  diagnosticKind,
+} from '../src/language/diagnostics.js';
 
 await initParser({
   runtimeWasm: './node_modules/web-tree-sitter/tree-sitter.wasm',
@@ -152,6 +158,31 @@ const values = [
     ),
     1,
   ],
+  // calloc zero-fills its block (7.24.3.2p2).
+  ['calloc array starts at zero', inMain('int *p=calloc(3,sizeof(int));int result=p[0]+p[2];'), 0],
+  ['calloc then write', inMain('int *p=calloc(2,sizeof(int));p[1]=4;int result=p[1];free(p);'), 4],
+  ['calloc double is zero', inMain('double *d=calloc(1,sizeof(double));int result=*d==0.0;'), 1],
+  [
+    'calloc struct members are zero and NULL',
+    inMain(
+      'struct N *n=calloc(1,sizeof(struct N));int result=n->v==0&&n->next==NULL;',
+      'struct N{int v;struct N *next;};',
+    ),
+    1,
+  ],
+  [
+    'calloc block typed later is still zero',
+    inMain('void *v=calloc(4,2);int *p=v;int result=p[1];free(v);'),
+    0,
+  ],
+  ['calloc with a zero count', inMain('int *p=calloc(0,4);int result=p==NULL;'), 1],
+  ['calloc with a zero size', inMain('int *p=calloc(4,0);int result=p==NULL;'), 1],
+  [
+    'calloc whose product overflows size_t',
+    inMain('int *p=calloc(9223372036854775807L,4);int result=p==NULL;'),
+    1,
+  ],
+  ['discarded calloc result', inMain('calloc(1,4);int result=1;'), 1],
   // L3: a struct that is never defined can still be pointed to.
   ['pointer to an undefined struct', inMain('struct Missing *p=0;int result=p==NULL;'), 1],
   ['size of a pointer to an undefined struct', inMain('int result=sizeof(struct Missing *);'), 8],
@@ -165,6 +196,13 @@ const values = [
 for (const [name, source, expected] of values)
   test(name, () => assert.equal(result(source), expected));
 
+test('Generate C keeps an untyped calloc block zero-filled', () => {
+  const c = generate(interpret(inMain('void *v=calloc(2,4);')).state);
+  assert.match(c, /v = calloc\(8, 1\);/);
+  const regenerated = c.replace(/return 0;\s*}\s*$/, 'int *p=v;int result=p[1];return 0;}');
+  assert.equal(result(regenerated), 0);
+});
+
 const errors = [
   // Phase 2.
   ['object of type void', inMain('void x;'), INVALID],
@@ -176,6 +214,11 @@ const errors = [
   ['empty initializer cannot size an array', inMain('int a[]={};'), INVALID],
   ['pointer argument to malloc', inMain('int x;void *v=malloc(&x);'), INVALID],
   ['block too small for its type', inMain('int *p=malloc(1);int n=*p;'), UNDEFINED],
+  ['calloc with one argument', inMain('int *p=calloc(4);'), INVALID],
+  ['pointer argument to calloc', inMain('int x;int *p=calloc(1,&x);'), INVALID],
+  ['calloc cannot name a variable', inMain('int calloc=1;'), UNSUPPORTED],
+  ['calloc over the byte limit', inMain('char *p=calloc(16385,1);'), LIMIT],
+  ['unsequenced calloc arguments', inMain('int i=1;int *p=calloc(i++,i);'), UNDEFINED],
   ['negative floating malloc size', inMain('void *v=malloc(-1.0);'), UNDEFINED],
   ['freeing an interior pointer', inMain('int *p=malloc(8);free(p+1);'), UNDEFINED],
   ['double free through void *', inMain('void *v=malloc(8);free(v);free(v);'), UNDEFINED],

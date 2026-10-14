@@ -45,7 +45,6 @@ const UNPROVIDED_STANDARD_NAMES = new Set([
   'abs',
   'aligned_alloc',
   'assert',
-  'calloc',
   'exit',
   'free_sized',
   'memcpy',
@@ -336,6 +335,12 @@ export function checkProgram(program) {
           if (s.names.has(e.name)) fail(e, `called object '${e.name}' is not a function`);
         if (e.name === 'printf') return printf(e, env);
         const args = e.arguments.map(a => expression(a, env));
+        if (e.name === 'calloc') {
+          if (args.length !== 2) fail(e, 'calloc expects exactly two arguments');
+          // Both sizes convert to size_t like any prototyped argument (C23 6.5.2.2p7).
+          if (!args.every(isPrimitive)) fail(e, 'calloc sizes must be numbers');
+          return pointer({ kind: 'void' });
+        }
         if (e.name === 'malloc' || e.name === 'free') {
           if (args.length !== 1) fail(e, `${e.name} expects exactly one argument`);
           if (e.name === 'malloc') {

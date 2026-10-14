@@ -1,4 +1,4 @@
-/** Function invocation with explicit call frames, and the malloc/free/printf built-ins. */
+/** Function invocation with explicit call frames, and the malloc/calloc/free/printf built-ins. */
 import { INVALID, LIMIT, UNDEFINED, diagnostic } from '../../language/diagnostics.js';
 import { MAX_CALL_DEPTH, MAX_HEAP_BYTES } from '../../language/limits.js';
 import { SIZE_T, convertNumber, isFloatingType } from '../../language/numeric.js';
@@ -97,37 +97,64 @@ export function callFunction(ctx, fn, args, callerFrame, entry = false) {
   return coerceRValue(fn.returnType, returnValue, fn, ctx);
 }
 
+/** A size argument converts to size_t like any prototyped parameter (C23 6.5.2.2p7). */
+function sizeArgument(arg, ctx, env, frame) {
+  const rv = evalExpression(arg, ctx, env, frame, SIZE_T);
+  requireNumber(rv, arg);
+  return BigInt(convertNumber(rv.value.value, SIZE_T, { fromFloat: isFloatingType(rv.type) }));
+}
+
+/** An untyped heap block; it has no type until a pointer to it is converted to T * (lvalues.js). */
+function allocateBlock(expr, bytes, ctx, { zeroFilled = false } = {}) {
+  // Implementation-defined for a zero size (C23 7.24.3p1): PointerViz returns NULL.
+  if (bytes === 0n) return { type: pointer(VOID), value: { kind: 'null' } };
+  if (bytes > BigInt(MAX_HEAP_BYTES))
+    throw semanticError(
+      expr,
+      `${expr.name} of ${bytes} bytes exceeds PointerViz's limit of ${MAX_HEAP_BYTES} bytes per block`,
+      LIMIT,
+    );
+  const allocation = addAllocation(ctx.state, {
+    type: block(Number(bytes)),
+    storage: { kind: 'heap' },
+    alive: true,
+  });
+  if (zeroFilled) allocation.zeroFilled = true;
+  pushTrace(ctx, {
+    kind: 'Allocate',
+    allocationId: allocation.id,
+    bytes: Number(bytes),
+    zeroFilled,
+    line: expr.loc?.startLine ?? null,
+  });
+  return { type: pointer(VOID), value: pointerValue(ref(allocation.id, [])) };
+}
+
 export function evalCall(expr, ctx, env, frame) {
   if (expr.name === 'malloc') {
     if (expr.arguments.length !== 1)
       throw semanticError(expr, 'malloc expects exactly one argument', INVALID);
-    const sizeRv = evalExpression(expr.arguments[0], ctx, env, frame, SIZE_T);
-    requireNumber(sizeRv, expr.arguments[0]);
-    // The argument converts to size_t like any prototyped parameter (C23 6.5.2.2p7).
-    const bytes = convertNumber(sizeRv.value.value, SIZE_T, {
-      fromFloat: isFloatingType(sizeRv.type),
-    });
-    // Implementation-defined for a zero size (C23 7.24.3p1): PointerViz returns NULL.
-    if (bytes === 0) return { type: pointer(VOID), value: { kind: 'null' } };
-    if (typeof bytes === 'bigint' || bytes > MAX_HEAP_BYTES)
-      throw semanticError(
-        expr,
-        `malloc(${bytes}) exceeds PointerViz's limit of ${MAX_HEAP_BYTES} bytes per block`,
-        LIMIT,
-      );
-    // The block has no type until a pointer to it is converted to T * (lvalues.js).
-    const allocation = addAllocation(ctx.state, {
-      type: block(bytes),
-      storage: { kind: 'heap' },
-      alive: true,
-    });
-    pushTrace(ctx, {
-      kind: 'Allocate',
-      allocationId: allocation.id,
-      bytes,
-      line: expr.loc?.startLine ?? null,
-    });
-    return { type: pointer(VOID), value: pointerValue(ref(allocation.id, [])) };
+    return allocateBlock(expr, sizeArgument(expr.arguments[0], ctx, env, frame), ctx);
+  }
+
+  if (expr.name === 'calloc') {
+    if (expr.arguments.length !== 2)
+      throw semanticError(expr, 'calloc expects exactly two arguments', INVALID);
+    const counts = [];
+    const argumentAccesses = [];
+    for (const arg of expr.arguments) {
+      const start = ctx.accesses.length;
+      counts.push(sizeArgument(arg, ctx, env, frame));
+      const accesses = ctx.accesses.slice(start);
+      for (const previous of argumentAccesses) checkUnsequenced(previous, accesses, ctx, expr);
+      argumentAccesses.push(accesses);
+    }
+    for (const accesses of argumentAccesses) for (const access of accesses) access.update = false;
+    const bytes = counts[0] * counts[1];
+    // A product size_t cannot represent fails, returning NULL (C23 7.24.3.2p3).
+    if (bytes > (1n << 64n) - 1n) return { type: pointer(VOID), value: { kind: 'null' } };
+    // calloc's storage is all bits zero (C23 7.24.3.2p2).
+    return allocateBlock(expr, bytes, ctx, { zeroFilled: true });
   }
 
   if (expr.name === 'printf') return evalPrintf(expr, ctx, env, frame);

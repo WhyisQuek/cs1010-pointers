@@ -80,7 +80,7 @@ const cases = [
   ['C23 binary literal', inMain('int x=0b101;'), UNSUPPORTED],
   ['C23 typeof', inMain('typeof(1) x=2;'), UNSUPPORTED],
   ['C23 static_assert', inMain('static_assert(1);'), UNSUPPORTED],
-  ['unprovided library function', inMain('int *p=calloc(1, sizeof(int));'), UNSUPPORTED],
+  ['unprovided library function', inMain('int *p=NULL;p=realloc(p, sizeof(int));'), UNSUPPORTED],
   [
     'reading an int as unsigned through void *',
     inMain('int x=1;void *v=&x;unsigned int *u=v;unsigned int y=*u;'),

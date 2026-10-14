@@ -7,7 +7,7 @@
  * Executed statements emit trace events and snapshots for step-through playback.
  *
  * The implementation lives in ./execution/, one module per concern:
- *   calls.js             function calls, call frames, malloc/free
+ *   calls.js             function calls, call frames, malloc/calloc/free
  *   output.js            printf and the program's standard output
  *   statements.js        statements, declarations and initializers
  *   expressions.js       expression evaluation

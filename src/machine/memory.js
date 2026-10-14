@@ -98,6 +98,29 @@ export function makeDefaultValue(type, structTypes = {}) {
   throw new Error(`cannot initialize value for ${typeToString(type)}`);
 }
 
+/**
+ * The value all-bits-zero storage holds once typed: 0, 0.0, false, or a null pointer (null
+ * is all bits zero on every LP64 target PointerViz models).
+ */
+export function makeZeroValue(type, structTypes = {}) {
+  if (isPrimitive(type)) return { kind: 'scalar', value: 0 };
+  if (isPointer(type)) return { kind: 'null' };
+  if (isArray(type))
+    return {
+      kind: 'aggregate',
+      elements: Array.from({ length: type.length }, () => makeZeroValue(type.of, structTypes)),
+    };
+  if (isStruct(type)) {
+    const def = resolveStructType(type, structTypes);
+    if (!def.fields) throw new Error(`unknown struct '${type.name}'`);
+    return {
+      kind: 'aggregate',
+      fields: Object.fromEntries(def.fields.map(f => [f.name, makeZeroValue(f.type, structTypes)])),
+    };
+  }
+  throw new Error(`cannot zero value for ${typeToString(type)}`);
+}
+
 export function addAllocation(
   state,
   {
@@ -309,7 +332,8 @@ export const heapAllocationType = (elementType, count) =>
 
 /**
  * Give an untyped malloc block its effective type (C23 6.5p6): as many whole `elementType`
- * objects as fit. Returns a reference to the first, or null when not even one fits.
+ * objects as fit. Returns a reference to the first, or null when not even one fits. A calloc
+ * block's zero bytes become zero values; a malloc block's stay indeterminate.
  */
 export function typeHeapBlock(state, allocation, elementType) {
   const count = Math.floor(allocation.type.bytes / sizeOf(elementType, state.structTypes));
@@ -318,7 +342,10 @@ export function typeHeapBlock(state, allocation, elementType) {
   validateObjectType(type, state.structTypes);
   allocation.requestedBytes = allocation.type.bytes;
   allocation.type = type;
-  allocation.value = makeDefaultValue(type, state.structTypes);
+  allocation.value = allocation.zeroFilled
+    ? makeZeroValue(type, state.structTypes)
+    : makeDefaultValue(type, state.structTypes);
+  delete allocation.zeroFilled;
   return ref(allocation.id, count === 1 ? [] : [0]);
 }
 

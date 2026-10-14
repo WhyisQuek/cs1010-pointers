@@ -44,6 +44,9 @@ const programs = [
   // The same inside a heap block: the interior field comes before the base field.
   'struct P { int v; }; struct H { int *in; struct P *base; }; int main(void) { struct H *h = malloc(sizeof(struct H)); h->base = malloc(sizeof(struct P)); h->base->v = 3; h->in = &h->base->v; return 0; }',
   'struct S { bool flag; size_t count; }; int main(void) { struct S s = {true, 3}; size_t *p = malloc(sizeof(size_t)); *p = 9; }',
+  'struct N { int v; struct N *next; }; int main(void) { struct N *n = calloc(2, sizeof(struct N)); n[1].v = 5; }',
+  // An untyped calloc block keeps its zero fill when regenerated.
+  'int main(void) { void *v = calloc(2, 4); }',
 ];
 
 await initParser({

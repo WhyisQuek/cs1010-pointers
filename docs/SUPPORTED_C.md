@@ -136,6 +136,7 @@ Supported:
 
 - `malloc` anywhere an expression may appear, including discarded results, `free(malloc(n))` and comparisons;
 - heap arrays through `malloc(n * sizeof(T))`, including pointer-to-array destinations;
+- `calloc(n, size)`, wherever `malloc` may appear;
 - `void *` holding any object pointer, and converting back to the original type;
 - `free`, through any pointer to the start of the block (for example a pointer to its first struct member);
 - `free(NULL)` / `free(0)`;
@@ -144,6 +145,8 @@ Supported:
 - dangling aliases after `free`.
 
 `malloc` returns a `void *` to an **untyped block** of the requested size, shown in the diagram as an `n-byte block`. The size may be any arithmetic value; it converts to `size_t`. The block takes a type the first time a pointer to it is converted to `T *` (C23's effective-type rule, 6.5p6). It then holds as many whole `T` objects as fit, so `malloc(5)` converted to `int *` holds one `int` and one unused byte. If not even one `T` fits, the block stays untyped and dereferencing the pointer is undefined behavior. A `void *` converted back to `T *` designates the `T` object at that address. Reading an object through a pointer to a different type is diagnosed: as undefined behavior in general, or as not supported for the cases C allows but PointerViz does not model (character access, and the signed/unsigned twin of the type).
+
+`calloc(n, size)` allocates an untyped block of `n * size` bytes, like `malloc`, but every byte is zero: when the block takes a type, each object starts as `0`, `0.0`, `false` or a null pointer instead of uninitialized. Both arguments convert to `size_t`. If either is zero it returns `NULL`, like `malloc(0)`; if their product does not fit in `size_t` it returns `NULL`, as C requires.
 
 `free` returns `void`. A dangling pointer remains visible as diagnostic history; evaluating it again is rejected (a repeated `free` reports double free). `malloc` always succeeds within the configured limits, and `malloc(0)` returns `NULL` ([Implementation choices](#implementation-choices)). Allocation failure is not simulated, so a program never sees `malloc` return `NULL` for a nonzero size. **Generate C** cannot yet reproduce a heap block reached only through a pointer to a whole array (`int (*p)[2] = malloc(...)`); such programs still run and display normally.
 
@@ -160,7 +163,7 @@ Supported:
 - character and integer literals;
 - `NULL`, zero and `nullptr` as null pointer constants in pointer context.
 
-`NULL`, `malloc`, `free` and `printf` are reserved: they cannot name a function, variable or parameter, in code or in a diagram. (C reserves the library functions as external names; PointerViz also forbids them as local names so every program state can be regenerated as C.) A diagram variable also cannot reuse a struct typedef name.
+`NULL`, `malloc`, `calloc`, `free` and `printf` are reserved: they cannot name a function, variable or parameter, in code or in a diagram. (C reserves the library functions as external names; PointerViz also forbids them as local names so every program state can be regenerated as C.) A diagram variable also cannot reuse a struct typedef name.
 
 `NULL` is predefined as integer constant `0`. A variable whose value happens to be zero is not a null pointer constant. `sizeof` returns an unsigned-long `size_t`; pointer subtraction returns signed-long `ptrdiff_t`. Character constants have type `int`. `true` and `false` are constants of type `bool` (so `sizeof(true)` is 1); they promote to `int` in arithmetic. Because they are not integer constants, `int *p = false;` is invalid, as in C23.
 
@@ -211,7 +214,7 @@ PointerViz executes in the browser, so the semantic layer enforces limits even w
 |---|---:|
 | Array elements | 64 |
 | Heap elements per allocation | 64 |
-| Bytes requested by one `malloc` | 16384 |
+| Bytes requested by one `malloc` or `calloc` | 16384 |
 | Struct fields | 32 |
 | Call depth | 32 |
 | Iterations per loop | 256 |
@@ -224,9 +227,9 @@ A loop that exceeds 256 iterations is stopped with an error. This prevents accid
 ## Other unsupported C features
 
 - casts;
-- `calloc`, `realloc`;
+- `realloc`;
 - macros and real preprocessing;
-- standard-library calls other than `malloc`, `free` and `printf`;
+- standard-library calls other than `malloc`, `calloc`, `free` and `printf`;
 - string literals outside `printf` and other C string semantics;
 - VLAs;
 - `long long`, unsigned char/short, long double, wide/multicharacter constants and hexadecimal floating literals;
@@ -247,6 +250,7 @@ C23 leaves these to the implementation (Annex J.3 lists what an implementation m
 | Struct layout | Members at natural alignment, tail padding to the largest member alignment | 6.7.2.1 |
 | Order of evaluation | Operands and arguments are evaluated left to right. Where C leaves the order unspecified, conflicting unsequenced accesses are still diagnosed as undefined behavior. | 6.5p2–3, 6.5.2.2p8 |
 | `malloc` | Every block is aligned to 16 bytes, the largest fundamental alignment, so converting its pointer to any object pointer type is defined. A nonzero request always succeeds within the [safety limits](#safety-limits). `malloc(0)` returns `NULL` (glibc instead returns a unique pointer). | 7.24.3p1 |
+| `calloc` | As `malloc`; a zero count or size returns `NULL`. A null pointer is all bits zero, so pointers in a `calloc` block start as `NULL`. | 7.24.3.2, 6.2.6.1 |
 | Lifetime ends | Expired stack frames and freed blocks stay visible as dead objects; any use of a pointer to them is diagnosed | 6.2.4p2 |
 | Optional features | Not provided: variable-length arrays, atomics, threads, complex numbers, decimal floating point | 6.10.9.3 (`__STDC_NO_VLA__` and related macros) |
 
