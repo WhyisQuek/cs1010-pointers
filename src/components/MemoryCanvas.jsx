@@ -403,6 +403,8 @@ export default function MemoryCanvas({
     setSelectedEdgeId(null);
     setMenu(null);
     setInspection(null);
+    // The focused menu item is about to unmount; move focus now so an immediate Ctrl+Z lands.
+    wrap.current?.focus({ preventScroll: true });
     emit(empty);
     setEditedPreviousState(null);
     notify({ kind: 'ok', text: 'Cleared the diagram. Ctrl+Z restores it.' });
