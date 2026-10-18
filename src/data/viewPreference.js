@@ -4,11 +4,16 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-/** Every preset draws the same boxes at the same size; only what is shown in them changes. */
+/**
+ * The first three presets draw the same boxes at the same size; only what is shown in them
+ * changes. Structure redraws lists and trees as compact nodes in their own shape, so it lays
+ * the canvas out afresh at every step; editable diagrams show it as Arrows.
+ */
 export const VIEW_MODES = Object.freeze([
   { id: 'both', label: 'Both' },
   { id: 'arrows', label: 'Arrows' },
   { id: 'addresses', label: 'Addresses' },
+  { id: 'structure', label: 'Structure', readOnly: true },
 ]);
 
 /** How char objects read: the stored number, or the character it encodes. */

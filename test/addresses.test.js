@@ -138,6 +138,7 @@ test('null, uninitialized, malformed, dangling and one-past addresses remain dis
     });
     assert.equal(describePointer(s, p.value).status, 'invalid');
     assert.doesNotThrow(() => stateToFlow(s));
+    assert.doesNotThrow(() => stateToFlow(s, { structure: true }));
   }
   const end = pointerValue(ref(a.id, ['$onePast']));
   assert.equal(describePointer(s, end).address, a.baseAddress + 4);

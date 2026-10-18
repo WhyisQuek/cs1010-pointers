@@ -59,6 +59,8 @@ export default function MemoryCanvas({
   onMessage,
   // Passed to the inspector: how to get struct types into a diagram that has none.
   structHint = null,
+  // Structure view: heap objects to mark unreachable, when the caller knows the whole run.
+  unreachable = null,
 }) {
   const state = useMemo(
     () => (rawState.addressSpace ? rawState : upgradeMemoryState(rawState)),
@@ -131,9 +133,17 @@ export default function MemoryCanvas({
   const [measurements, setMeasurements] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
-  const [view, setView] = useViewPreference();
+  const [preferredView, setView] = useViewPreference();
+  // Structure view is read-only; an editable diagram keeps its editing tools in Arrows.
+  const view =
+    editable && VIEW_MODES.find(m => m.id === preferredView)?.readOnly ? 'arrows' : preferredView;
+  const structure = view === 'structure';
   const [chars, setChars] = useCharPreference();
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  // Structure view: every recursive call shown instead of folded, and the stack variable
+  // whose line and cursor label are highlighted together while hovered.
+  const [unfold, setUnfold] = useState(false);
+  const [linkedLocal, setLinkedLocal] = useState(null);
   const { nodes, edges } = useMemo(() => {
     const result = stateToFlow(state, {
       ...history.present,
@@ -141,6 +151,10 @@ export default function MemoryCanvas({
       badIds: badIds ?? new Set(),
       showExpired,
       previousState: previousState ?? (editable ? editedPreviousState : null),
+      structure,
+      chars,
+      unfold,
+      unreachable,
     });
     result.nodes = result.nodes.map(n => ({
       ...n,
@@ -171,12 +185,18 @@ export default function MemoryCanvas({
     selectedEdgeId,
     editedPreviousState,
     view,
+    structure,
+    chars,
+    unfold,
+    unreachable,
   ]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   useEffect(() => {
+    // Structure view's positions are computed, never remembered: the other views keep theirs.
+    if (structure) return;
     dispatch({ type: 'sync', layout: captureLayout(historyRef.current.present, nodes) });
-  }, [nodes, dispatch]);
+  }, [nodes, dispatch, structure]);
 
   const emit = useCallback(
     next => {
@@ -440,6 +460,9 @@ export default function MemoryCanvas({
       ...n.data,
       view,
       chars,
+      linkedLocal,
+      onLink: setLinkedLocal,
+      onUnfold: () => setUnfold(true),
       onInspect: path => inspect(n.id, path),
       inspectedPath:
         inspection?.allocationId === n.id && selectedId === n.id ? inspection.path : undefined,
@@ -533,7 +556,8 @@ export default function MemoryCanvas({
           onNodeContextMenu={openMenu}
           onPaneContextMenu={event => openMenu(event)}
           onNodeClick={(_, node) => {
-            if (node.type === 'memoryAllocation') pendingReveal.current = node.id;
+            if (['memoryAllocation', 'structureNode', 'stackLocal'].includes(node.type))
+              pendingReveal.current = node.id;
           }}
           onPaneClick={() => {
             setMenu(null);
@@ -581,6 +605,7 @@ export default function MemoryCanvas({
         <div className="canvas-overlay">
           <ViewMenu
             view={view}
+            editable={editable}
             chars={chars}
             open={viewMenuOpen}
             onOpenChange={setViewMenuOpen}
@@ -610,6 +635,11 @@ export default function MemoryCanvas({
               onClick={() => setShowExpired(v => !v)}
             >
               {showExpired ? 'Hide out-of-scope memory' : `Show out-of-scope (${hiddenCount})`}
+            </button>
+          )}
+          {structure && unfold && (
+            <button className="plain-btn canvas-chip" onClick={() => setUnfold(false)}>
+              Fold recursive calls
             </button>
           )}
         </div>
@@ -697,7 +727,7 @@ export default function MemoryCanvas({
  * "View: Both ▾" with a menu of the three presets, plus how char values read.
  * The menu closes on outside clicks.
  */
-function ViewMenu({ view, chars, open, onOpenChange, onChange, onCharsChange }) {
+function ViewMenu({ view, editable, chars, open, onOpenChange, onChange, onCharsChange }) {
   const root = useRef(null);
   const toggle = useRef(null);
   useEffect(() => {
@@ -716,7 +746,7 @@ function ViewMenu({ view, chars, open, onOpenChange, onChange, onCharsChange }) 
         className="plain-btn"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Choose whether the diagram shows addresses, arrows, or both, and how char values read"
+        title="Choose whether the diagram shows addresses, arrows, both, or lists and trees in their own shape, and how char values read"
         onClick={() => onOpenChange(!open)}
       >
         View: {current.label} ▾
@@ -731,6 +761,12 @@ function ViewMenu({ view, chars, open, onOpenChange, onChange, onCharsChange }) 
               key={mode.id}
               role="menuitemradio"
               aria-checked={mode.id === view}
+              disabled={editable && mode.readOnly}
+              title={
+                editable && mode.readOnly
+                  ? 'Structure view is for playback. Editing uses Arrows.'
+                  : undefined
+              }
               onClick={() => {
                 onChange(mode.id);
                 // The chosen item disappears with the menu; keep focus (and Escape, Ctrl+Z) in the canvas.

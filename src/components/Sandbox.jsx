@@ -11,6 +11,8 @@ import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../machine/memory.js';
 import { loadDraft, saveDraft } from '../data/drafts.js';
 import { pausedLine } from '../machine/navigation.js';
+import { leaksByStep } from '../flow/structureLayout.js';
+import { useViewPreference } from '../data/viewPreference.js';
 
 const STARTER = `int main(void) {
     int a = 10;
@@ -86,6 +88,13 @@ export default function Sandbox() {
   const shownSnapshot = snapshots && step > 0 ? snapshots[step - 1] : null;
   const shownState = snapshots ? (shownSnapshot?.state ?? emptyState) : state;
   const previousState = shownSnapshot ? (step > 1 ? snapshots[step - 2].state : emptyState) : null;
+  // Leaks need the whole run (see leaksByStep), so they are found once per run, and only
+  // while Structure view, which shows them, is chosen.
+  const [view] = useViewPreference();
+  const leaks = useMemo(
+    () => (snapshots && view === 'structure' ? leaksByStep(snapshots) : null),
+    [snapshots, view],
+  );
   const nextLine = snapshots?.length ? pausedLine(snapshots, step) : null;
 
   // Generates from the memory on screen, which during playback is the selected step.
@@ -205,6 +214,7 @@ export default function Sandbox() {
             key={canvasSession}
             state={shownState}
             previousState={previousState}
+            unreachable={leaks && shownSnapshot ? leaks[step - 1] : null}
             onChange={onDiagramEdit}
             editable={!snapshots}
             structHint="To use a struct, define it in the code and Run, then Edit a step."

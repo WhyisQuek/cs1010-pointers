@@ -10,7 +10,13 @@ import {
 } from '@xyflow/react';
 import { isArray, isPointer, isStruct, sizeOf, typeToString } from '../language/types.js';
 import { referenceLocation } from '../machine/addresses.js';
-import { allocationDisplayName, pointerCanTarget, ref, resolveRef } from '../machine/memory.js';
+import {
+  allocationDisplayName,
+  pointerCanTarget,
+  ref,
+  resolveRef,
+  scalarSubobjects,
+} from '../machine/memory.js';
 import {
   describePointer,
   formatAddress,
@@ -19,13 +25,17 @@ import {
   scalarText,
 } from './addressPresentation.js';
 import { allocationMetrics, handleId, memoryMetricsStyle, pathFromHandle } from './layout.js';
+import { NODE } from './structureLayout.js';
 
 function FrameGroupNode({ id, data, selected }) {
   return (
     <>
-      <div className="frame-group-label" title="Drag to move this call frame · Select to resize">
-        <strong>{data.frame.name}()</strong>
-        <span>{data.frame.active ? 'active' : 'returned'}</span>
+      <div
+        className="frame-group-label"
+        title={data.callLabel ? undefined : 'Drag to move this call frame · Select to resize'}
+      >
+        <strong>{data.callLabel ?? `${data.frame.name}()`}</strong>
+        <span>{data.running ? 'running' : data.frame.active ? 'active' : 'returned'}</span>
       </div>
       {selected && (
         <>
@@ -190,7 +200,8 @@ function MemoryAllocationNode({ id, data, selected }) {
   // Rows (or the whole object, "[]") that some pointer stores the address of.
   const targeted = path => targetPaths?.has(JSON.stringify(path));
   // Arrows hides numeric addresses; the boxes keep their size so changing view never overlaps them.
-  const showAddresses = view !== 'arrows';
+  // Structure view draws its other boxes the way Arrows does.
+  const showAddresses = view !== 'arrows' && view !== 'structure';
   const fromHandle = useConnection(connection => connection.fromHandle);
   const sourceType =
     fromHandle?.type === 'source'
@@ -342,6 +353,238 @@ function MemoryAllocationNode({ id, data, selected }) {
 function formatPath(path) {
   return path.map(x => (typeof x === 'number' ? `[${x}]` : `.${x}`)).join('');
 }
+
+/** Every path a pointer could target in an object: the whole, each member and each element. */
+function targetPaths(scalars) {
+  const seen = new Set(),
+    out = [];
+  for (const s of scalars)
+    for (let length = 0; length <= s.ref.path.length; length++) {
+      const path = s.ref.path.slice(0, length),
+        key = path.join('.');
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(path);
+      }
+    }
+  return out;
+}
+
+const slotKind = (state, value) => {
+  const d = describePointer(state, value);
+  return d.status === 'null'
+    ? 'null'
+    : d.status === 'uninitialized'
+      ? 'uninit'
+      : ['dangling', 'invalid'].includes(d.status)
+        ? 'dangling'
+        : 'ptr';
+};
+
+/** Hidden source and target handles on both sides of a one-line box, for edge geometry. */
+function SideHandles({ path = [] }) {
+  return ['left', 'right'].flatMap(side =>
+    ['src', 'tgt'].map(kind => (
+      <Handle
+        key={`${kind}-${side}`}
+        type={kind === 'src' ? 'source' : 'target'}
+        id={handleId(kind, path, side)}
+        position={side === 'left' ? Position.Left : Position.Right}
+        className={`mem-handle ${kind} hidden-handle`}
+        isConnectable={false}
+      />
+    )),
+  );
+}
+
+/**
+ * Structure view: a scalar or pointer local as one line in its frame. A pointer to a list or
+ * tree node reads `→ 50` and shows as a cursor label on that node instead of an arrow.
+ */
+function StackLocalNode({ data, selected }) {
+  const { allocation: a, state, chars, changed, cursorText, linkedLocal } = data;
+  const name = allocationDisplayName(state, a);
+  const pointer = isPointer(a.type);
+  const d = pointer ? describePointer(state, a.value) : null;
+  const text = !pointer
+    ? valueText(state, a.value, a.type, chars)
+    : cursorText
+      ? `→ ${cursorText}`
+      : d.status === 'null'
+        ? 'NULL'
+        : d.status === 'uninitialized'
+          ? '?'
+          : `● ${pointerCaption(d)}`;
+  return (
+    <div
+      className={`stack-local${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${changed ? ' value-changed' : ''}${linkedLocal === a.id ? ' linked' : ''}`}
+      onMouseEnter={() => pointer && data.onLink?.(a.id)}
+      onMouseLeave={() => pointer && data.onLink?.(null)}
+    >
+      <SideHandles />
+      <button
+        className="stack-local-name inspect-label nodrag"
+        title={`Inspect ${name} (${typeToString(a.type)})`}
+        onClick={e => {
+          e.stopPropagation();
+          data.onInspect?.([]);
+        }}
+      >
+        {name}
+      </button>
+      <span
+        className={`stack-local-value${pointer ? ` ${d.status === 'dangling' ? 'dangling' : d.status === 'valid' ? 'ptr' : 'null'}` : ''}`}
+        title={valueText(state, a.value, a.type, chars)}
+      >
+        {text}
+      </span>
+    </div>
+  );
+}
+
+/** Structure view: consecutive recursive calls folded into one row of the stack column. */
+function FrameFoldNode({ data }) {
+  return (
+    <div className="frame-fold" title={data.calls.join(', ')}>
+      <strong>
+        {data.name}() × {data.calls.length}
+      </strong>
+      <button className="plain-btn nodrag" onClick={() => data.onUnfold?.()}>
+        Show all calls
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Structure view card for a node of a list or tree: its fields as a label, and one slot per
+ * link along the bottom. Stack variables pointing at it are labels above it. Sizes, types and
+ * addresses stay in the inspector. Read-only.
+ */
+function StructureNode({ id, data, selected }) {
+  const { allocation: a, state, card, bad, changed, changedPaths, cursors = [] } = data;
+  const updateNodeInternals = useUpdateNodeInternals();
+  const scalars = scalarSubobjects(a, state);
+  const signature = `${a.alive}:${card.width}:${card.slots.length}:${scalars.length}`;
+  useLayoutEffect(() => {
+    updateNodeInternals(id);
+  }, [id, signature, updateNodeInternals]);
+  const name = allocationDisplayName(state, a);
+  const sourceHandles = path =>
+    ['left', 'right'].map(side => (
+      <Handle
+        key={side}
+        type="source"
+        id={handleId('src', path, side)}
+        position={side === 'left' ? Position.Left : Position.Right}
+        className="mem-handle src hidden-handle"
+        isConnectable={false}
+      />
+    ));
+  const single = card.fields.length === 1 && !card.more;
+  return (
+    <div
+      className={`structure-node${!a.alive ? ' dead' : ''}${data.unreachable ? ' unreachable' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}`}
+      style={{ '--structure-line': `${NODE.line}px`, '--structure-pad': `${NODE.labelTop}px` }}
+    >
+      {card.top > 0 && (
+        // Inside the card, so labels never spill onto a neighbour or cover an arriving arrow.
+        <div
+          className="structure-band"
+          style={{ height: card.top }}
+          title={cursors.length ? `Pointed at by ${cursors.map(cursorText).join(', ')}` : undefined}
+        >
+          {cursors.map(c => (
+            <span
+              key={c.id}
+              className={`structure-cursor${c.running ? ' running' : ''}${c.dangling ? ' dangling' : ''}${c.changed ? ' changed' : ''}${data.linkedLocal === c.sourceId ? ' linked' : ''}`}
+              onMouseEnter={() => data.onLink?.(c.sourceId)}
+              onMouseLeave={() => data.onLink?.(null)}
+            >
+              {c.tag && <span className="structure-cursor-tag">{c.tag}</span>}
+              {c.name}
+            </span>
+          ))}
+        </div>
+      )}
+      {data.unreachable && (
+        <span
+          className="structure-unreachable"
+          title="No pointer reaches this node any more, so it can never be freed (a memory leak)"
+        >
+          unreachable
+        </span>
+      )}
+      {targetPaths(scalars).map(path => (
+        <TargetHandles
+          key={path.join('.') || 'root'}
+          path={path}
+          state={state}
+          allocation={a}
+          editable={false}
+        />
+      ))}
+      <div className={`structure-body${card.side ? ' side' : ''}`}>
+        <button
+          className={`structure-label inspect-label nodrag${single ? ' single' : ''}`}
+          style={{ height: card.labelHeight, width: card.labelWidth }}
+          title={`Inspect ${name} (${typeToString(a.type)})`}
+          onClick={e => {
+            e.stopPropagation();
+            data.onInspect?.([]);
+          }}
+        >
+          {!card.fields.length && <span className="structure-name">{name}</span>}
+          {card.fields.map(f => (
+            <span
+              key={f.name}
+              className={`structure-field${changedPaths?.has(JSON.stringify(f.path)) ? ' value-changed' : ''}`}
+              title={`${name}.${f.name} = ${f.text}`}
+            >
+              {!single && <span className="structure-field-name">{f.name}</span>}
+              <span className={`structure-field-value${f.pointer ? ' pointer' : ''}`}>
+                {f.text}
+              </span>
+              {f.pointer && sourceHandles(f.path)}
+            </span>
+          ))}
+          {card.more > 0 && <span className="structure-more">+{card.more} more</span>}
+        </button>
+        {!a.alive && <span className="structure-freed">freed</span>}
+        {card.slots.length > 0 && (
+          <div
+            className="structure-slots"
+            style={
+              card.side
+                ? { width: card.slots.length * NODE.sideSlot, height: card.labelHeight }
+                : { height: NODE.slotRow }
+            }
+          >
+            {card.slots.map(s => {
+              const kind = slotKind(state, s.value);
+              return (
+                <div
+                  key={s.path.join('.')}
+                  className={`structure-slot${changedPaths?.has(JSON.stringify(s.path)) ? ' value-changed' : ''}`}
+                  title={`${name}${formatPath(s.path)}: ${pointerCaption(describePointer(state, s.value))}`}
+                  aria-label={pointerAccessibleLabel(state, { ...s, ref: ref(a.id, s.path) })}
+                >
+                  <span className="structure-slot-name">{s.label}</span>
+                  <span className={`structure-slot-value ${kind}`}>
+                    {kind === 'null' ? '∅' : kind === 'uninit' ? '?' : '●'}
+                  </span>
+                  {sourceHandles(s.path)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const cursorText = c => (c.tag ? `${c.name} (${c.tag})` : c.name);
 function MemoryPointerEdge({ id, data, markerEnd, style, selected }) {
   const { screenToFlowPosition } = useReactFlow();
   const dragging = useRef(false);
@@ -413,5 +656,11 @@ function MemoryPointerEdge({ id, data, markerEnd, style, selected }) {
     </>
   );
 }
-export const nodeTypes = { memoryAllocation: MemoryAllocationNode, frameGroup: FrameGroupNode };
+export const nodeTypes = {
+  memoryAllocation: MemoryAllocationNode,
+  frameGroup: FrameGroupNode,
+  structureNode: StructureNode,
+  stackLocal: StackLocalNode,
+  frameFold: FrameFoldNode,
+};
 export const edgeTypes = { memoryPointer: MemoryPointerEdge };

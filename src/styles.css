@@ -745,6 +745,293 @@ button:disabled {
   stroke-dasharray: 5 4;
 }
 
+/* Structure view node: label on top, one slot per link below. Heights come from NODE in
+   structureLayout.js through inline styles, so the card always matches its layout box. */
+.structure-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--heap);
+  border-radius: 7px;
+  font-family: var(--mono);
+}
+.structure-node.dead {
+  border-style: dashed;
+  border-color: var(--err);
+  opacity: 0.72;
+}
+.structure-node.selected {
+  outline: 2px solid var(--ptr);
+}
+.structure-node.bad {
+  outline: 2px solid var(--err);
+}
+.structure-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  padding: var(--structure-pad) 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.structure-label.single {
+  align-items: center;
+}
+.structure-field,
+.structure-more,
+.structure-name {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  height: var(--structure-line);
+  line-height: var(--structure-line);
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.structure-label.single .structure-field {
+  font-size: 16px;
+  font-weight: 600;
+}
+.structure-field-name,
+.structure-more,
+.structure-name {
+  color: var(--muted);
+}
+.structure-field-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.structure-field:not(:only-child) .structure-field-value {
+  margin-left: auto;
+}
+.structure-field-value.pointer {
+  color: var(--ptr);
+}
+.structure-field.value-changed {
+  border-radius: 3px;
+}
+.structure-freed {
+  position: absolute;
+  top: -9px;
+  right: 8px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--err);
+  color: var(--bg);
+  font: 600 10px/16px var(--ui);
+}
+.structure-slots {
+  display: flex;
+  border-top: 1px solid var(--line);
+}
+.structure-slot {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+}
+.structure-slot + .structure-slot {
+  border-left: 1px solid var(--line);
+}
+.structure-slot-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.structure-slot-value.ptr {
+  color: var(--ptr);
+}
+.structure-slot-value.dangling {
+  color: var(--err);
+}
+.structure-slot-value.null,
+.structure-slot-value.uninit {
+  color: var(--muted);
+}
+.structure-node .mem-handle {
+  top: 50%;
+}
+.structure-node.unreachable {
+  border-color: var(--err);
+  background: #f8514914;
+}
+/* Above the card: no stack variable points at an unreachable node, so it has no cursor labels. */
+.structure-unreachable {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  color: var(--err);
+  font: 600 10px/16px var(--ui);
+  white-space: nowrap;
+}
+/* Cursor band: the stack variables pointing at a node, inside the top of its card. Labels
+   that do not fit are cut off; the band's tooltip lists them all. */
+.structure-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  padding: 2px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.structure-cursor {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 5px;
+  border: 1px solid var(--ptr);
+  border-radius: 7px;
+  background: #13253f;
+  color: var(--ptr);
+  font: 600 10px/13px var(--mono);
+  white-space: nowrap;
+}
+.structure-body {
+  display: flex;
+  flex-direction: column;
+}
+.structure-body.side {
+  flex-direction: row;
+}
+.structure-body.side .structure-slots {
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}
+.structure-body.side .structure-slot {
+  flex-direction: column;
+  gap: 0;
+}
+.structure-body.side .structure-slot + .structure-slot {
+  border-left: 1px solid var(--line);
+}
+.structure-body.side .structure-slot-name {
+  font-size: 9px;
+  line-height: 11px;
+}
+.structure-cursor-tag {
+  color: var(--muted);
+  font-weight: 400;
+}
+.structure-cursor.running {
+  background: var(--ptr);
+  color: var(--bg);
+}
+.structure-cursor.running .structure-cursor-tag {
+  color: #0b1220b3;
+}
+.structure-cursor.dangling {
+  border-color: var(--err);
+  background: #3a1517;
+  color: var(--err);
+}
+.structure-cursor.changed {
+  box-shadow: 0 0 0 2px #e3b341;
+}
+.structure-cursor.linked,
+.stack-local.linked {
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+/* Structure view's call stack column: one line per scalar or pointer local. */
+.frame-group.compact.running {
+  border-color: var(--ptr);
+}
+.frame-group.compact .frame-group-label {
+  cursor: default;
+}
+.stack-local {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2);
+  font: 12px var(--mono);
+}
+.stack-local.selected {
+  outline: 2px solid var(--ptr);
+}
+.stack-local.dead {
+  opacity: 0.72;
+}
+.stack-local-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: 600 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.stack-local-value {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stack-local-value.ptr {
+  color: var(--ptr);
+}
+.stack-local-value.dangling {
+  color: var(--err);
+}
+.stack-local-value.null {
+  color: var(--muted);
+}
+.stack-local .mem-handle {
+  top: 50%;
+}
+.frame-fold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 6px 0 10px;
+  border: 1px dashed var(--line-strong);
+  border-left: 2px solid var(--stack);
+  border-radius: 6px;
+  background: #161b22;
+  font-size: 12px;
+}
+.frame-fold strong {
+  color: var(--stack);
+}
+.frame-fold .plain-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 /* Overlay, not a flex sibling: opening it never resizes the React Flow viewport. */
 .inspector {
   position: absolute;

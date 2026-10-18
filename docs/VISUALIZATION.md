@@ -9,8 +9,29 @@ By default each object shows its own address and size, pointer values show the t
 | Both (default) | Shown | Target's address | All |
 | Arrows | Hidden (still in the inspector) | A dot where the arrow starts; `→ x` beneath | All |
 | Addresses | Shown | Target's address | Only the selected box's |
+| Structure | Hidden; list and tree nodes are compact cards | As in Arrows; a node's links are slots (`●` or `∅`) | All |
 
-Boxes keep the same size and position in every view, so switching never overlaps or moves them. In Arrows, a hidden slot is left empty rather than given another meaning, and the aggregate Address column is dropped. The choice applies to every canvas (sandbox, challenges, level editor), is remembered in the browser (`pointerviz.view.v1`), and is never part of the diagram, grading or undo history. These modes were retired in October 2026 because the old Arrows view replaced addresses with unrelated text; they returned in this form on 12 October 2026.
+Boxes keep the same size and position in Both, Arrows and Addresses, so switching between them never overlaps or moves them. In Arrows, a hidden slot is left empty rather than given another meaning, and the aggregate Address column is dropped. The choice applies to every canvas (sandbox, challenges, level editor), is remembered in the browser (`pointerviz.view.v1`), and is never part of the diagram, grading or undo history. These modes were retired in October 2026 because the old Arrows view replaced addresses with unrelated text; they returned in this form on 12 October 2026.
+
+### Structure view
+
+Structure is meant for algorithm lessons on lists and trees. It works from the program's own structs: a struct with a member (or array of members) pointing to its own type is a node type, and its heap objects are drawn as compact cards showing up to three fields, then one slot per link. How links are followed depends on the struct, never on a preset:
+
+- One forward link draws a chain, left to right in link order. List nodes put their link slots on the right (`[ 10 | next ● ]`), so `next` arrows run straight from one card's edge to the next.
+- Two forward links draw a binary tree with in-order columns, so a left child is always left of its parent and a BST reads sorted. Fields named `left`/`right` set the sides; otherwise declaration order does.
+- Two links where every step along one is mirrored by the other draw a doubly linked chain, whatever the names.
+- More links draw a tree with that many children, each parent centred over its subtree.
+- Links whose names contain `parent`, `prev`, `pred` or `back` are drawn but not followed.
+
+Each structure starts from a node nothing links to, the one a variable in the oldest frame points at first, so `main`'s `head` or `root` leads. A node reachable twice is drawn once, under its first parent, and a node not yet linked in (just returned by `malloc`) gets a row of its own. Other heap objects follow in rows.
+
+The call stack is a column on the left, oldest call at the top, with the heap region beside it. Scalar and pointer locals are one line each (`data 60`, `root → 50`); arrays and structs on the stack keep their full card. When a function has several frames they are numbered (`insert() #2`), and the newest call is marked **running**. Between `main` and the two newest calls, two or more consecutive calls of one function fold into one row (`insert() × 3`); **Show all calls** expands them and **Fold recursive calls** (top of the canvas) folds them again. Variables in folded calls are hidden along with their arrows.
+
+A stack variable that points at a whole list or tree node is drawn as a label on that node, not as an arrow. Labels sit in a band inside the top of the card, so they never spill onto a neighbouring node or cover an arriving arrow; every node of that type gets the band, so cards keep one size as cursors move. A label names its frame only when more than one frame is on screen (`#2 root`, not `main head`). The running call's labels are filled, a dangling one is red, and labels that do not fit are cut off, with the band's tooltip listing them all. Hovering a label highlights its variable's line, and the other way round. Pointers to anything else, including into a node's field or slot, stay arrows.
+
+A live heap node that no pointer reaches is marked **unreachable** (a leak) and placed after the reachable structures. Return values are not part of MemoryState, so a node a function is still handing back to its caller looks unreachable for a step or two; playback therefore only flags a node that stays unreachable for the rest of the run (`leaksByStep`). A diagram without a recorded run is judged on its own.
+
+Every position is recomputed at each step, so boxes and arrows cannot be dragged or bent, and Structure never changes the positions remembered for the other views. Editable diagrams show Arrows instead, and the menu item is disabled there. Code: `src/flow/structureLayout.js`.
 
 Select an object name or member label to inspect it, including during playback. The inspector floats over the top-right of the canvas, so opening it never resizes the diagram; if it would cover the selected object, the canvas pans just enough to keep the object visible, without changing zoom. The heading line gives the object's own address (`&p`), size and frame. The **Memory** block shows `p` (the address it stores, in a blue slot) with `→ target` beneath it, and `*p` (the target's value), using the same 8-digit addresses and slot colours as the cards; the copy buttons copy the full 64-bit address. The target name is a link that selects it in the diagram. The ⓘ next to Memory notes that addresses are simulated. Clicking the target name selects the exact member, revealing out-of-scope storage when needed; for a one-past pointer it identifies the boundary without reading it. Narrow memory panes show the inspector as a bottom sheet over the canvas.
 

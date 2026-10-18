@@ -5,6 +5,7 @@
 ### Fixed
 
 - A code → diagram level whose answer has a one-past-the-end pointer is reported as undrawable instead of being impossible to solve: the diagram editor's target picker cannot choose a one-past boundary.
+- A new call frame no longer opens on top of a heap block. Heap blocks keep the place they got when allocated, so in deep recursion (a recursive BST insert) later frames used to land on them; a new frame now skips past any heap block's column.
 
 ### Internal
 
@@ -13,6 +14,8 @@
 
 ### Added
 
+- **Structure** in the View menu draws linked lists and trees in their own shape. Any struct with a member pointing to its own type counts as a node type, whatever the names: one forward link gives a chain, two give a binary tree in in-order columns (so a BST reads sorted left to right), more give a wider tree; `parent`/`prev` links and links that only mirror another (a doubly linked list) are drawn but not followed. Nodes are compact cards (their fields, then one slot per link), the heap sits below the frames, and the layout is recomputed at every step, so nothing can be dragged. Structure is for playback: an editable diagram shows Arrows.
+- Structure view shows the call stack as a column beside the heap, one line per scalar or pointer local, with numbered recursive calls (`insert() #2`) and the newest call marked running. Runs of recursive calls between `main` and the two newest calls fold into one row (`insert() × 3`) that expands on request. A stack variable pointing at a list or tree node becomes a label in a band inside the node's card instead of an arrow (named with its frame only when several frames are shown), and hovering it highlights the variable. List nodes are drawn as `[ 10 | next ● ]` boxes joined by straight arrows. Live nodes that no pointer reaches for the rest of the run are marked unreachable and set apart.
 - `calloc(n, size)`: a zero-filled heap block whose objects start as `0`, `0.0`, `false` or `NULL` once it takes a type. A zero argument returns `NULL` like `malloc(0)`, and a product too large for `size_t` returns `NULL`. `calloc` is now a reserved name.
 - Challenge sections. Levels have an optional `section`, set in the Level editor (which suggests the existing names), and the Challenges list groups cards under section headings. Each heading shows its completed count and a small progress bar beside it, both turning green when the section is finished; sections are separated by space rather than rules. Cards show their number, a small direction tag and a ✓ when completed (replacing the "✓ Completed" badge), and the list is at most 1300px wide so a section's cards stay together on wide screens. Sections keep the order they are first used in, so a course level can join a built-in section by its exact name; levels without one are listed last under **More challenges**. Numbering and **Next challenge** follow the grouped order. The built-in levels are in six sections: Basics, Arrays, Functions, Heap, Structs and Linked lists.
 - Separate student and instructor builds. The student app (`npm run build`) has Sandbox and Challenges and contains no Level editor code; the instructor app (`npm run build:instructor`, `npm run dev:instructor`) adds the Level editor. CI checks the student build with `npm run check:editions`. The instructor site must be hosted behind access control.

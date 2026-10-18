@@ -13,6 +13,15 @@ import {
 import { toJSON } from '../data/json.js';
 import { describePointer } from './addressPresentation.js';
 import { curvePointer } from './routing.js';
+import {
+  STACK,
+  callLabels,
+  foldFrames,
+  layoutStructures,
+  linkRoute,
+  structureAnchor,
+  unreachableHeap,
+} from './structureLayout.js';
 
 /** Row/box metrics; memoryMetricsStyle mirrors them into CSS custom properties. */
 export const GEOMETRY = {
@@ -31,6 +40,10 @@ export const GEOMETRY = {
 export const FRAME_MIN = { width: 240, height: 160 };
 // Space between call frames and between the stack and the heap column.
 const FRAME_SPACING = 64;
+// Structure view: space between the call stack column and the heap region beside it, and
+// how wide a row of other heap objects grows before wrapping.
+const HEAP_REGION_GAP = 96;
+const HEAP_ROW_WIDTH = 1100;
 // SVG markers need literal colours; keep these in sync with --err, --heap and --ptr in styles.css.
 const EDGE_COLORS = { dangling: '#f85149', changed: '#e3b341', normal: '#58a6ff' };
 export const memoryMetricsStyle = Object.fromEntries(
@@ -71,7 +84,18 @@ function allocationSize(a, state) {
   };
 }
 
-export function stateToFlow(
+/**
+ * With `structure`, heap nodes of self-referential structs are drawn as lists and trees
+ * (structureLayout.js) and every position is computed afresh: remembered positions, sizes
+ * and bends are ignored, and nothing can be dragged.
+ */
+export function stateToFlow(state, options = {}) {
+  return options.structure
+    ? layoutFlow(state, { ...options, positions: {}, sizes: {}, routes: {} })
+    : layoutFlow(state, options);
+}
+
+function layoutFlow(
   state,
   {
     positions = {},
@@ -81,6 +105,11 @@ export function stateToFlow(
     badIds = new Set(),
     showExpired = false,
     previousState = null,
+    structure = false,
+    chars = 'number',
+    unfold = false,
+    // Heap objects to mark unreachable; playback passes leaksByStep's, which looks ahead.
+    unreachable: knownUnreachable = null,
   } = {},
 ) {
   const nodes = [];
@@ -121,12 +150,28 @@ export function stateToFlow(
       : [];
   let frameX = 30,
     rightEdge = 30;
-  for (const frame of frames) {
+  // Remembered heap boxes and frames. A new frame skips past them: heap blocks keep the
+  // place they got when allocated, and later calls (deep recursion) used to open on top.
+  // Frames grow downward as locals are declared, so a heap box blocks its whole column.
+  const occupiedStack = [
+    ...heapAllocations(state).flatMap(a =>
+      positions[a.id]
+        ? [{ x: positions[a.id].x, y: 0, width: allocationSize(a, state).width, height: Infinity }]
+        : [],
+    ),
+    ...frames.flatMap(f => {
+      const id = `frame:${f.id}`;
+      return (f.active || showExpired) && positions[id] && frameSizes[id]
+        ? [{ ...positions[id], ...frameSizes[id] }]
+        : [];
+    }),
+  ];
+  // Structure view stacks the frames in a column instead (stackColumn below).
+  for (const frame of structure ? [] : frames) {
     if (!frame.active && !showExpired) continue;
     const allocations = frameAllocations(state, frame.id).filter(a => a.alive || showExpired);
     const sizes = allocations.map(a => allocationSize(a, state));
-    const id = `frame:${frame.id}`,
-      position = positions[id] ?? { x: frameX, y: 72 };
+    const id = `frame:${frame.id}`;
     let y = GEOMETRY.top;
     // New objects occupy unused space; remembered positions are never reflowed.
     const occupied = allocations.flatMap((a, i) =>
@@ -163,6 +208,16 @@ export function stateToFlow(
       FRAME_MIN.height,
       ...sizes.map((s, i) => locals[i].y + s.height + GEOMETRY.padding),
     );
+    let position = positions[id];
+    if (!position) {
+      position = { x: frameX, y: 72 };
+      for (
+        let blocker;
+        (blocker = occupiedStack.find(r => overlapping(position, width, height, r)));
+      )
+        position = { ...position, x: blocker.x + blocker.width + FRAME_SPACING };
+      occupiedStack.push({ ...position, width, height });
+    }
     nodes.push({
       id,
       type: 'frameGroup',
@@ -204,7 +259,7 @@ export function stateToFlow(
       });
     });
     // Every invocation gets a distinct slot, even with the same depth/name.
-    frameX += width + FRAME_SPACING;
+    frameX = Math.max(frameX + width, position.x + width) + FRAME_SPACING;
     rightEdge = Math.max(rightEdge, position.x + width);
   }
   let heapY = 124;
@@ -213,11 +268,161 @@ export function stateToFlow(
   const occupiedHeap = heap.flatMap(a =>
     positions[a.id] ? [{ ...positions[a.id], ...allocationSize(a, state) }] : [],
   );
+  // Structure view: the call stack as a column, then one heap region beside it, lists and
+  // trees first, with nodes no pointer reaches set apart at the end.
+  const columnRight = structure ? stackColumn() : 0;
+  const region = { x: columnRight ? columnRight + HEAP_REGION_GAP : 30, y: 72 };
+  const unreachable = structure ? (knownUnreachable ?? unreachableHeap(state)) : new Set();
+  // Objects a shown stack variable holds the address of: list and tree nodes among them get
+  // a cursor band on their card.
+  const cursorTargets = new Set(
+    nodes
+      .filter(n => structure && n.parentId && n.data.allocation?.storage.kind === 'stack')
+      .flatMap(n =>
+        scalarSubobjects(n.data.allocation, state).flatMap(s =>
+          s.value.kind === 'pointer' && s.value.target && !s.value.target.path?.length
+            ? [s.value.target.allocationId]
+            : [],
+        ),
+      ),
+  );
+  const structures = structure
+    ? layoutStructures(state, region, chars, unreachable, cursorTargets)
+    : { cards: new Map(), bottom: region.y };
+  function stackColumn() {
+    const visible = frames.filter(f => f.active || showExpired);
+    const labels = callLabels(visible);
+    const top = visible.filter(f => f.active).at(-1);
+    // With one frame on screen, a cursor's frame goes without saying.
+    const tagged = visible.length > 1;
+    let y = 72,
+      right = 0;
+    for (const entry of foldFrames(visible, unfold)) {
+      if (entry.folded) {
+        const [first] = entry.folded;
+        nodes.push({
+          id: `fold:${first.id}`,
+          type: 'frameFold',
+          position: { x: 30, y },
+          width: STACK.width,
+          height: STACK.header,
+          style: { width: STACK.width, height: STACK.header },
+          draggable: false,
+          selectable: false,
+          deletable: false,
+          zIndex: 0,
+          data: {
+            name: first.name,
+            calls: entry.folded.map(f => labels.get(f.id).label),
+          },
+        });
+        y += STACK.header + STACK.frameGap;
+        right = Math.max(right, 30 + STACK.width);
+        continue;
+      }
+      const { frame } = entry;
+      const id = `frame:${frame.id}`;
+      const allocations = frameAllocations(state, frame.id).filter(a => a.alive || showExpired);
+      let localY = STACK.header + STACK.pad / 2;
+      const placed = allocations.map(a => {
+        const compact = isPointer(a.type) || !(isArray(a.type) || isStruct(a.type));
+        const size = compact
+          ? { width: STACK.width - STACK.pad * 2, height: STACK.row }
+          : allocationSize(a, state);
+        const position = { x: STACK.pad, y: localY };
+        localY += size.height + STACK.rowGap;
+        return { a, compact, size, position };
+      });
+      const width = Math.max(STACK.width, ...placed.map(p => p.size.width + STACK.pad * 2));
+      const height = Math.max(STACK.header + STACK.pad, localY - STACK.rowGap + STACK.pad);
+      nodes.push({
+        id,
+        type: 'frameGroup',
+        position: { x: 30, y },
+        data: {
+          frame,
+          editable: false,
+          callLabel: labels.get(frame.id).label,
+          running: frame === top,
+        },
+        draggable: false,
+        selectable: false,
+        deletable: false,
+        zIndex: 0,
+        width,
+        height,
+        style: { width, height },
+        className: `frame-group compact${frame.active ? '' : ' returned'}${frame === top ? ' running' : ''}${previousState && !previousState.frames?.some(f => f.id === frame.id && f.active === frame.active) ? ' memory-changed' : ''}`,
+        ariaLabel: `${labels.get(frame.id).label} ${frame.active ? 'active' : 'returned'} call frame`,
+      });
+      for (const { a, compact, size, position } of placed)
+        nodes.push({
+          id: a.id,
+          type: compact ? 'stackLocal' : 'memoryAllocation',
+          parentId: id,
+          expandParent: false,
+          position,
+          draggable: false,
+          selectable: true,
+          deletable: false,
+          zIndex: 2,
+          ...size,
+          style: size,
+          data: {
+            allocation: a,
+            state,
+            ...changes(a),
+            editable: false,
+            bad: badIds.has(a.id),
+            cursorTag: tagged ? labels.get(frame.id).tag : null,
+          },
+        });
+      y += height + STACK.frameGap;
+      right = Math.max(right, 30 + width);
+    }
+    return right;
+  }
+  for (const [id, { card, x, y }] of structures.cards) {
+    const a = state.allocations.find(x => x.id === id);
+    nodes.push({
+      id,
+      type: 'structureNode',
+      position: { x, y },
+      width: card.width,
+      height: card.height,
+      style: { width: card.width, height: card.height },
+      zIndex: 2,
+      draggable: false,
+      selectable: true,
+      deletable: false,
+      data: {
+        allocation: a,
+        state,
+        card,
+        ...changes(a),
+        editable: false,
+        bad: badIds.has(id),
+        unreachable: unreachable.has(id),
+        cursors: [],
+      },
+    });
+  }
+  let row = { x: region.x, y: structures.bottom, height: 0 };
   for (const a of heap) {
+    if (structures.cards.has(a.id)) continue;
     const readOnly = a.storage.kind === 'static';
     const size = allocationSize(a, state);
     let position = positions[a.id];
-    if (!position) {
+    if (structure) {
+      if (row.x > region.x && row.x + size.width > region.x + HEAP_ROW_WIDTH)
+        row = { x: region.x, y: row.y + row.height + GEOMETRY.gap, height: 0 };
+      position = { x: row.x, y: row.y };
+      row = {
+        ...row,
+        x: row.x + size.width + GEOMETRY.gap,
+        height: Math.max(row.height, size.height),
+      };
+    } else if (!position) {
       position = { x: rightEdge + FRAME_SPACING, y: heapY };
       while (
         occupiedHeap.some(
@@ -238,7 +443,7 @@ export function stateToFlow(
       ...size,
       style: size,
       zIndex: 2,
-      draggable: true,
+      draggable: !structure,
       selectable: true,
       // A freed block can still be deleted from an editable diagram.
       deletable: editable && !readOnly,
@@ -255,7 +460,7 @@ export function stateToFlow(
   const byId = new Map(nodes.map(n => [n.id, n]));
   const boxes = new Map(
     nodes
-      .filter(n => n.type === 'memoryAllocation')
+      .filter(n => ['memoryAllocation', 'structureNode', 'stackLocal'].includes(n.type))
       .map(n => {
         const parent = byId.get(n.parentId)?.position ?? { x: 0, y: 0 };
         return [n.id, { x: n.position.x + parent.x, y: n.position.y + parent.y, ...n.style }];
@@ -267,10 +472,15 @@ export function stateToFlow(
       .filter(n => n.type === 'frameGroup')
       .map(n => ({ ...n.position, width: n.style.width, height: 34 })),
   ];
-  function anchor(r, side) {
+  function anchor(r, side, role) {
     const box = boxes.get(r.allocationId),
       node = byId.get(r.allocationId);
     if (!box) return null;
+    if (node.type === 'structureNode')
+      return structureAnchor(box, node.data.card, r.path, side, role);
+    // A one-line stack variable: arrows leave and arrive at the middle of its side.
+    if (node.type === 'stackLocal')
+      return { x: box.x + (side === 'right' ? box.width : 0), y: box.y + box.height / 2 };
     const rows = allocationMetrics(node.data.allocation, state).rows;
     let row = rows.findIndex(s => JSON.stringify(s.ref.path) === JSON.stringify(r.path));
     if (row < 0 && r.path.length) {
@@ -297,13 +507,55 @@ export function stateToFlow(
         ? 'right'
         : 'left';
     const side = self ? 'right' : sourceSide === 'right' ? 'left' : 'right';
-    const source = anchor(e.source, sourceSide);
+    const source = anchor(e.source, sourceSide, 'source');
     if (!source) continue;
-    const target = anchor(e.target, side);
+    const target = anchor(e.target, side, 'target');
     if (!target) continue;
     byId.get(e.source.allocationId).data.sourceSides[JSON.stringify(e.source.path)] = sourceSide;
     const id = `${e.source.allocationId}:${e.source.path.join('.')}->${e.target.allocationId}:${e.target.path.join('.')}`;
-    const route = curvePointer(source, target, sourceSide, side, obstacles, routes[id], self);
+    // A stack variable holding a whole node is a cursor: a label on that node, not an arrow.
+    const sourceNode = byId.get(e.source.allocationId),
+      targetNode = byId.get(e.target.allocationId);
+    if (
+      structure &&
+      sourceNode.data.allocation.storage.kind === 'stack' &&
+      targetNode.type === 'structureNode' &&
+      !e.target.path.length
+    ) {
+      targetNode.data.cursors.push({
+        id,
+        sourceId: e.source.allocationId,
+        name: `${allocationDisplayName(state, sourceNode.data.allocation)}${e.source.path.map(p => (typeof p === 'number' ? `[${p}]` : `.${p}`)).join('')}`,
+        tag: sourceNode.data.cursorTag,
+        running: byId.get(sourceNode.parentId)?.data.running ?? false,
+        dangling: e.status === 'dangling',
+        changed: sourceNode.data.changedPaths.has(JSON.stringify(e.source.path)),
+      });
+      // The variable's own line names the node the way the node's card reads.
+      const { card } = targetNode.data;
+      if (!e.source.path.length)
+        sourceNode.data.cursorText =
+          card.fields.length === 1
+            ? card.fields[0].text
+            : allocationDisplayName(state, targetNode.data.allocation);
+      continue;
+    }
+    // A link between two cards: a slot to a whole node, drawn in the structure's own direction.
+    const link =
+      byId.get(e.source.allocationId).type === 'structureNode' &&
+      byId.get(e.target.allocationId).type === 'structureNode' &&
+      !e.target.path.length &&
+      byId
+        .get(e.source.allocationId)
+        .data.card.slots.some(s => JSON.stringify(s.path) === JSON.stringify(e.source.path));
+    const route = link
+      ? linkRoute(
+          source,
+          sourceBox,
+          targetBox,
+          structureAnchor(targetBox, targetNode.data.card, [], 'left', 'target').y,
+        )
+      : curvePointer(source, target, sourceSide, side, obstacles, routes[id], self);
     const changed = byId
       .get(e.source.allocationId)
       .data.changedPaths.has(JSON.stringify(e.source.path));
@@ -322,7 +574,8 @@ export function stateToFlow(
       type: 'memoryPointer',
       data: { ...route, manual: !!routes[id] },
       zIndex: 1,
-      selectable: true,
+      // Structure view computes every route afresh, so there is nothing to bend.
+      selectable: !structure,
       reconnectable: editable && byId.get(e.source.allocationId).data.editable ? 'target' : false,
       deletable: editable && byId.get(e.source.allocationId).data.editable,
       className: e.status === 'dangling' ? 'dangling-edge' : '',
@@ -331,4 +584,13 @@ export function stateToFlow(
     });
   }
   return { nodes, edges };
+}
+
+function overlapping(position, width, height, r) {
+  return (
+    position.x < r.x + r.width + GEOMETRY.gap &&
+    position.x + width + GEOMETRY.gap > r.x &&
+    position.y < r.y + r.height + GEOMETRY.gap &&
+    position.y + height + GEOMETRY.gap > r.y
+  );
 }
