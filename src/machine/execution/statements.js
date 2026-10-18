@@ -215,6 +215,11 @@ export function execEmbeddedStatement(stmt, ctx, env, frame, fn, loopDepth) {
       compound ? { kind: 'EndScope', loc: { startLine: stmt.loc?.endLine } } : stmt,
       frame,
     );
+  } else if (!compound && count < ctx.snapshots.length) {
+    // A statement such as `f(x);` ends with its last call's LeaveFrame step, recorded in the
+    // callee. Mark that step as completing a statement here, for step over and breakpoints.
+    const last = ctx.snapshots.at(-1);
+    last.completesDepth = Math.min(last.completesDepth ?? Infinity, frame.depth);
   }
   return result;
 }

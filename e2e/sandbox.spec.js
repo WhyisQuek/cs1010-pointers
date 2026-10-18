@@ -15,7 +15,7 @@ test('a runtime error opens playback at the step where execution stopped', async
   await expect(page.locator('.mem-cell')).toHaveCount(2);
 
   // Earlier steps are still there.
-  await page.getByRole('button', { name: 'Previous', exact: true }).click();
+  await page.getByRole('button', { name: 'Step back', exact: true }).click();
   await expect(page.getByText('3/4', { exact: true })).toBeVisible();
   await expect(page.getByText('Stopped by an error')).toBeHidden();
 });
@@ -114,9 +114,9 @@ test('the sandbox keeps its work across tab switches', async ({ page }) => {
   await openApp(page);
   await code(page).fill('int main(void) {\n    int kept = 5;\n}');
   await page.getByRole('button', { name: 'Run', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  const counter = page.locator('.stepper span');
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  const counter = page.locator('.step-count');
   const position = await counter.textContent();
   expect(position).toMatch(/^2\/\d+$/);
 
@@ -168,7 +168,7 @@ test('parser loads under the Pages subpath and playback steps through a program'
   await expect(page.getByText('Ready: 3 execution steps')).toBeVisible();
   await expect(page.locator('.next-line-number')).toHaveText('1');
 
-  const next = page.getByRole('button', { name: 'Next', exact: true });
+  const next = page.getByRole('button', { name: 'Step into', exact: true });
   await next.click();
   await next.click();
   await expect(page.getByText('2/3', { exact: true })).toBeVisible();
@@ -178,6 +178,91 @@ test('parser loads under the Pages subpath and playback steps through a program'
   await expect(cell).toHaveCount(1);
   await expect(cell.locator('.val')).toHaveText('10');
   await expect(cell.locator('.mem-meta')).toContainText('0x10000000');
+});
+
+test('step over skips a call, and step out returns from one', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill(
+    'int twice(int n) {\n    int t = n * 2;\n    return t;\n}\nint main(void) {\n    int a = twice(4);\n    int b = a;\n    return 0;\n}',
+  );
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const button = name => page.getByRole('button', { name, exact: true });
+  const line = page.locator('.next-line-number');
+
+  await button('Step into').click();
+  await expect(line).toHaveText('6');
+  await expect(button('Step out')).toBeDisabled();
+  await button('Step over').click();
+  await expect(line).toHaveText('7');
+
+  // Stepping back lands on the call site, just after twice() returned.
+  await button('Step back').click();
+  await expect(line).toHaveText('6');
+
+  await page.getByRole('slider', { name: 'execution step' }).fill('1');
+  await page.keyboard.press('F11');
+  await expect(line).toHaveText('2');
+  await expect(button('Step out')).toBeEnabled();
+  await button('Step out').click();
+  await expect(line).toHaveText('6');
+  await expect(button('Step out')).toBeDisabled();
+
+  await page.keyboard.press('F10');
+  await expect(line).toHaveText('7');
+});
+
+test('breakpoints, continue, reverse stepping and the call stack', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill(
+    'int twice(int n) {\n    int t = n * 2;\n    return t;\n}\nint main(void) {\n    int a = twice(4);\n    int b = twice(a);\n    return 0;\n}',
+  );
+  const button = name => page.getByRole('button', { name, exact: true });
+  const line = page.locator('.next-line-number');
+  const stack = page.getByRole('group', { name: 'Call stack' });
+
+  // Breakpoints are set in the gutter, or with F9 on the editor's cursor line.
+  await button('Breakpoint on line 2').click();
+  await expect(button('Breakpoint on line 2')).toHaveAttribute('aria-pressed', 'true');
+  await code(page).evaluate(el =>
+    el.setSelectionRange(el.value.indexOf('int b'), el.value.indexOf('int b')),
+  );
+  await code(page).press('F9');
+  await expect(button('Breakpoint on line 7')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await button('Continue').click();
+  await expect(line).toHaveText('2');
+  await expect(stack).toHaveText(/main\(\).*twice\(\)/);
+  await button('Continue').click();
+  await expect(line).toHaveText('7');
+  await expect(stack).toHaveText('Call stackmain()');
+  await page.keyboard.press('F8');
+  await expect(line).toHaveText('2');
+
+  // Clicking main() in the call stack runs until twice() returns to it.
+  await stack.getByRole('button', { name: 'main()' }).click();
+  await expect(line).toHaveText('7');
+
+  // Holding Shift turns the commands around.
+  await page.keyboard.down('Shift');
+  await expect(button('Reverse continue')).toBeVisible();
+  await button('Reverse continue').click();
+  await page.keyboard.up('Shift');
+  await expect(line).toHaveText('2');
+  // Back out of twice(a) to just before it is called, then back over twice(4).
+  await button('Step out').click({ modifiers: ['Shift'] });
+  await expect(line).toHaveText('7');
+  await expect(stack).toHaveText('Call stackmain()');
+  await page.keyboard.press('Shift+F10');
+  await expect(line).toHaveText('6');
+  await expect(page.locator('.step-count')).toHaveText(/^1\//);
+
+  // Editing above a breakpoint moves it with its line.
+  await code(page).evaluate(el => el.setSelectionRange(0, 0));
+  await code(page).press('Enter');
+  await expect(button('Breakpoint on line 3')).toHaveAttribute('aria-pressed', 'true');
+  await expect(button('Breakpoint on line 8')).toHaveAttribute('aria-pressed', 'true');
+  await expect(button('Breakpoint on line 2')).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('diagram edits are range-checked and generate matching C', async ({ page }) => {
@@ -214,7 +299,7 @@ test('generate during playback uses the step on screen', async ({ page }) => {
   await openApp(page);
   await page.getByRole('button', { name: 'Run', exact: true }).click();
   // Step 1 enters main() before `int a = 10;` runs, so no object exists yet.
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
   await page.getByRole('button', { name: 'Generate C' }).click();
   const code = page.getByRole('textbox', { name: 'C source code' });
   await expect(code).not.toHaveValue(/int a/);
@@ -262,8 +347,8 @@ test('View switches between addresses, arrows and both, and is remembered', asyn
 test('the inspector overlays the canvas without resizing it', async ({ page }) => {
   await openApp(page);
   await page.getByRole('button', { name: 'Run', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
   const canvas = page.locator('.react-flow');
   const before = await canvas.boundingBox();
   await page.locator('.mem-cell .name').filter({ hasText: 'a' }).click();

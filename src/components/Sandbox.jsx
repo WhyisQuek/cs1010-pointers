@@ -2,12 +2,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CodePanel } from './CodePanel.jsx';
 import MemoryCanvas from './MemoryCanvas.jsx';
+import Stepper from './Stepper.jsx';
 import Workbench from './Workbench.jsx';
+import { shiftBreakpoints } from './breakpoints.js';
 import { interpret } from '../pipeline/interpreter.js';
 import { describeError } from '../language/diagnostics.js';
 import { generate, ValidationError, validate } from '../pipeline/codegen.js';
 import { makeState } from '../machine/memory.js';
 import { loadDraft, saveDraft } from '../data/drafts.js';
+import { pausedLine } from '../machine/navigation.js';
 
 const STARTER = `int main(void) {
     int a = 10;
@@ -22,6 +25,14 @@ export default function Sandbox() {
   const [state, setState] = useState(() => draft?.diagram ?? makeState());
   const [snapshots, setSnapshots] = useState(null);
   const [step, setStep] = useState(0);
+  // Line numbers; kept across runs and moved with the code as it is edited.
+  const [breakpoints, setBreakpoints] = useState(() => new Set());
+  const toggleBreakpoint = line =>
+    setBreakpoints(b => {
+      const next = new Set(b);
+      if (!next.delete(line)) next.add(line);
+      return next;
+    });
   // One current message about the code: errors stay until the next edit or run.
   const [notice, setNotice] = useState(() =>
     draft && (draft.code !== STARTER || draft.diagram?.allocations.length)
@@ -56,7 +67,7 @@ export default function Sandbox() {
       loadPlayback(result, 0);
       setNotice({
         kind: 'ok',
-        text: `Ready: ${result.snapshots.length} execution steps. Select Next to begin.`,
+        text: `Ready: ${result.snapshots.length} execution steps. Select Step into to begin.`,
       });
     } catch (e) {
       if (!e.playback) return reportError(e);
@@ -65,7 +76,7 @@ export default function Sandbox() {
       loadPlayback(e.playback, steps);
       setNotice({
         kind: 'err',
-        text: `Stopped at step ${steps}. ${describeError(e)}. Select Previous to see how it got there.`,
+        text: `Stopped at step ${steps}. ${describeError(e)}. Select Step back to see how it got there.`,
       });
     }
   };
@@ -75,12 +86,13 @@ export default function Sandbox() {
   const shownSnapshot = snapshots && step > 0 ? snapshots[step - 1] : null;
   const shownState = snapshots ? (shownSnapshot?.state ?? emptyState) : state;
   const previousState = shownSnapshot ? (step > 1 ? snapshots[step - 2].state : emptyState) : null;
-  const nextLine = snapshots ? (step === 0 ? snapshots[0]?.line : shownSnapshot?.nextLine) : null;
+  const nextLine = snapshots?.length ? pausedLine(snapshots, step) : null;
 
   // Generates from the memory on screen, which during playback is the selected step.
   const diagramToCode = () => {
     try {
       setCode(generate(shownState));
+      setBreakpoints(new Set());
       if (snapshots) setState(structuredClone(shownState));
       setSnapshots(null);
       setSavedPlayback(null);
@@ -113,6 +125,7 @@ export default function Sandbox() {
     setSavedPlayback(null);
   };
   const onCode = value => {
+    setBreakpoints(b => shiftBreakpoints(code, value, b));
     setCode(value);
     setSnapshots(null);
     setSavedPlayback(null);
@@ -149,6 +162,8 @@ export default function Sandbox() {
             onCode={onCode}
             activeLine={nextLine}
             activeError={!!shownSnapshot?.error}
+            breakpoints={breakpoints}
+            onToggleBreakpoint={toggleBreakpoint}
           />
           {snapshots?.at(-1)?.output && (
             <section className="program-output" aria-label="Program output">
@@ -195,29 +210,7 @@ export default function Sandbox() {
             structHint="To use a struct, define it in the code and Run, then Edit a step."
           />
           {snapshots?.length > 0 && (
-            <div className="stepper">
-              <button className="step-btn" disabled={step <= 0} onClick={() => setStep(s => s - 1)}>
-                Previous
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={snapshots.length}
-                value={step}
-                onChange={e => setStep(Number(e.target.value))}
-                aria-label="execution step"
-              />
-              <span>
-                {step}/{snapshots.length}
-              </span>
-              <button
-                className="step-btn"
-                disabled={step >= snapshots.length}
-                onClick={() => setStep(s => s + 1)}
-              >
-                Next
-              </button>
-            </div>
+            <Stepper snapshots={snapshots} step={step} onStep={setStep} breakpoints={breakpoints} />
           )}
         </section>
       }

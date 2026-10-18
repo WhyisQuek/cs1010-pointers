@@ -348,6 +348,42 @@ button:disabled {
   background: #e3b34122;
   box-shadow: -3px 0 #e3b341;
 }
+/* Line numbers that toggle breakpoints; a dot sits in the gutter's left padding. */
+.gutter.with-breakpoints {
+  display: flex;
+  flex-direction: column;
+  padding-left: 22px;
+}
+.gutter-line,
+.gutter-line:hover:not(:disabled) {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+}
+.gutter-line:hover:not(:disabled) {
+  color: var(--text);
+}
+.gutter-line::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -15px;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+}
+.gutter-line:hover::before {
+  background: #f8514966;
+}
+.gutter-line.breakpoint::before {
+  background: var(--err);
+}
 .next-line-number {
   color: #e3b341;
   font-weight: bold;
@@ -811,18 +847,72 @@ button:disabled {
 }
 
 .stepper {
-  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+}
+.call-stack {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font: 12px var(--mono);
+}
+.call-stack-label {
+  flex: none;
+  color: var(--muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.call-stack ol {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.call-stack li + li::before {
+  content: '▸';
+  margin: 0 6px;
+  color: var(--muted);
+}
+.call-stack strong {
+  color: #e3b341;
+}
+.call-stack-frame,
+.call-stack-frame:hover:not(:disabled) {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ptr);
+  font: inherit;
+}
+.call-stack-frame:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.step-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.step-controls .step-btn {
+  padding: 5px 10px;
+}
+.step-scrub {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 10px;
-  border-top: 1px solid var(--line);
 }
 .stepper input[type='range'] {
   flex: 1;
   accent-color: #8b949e;
 }
-.stepper span {
+.step-count {
   color: var(--muted);
   font: 12px var(--mono);
 }

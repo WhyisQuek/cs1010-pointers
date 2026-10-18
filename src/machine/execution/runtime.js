@@ -50,6 +50,8 @@ export function markNext(ctx, node, frame) {
   if (previous) {
     previous.nextLine = node.loc?.startLine ?? null;
     previous.nextFunction = frame.name;
+    previous.nextFrameId = frame.id;
+    previous.nextDepth = frame.depth;
   }
 }
 
@@ -62,6 +64,7 @@ export function snapshot(ctx, stmt, frame) {
     nextLine: null,
     function: frame.name,
     frameId: frame.id,
+    depth: frame.depth,
     statement: stmt.kind,
     events: ctx.trace.slice(ctx.snapshotTraceIndex),
     output: ctx.output,

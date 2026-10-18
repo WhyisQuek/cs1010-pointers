@@ -17,8 +17,17 @@ const LINE_HEIGHT = 20.8;
  * Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus; with a
  * selection across lines, both act on every selected line and keep the lines selected.
  * Enter carries indentation forward (one level deeper after `{`), and `}` on a blank line outdents.
+ * With onToggleBreakpoint, clicking a line number or pressing F9 in the editor toggles a breakpoint.
  */
-export function CodePanel({ code, onCode, readOnly, activeLine = null, activeError = false }) {
+export function CodePanel({
+  code,
+  onCode,
+  readOnly,
+  activeLine = null,
+  activeError = false,
+  breakpoints = null,
+  onToggleBreakpoint = null,
+}) {
   const activeClass = activeError ? ' error-line' : '';
   const lines = useMemo(() => highlightC(code), [code]);
   const wrap = useRef(null);
@@ -32,6 +41,12 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null, activeErr
   }, [activeLine]);
 
   const onKeyDown = e => {
+    if (e.key === 'F9' && onToggleBreakpoint && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const el = e.currentTarget;
+      onToggleBreakpoint(code.slice(0, el.selectionStart).split('\n').length);
+      return;
+    }
     if (readOnly || !onCode || e.nativeEvent.isComposing) return;
     const el = e.currentTarget;
     const start = el.selectionStart,
@@ -72,13 +87,37 @@ export function CodePanel({ code, onCode, readOnly, activeLine = null, activeErr
 
   return (
     <div className="code-wrap" ref={wrap}>
-      <div className="gutter" aria-hidden="true">
-        {lines.map((_, i) => (
-          <div key={i} className={i + 1 === activeLine ? `next-line-number${activeClass}` : ''}>
-            {i + 1}
-          </div>
-        ))}
-      </div>
+      {onToggleBreakpoint ? (
+        // Line buttons stay out of the tab order; F9 in the editor is the keyboard route.
+        <div className="gutter with-breakpoints" role="group" aria-label="Breakpoints">
+          {lines.map((_, i) => {
+            const line = i + 1,
+              set = breakpoints?.has(line);
+            return (
+              <button
+                key={i}
+                type="button"
+                tabIndex={-1}
+                className={`gutter-line${set ? ' breakpoint' : ''}${line === activeLine ? ` next-line-number${activeClass}` : ''}`}
+                aria-pressed={!!set}
+                aria-label={`Breakpoint on line ${line}`}
+                title={set ? 'Remove breakpoint (F9)' : 'Add breakpoint (F9)'}
+                onClick={() => onToggleBreakpoint(line)}
+              >
+                {line}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="gutter" aria-hidden="true">
+          {lines.map((_, i) => (
+            <div key={i} className={i + 1 === activeLine ? `next-line-number${activeClass}` : ''}>
+              {i + 1}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="code-body">
         <pre className="code-highlight" aria-hidden="true">
           {lines.map((tokens, i) => (
