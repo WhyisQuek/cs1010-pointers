@@ -147,7 +147,11 @@ test('tree links are edges; stack pointers to nodes are cursor labels instead', 
   const links = edges.filter(e => ids.has(e.source) && ids.has(e.target));
   assert.equal(links.length, 6);
   assert.ok(links.every(e => /^src:(left|right):/.test(e.sourceHandle)));
-  assert.equal(edges.length, 6);
+  // The only other edge is root's arrow, hidden until root is hovered.
+  const hover = edges.filter(e => e.hidden);
+  assert.equal(edges.length - hover.length, 6);
+  assert.equal(hover.length, 1);
+  assert.equal(hover[0].data.cursorFor, hover[0].source);
   const root = cards.find(n => n.data.card.fields[0].text === '50');
   // Only main is on screen, so the label needs no frame tag.
   assert.deepEqual(

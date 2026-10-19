@@ -480,6 +480,8 @@ export default function MemoryCanvas({
   }));
   const interactiveEdges = edges.map(e => ({
     ...e,
+    // Structure view's cursor arrows appear only while their variable is hovered.
+    hidden: e.data?.cursorFor ? e.data.cursorFor !== linkedLocal : e.hidden,
     data: {
       ...e.data,
       onGestureStart: begin,

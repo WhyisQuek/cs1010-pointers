@@ -538,6 +538,29 @@ function layoutFlow(
           card.fields.length === 1
             ? card.fields[0].text
             : allocationDisplayName(state, targetNode.data.allocation);
+      // The arrow it stands for, shown only while the variable or its label is hovered.
+      const color = e.status === 'dangling' ? EDGE_COLORS.dangling : EDGE_COLORS.normal;
+      edges.push({
+        id: `cursor:${id}`,
+        source: e.source.allocationId,
+        sourceHandle: handleId('src', e.source.path, sourceSide),
+        target: e.target.allocationId,
+        targetHandle: handleId('tgt', e.target.path, side),
+        type: 'memoryPointer',
+        data: {
+          ...curvePointer(source, target, sourceSide, side, obstacles, undefined, false),
+          cursorFor: e.source.allocationId,
+        },
+        hidden: true,
+        zIndex: 2,
+        selectable: false,
+        focusable: false,
+        reconnectable: false,
+        deletable: false,
+        className: `cursor-edge${e.status === 'dangling' ? ' dangling-edge' : ''}`,
+        style: { stroke: color, strokeWidth: 2.5 },
+        markerEnd: { type: 'arrowclosed', color, width: 18, height: 18 },
+      });
       continue;
     }
     // A link between two cards: a slot to a whole node, drawn in the structure's own direction.

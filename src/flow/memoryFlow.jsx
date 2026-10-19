@@ -434,7 +434,11 @@ function StackLocalNode({ data, selected }) {
       </button>
       <span
         className={`stack-local-value${pointer ? ` ${d.status === 'dangling' ? 'dangling' : d.status === 'valid' ? 'ptr' : 'null'}` : ''}`}
-        title={valueText(state, a.value, a.type, chars)}
+        title={
+          cursorText
+            ? `Pointer to node ${cursorText} (hover to show the arrow)`
+            : valueText(state, a.value, a.type, chars)
+        }
       >
         {text}
       </span>
