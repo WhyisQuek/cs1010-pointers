@@ -1,8 +1,12 @@
 /** Execution-context helpers: lexical scopes, trace/snapshot recording, safety guards and runtime checks. */
 import { INVALID, LIMIT, diagnostic } from '../../language/diagnostics.js';
-import { MAX_LOOP_ITERATIONS, MAX_TRACE_STEPS } from '../../language/limits.js';
+import {
+  MAX_HISTORY_SCALARS,
+  MAX_LOOP_ITERATIONS,
+  MAX_TRACE_STEPS,
+} from '../../language/limits.js';
 import { isFloatingType, isIntegerType } from '../../language/numeric.js';
-import { INT, typeToString } from '../../language/types.js';
+import { INT, typeToString, validateObjectType } from '../../language/types.js';
 import { cloneState, getAllocation } from '../memory.js';
 
 export function makeScope(parent = null) {
@@ -59,6 +63,14 @@ export function snapshot(ctx, stmt, frame) {
   ctx.steps++;
   if (ctx.steps > MAX_TRACE_STEPS)
     throw diagnostic(LIMIT, `execution exceeded ${MAX_TRACE_STEPS} visualized statements`);
+  // Every snapshot copies every allocation, expired ones included (validateObjectType counts scalars).
+  for (const a of ctx.state.allocations)
+    ctx.historyScalars += validateObjectType(a.type, ctx.state.structTypes);
+  if (ctx.historyScalars > MAX_HISTORY_SCALARS)
+    throw diagnostic(
+      LIMIT,
+      `execution history exceeded ${MAX_HISTORY_SCALARS} stored values (every step keeps a copy of memory)`,
+    );
   ctx.snapshots.push({
     line: stmt.loc?.startLine ?? null,
     nextLine: null,

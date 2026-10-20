@@ -33,6 +33,8 @@ import { validate, ValidationError } from './codegen.js';
  * level already shows (in its code or target diagram) may appear. Hints are for help.
  */
 const MEMORY_MISMATCH = "Your memory doesn't match the expected layout";
+const SEARCH_EXHAUSTED =
+  'PointerViz could not finish comparing your memory: it has too many similar heap blocks';
 
 /**
  * The allocations grading compares: every live stack object and every heap block (freed or
@@ -181,48 +183,116 @@ export function equivalent(expected, actual, options = {}) {
     };
   }
 
-  const result = bestHeapMapping(expected, actual, initial, aHeap, bHeap, config, gradedA.size);
-  if (!result)
+  const result = bestHeapMapping(expected, actual, initial, aHeap, bHeap, config, gradedA, gradedB);
+  // A search cut short may have missed a perfect mapping, so its mismatches are not reported.
+  if (result.exhausted && result.best?.score !== 0)
+    return { equal: false, diffs: [SEARCH_EXHAUSTED], badIds: new Set() };
+  const best = result.best;
+  if (!best)
     return {
       equal: false,
       diffs: [MEMORY_MISMATCH],
       badIds: new Set(actual.allocations.map(a => a.id)),
     };
-  if (result.score === 0) return { equal: true, diffs: [], badIds: new Set() };
-  return collectDiffs(expected, actual, result.map, config);
+  if (best.score === 0) return { equal: true, diffs: [], badIds: new Set() };
+  return collectDiffs(expected, actual, best.map, config);
 }
 
-function bestHeapMapping(A, B, initial, aHeap, bHeap, config, mappedCount) {
-  let best = null;
+/** Mappings tried before grading gives up; pruning keeps real answers far below it. */
+export const MAX_SEARCH_NODES = 100000;
+
+/**
+ * Branch and bound over heap pairings. Scores only grow as blocks are paired, so a branch is
+ * cut once the score so far, plus the least each unpaired block must still cost, cannot beat
+ * the best complete mapping. Cheapest pairings are tried first, and the search stops at a
+ * perfect match.
+ */
+function bestHeapMapping(A, B, initial, aHeap, bHeap, config, gradedA, gradedB) {
+  let best = null,
+    nodes = 0,
+    exhausted = false;
   const used = new Set();
   const map = new Map(initial);
+  const twins = interchangeableBlocks(B, bHeap, gradedB);
+  const compatible = (a, b) =>
+    typeEquals(a.type, b.type) && (!config.compareLifetime || a.alive === b.alive);
+  // What pairing a with b costs whatever else is paired: pointer targets are not yet known.
+  const floor = new Map(
+    aHeap.map(a => [
+      a.id,
+      bHeap
+        .filter(b => compatible(a, b))
+        .map(b => [b.id, pairScore(A, B, a, b, new Map(), config, true)]),
+    ]),
+  );
+  const remainingFloor = i => {
+    let total = 0;
+    for (let j = i; j < aHeap.length; j++) {
+      let least = Number.POSITIVE_INFINITY;
+      for (const [bId, cost] of floor.get(aHeap[j].id))
+        if (!used.has(bId) && cost < least) least = cost;
+      total += least;
+    }
+    return total;
+  };
 
   function search(i) {
     if (i === aHeap.length) {
-      const score = scoreMapping(A, B, map, config, mappedCount);
+      const score = scoreMapping(A, B, map, config, gradedA.size);
       if (!best || score < best.score) best = { score, map: new Map(map) };
       return;
     }
     const a = aHeap[i];
-    const candidates = bHeap.filter(
-      b =>
-        !used.has(b.id) &&
-        typeEquals(a.type, b.type) &&
-        (!config.compareLifetime || a.alive === b.alive),
-    );
-    for (const b of candidates) {
+    const options = [];
+    const triedTwins = new Set();
+    for (const b of bHeap) {
+      if (used.has(b.id) || !compatible(a, b)) continue;
+      // Pairing `a` with either of two interchangeable blocks scores the same; try one.
+      const twin = twins.get(b.id);
+      if (twin !== undefined) {
+        if (triedTwins.has(twin)) continue;
+        triedTwins.add(twin);
+      }
+      map.set(a.id, b.id);
+      options.push({ b, score: scoreMappedAllocations(A, B, map, config, true) });
+      map.delete(a.id);
+    }
+    options.sort((x, y) => x.score - y.score);
+    for (const { b, score } of options) {
+      if (best?.score === 0) return;
+      if (++nodes > MAX_SEARCH_NODES) {
+        exhausted = true;
+        return;
+      }
       map.set(a.id, b.id);
       used.add(b.id);
-      // Partial pruning: already mapped pointers/values must not exceed current best.
-      const partialScore = scoreMappedAllocations(A, B, map, config, true);
-      if (!best || partialScore <= best.score) search(i + 1);
+      // Only a strictly better mapping replaces the best, so equal bounds are cut too.
+      if (!best || score + remainingFloor(i + 1) < best.score) search(i + 1);
       map.delete(a.id);
       used.delete(b.id);
     }
   }
 
   search(0);
-  return best;
+  return { best, exhausted };
+}
+
+/**
+ * Heap blocks of `state` that no graded object points to, keyed so that blocks with equal keys
+ * have the same type, lifetime and contents. Swapping two such blocks in any mapping leaves
+ * every score unchanged: their own comparison is identical, and no compared pointer can tell
+ * them apart. (Expired locals that are not graded, such as a loop's `p`, are never compared.)
+ */
+function interchangeableBlocks(state, heap, graded) {
+  const targeted = new Set();
+  for (const a of state.allocations.filter(a => graded.has(a.id)))
+    for (const s of scalarSubobjects(a, state))
+      if (s.value.kind === 'pointer') targeted.add(s.value.target.allocationId);
+  return new Map(
+    heap
+      .filter(b => !targeted.has(b.id))
+      .map(b => [b.id, JSON.stringify([b.type, b.alive, b.value])]),
+  );
 }
 
 function scoreMapping(A, B, map, config, mappedCount) {
@@ -232,28 +302,23 @@ function scoreMapping(A, B, map, config, mappedCount) {
 
 function scoreMappedAllocations(A, B, map, config, partial) {
   let score = 0;
-  for (const [aId, bId] of map.entries()) {
-    const a = getAllocation(A, aId),
-      b = getAllocation(B, bId);
-    if (!typeEquals(a.type, b.type)) {
-      score += 10;
-      continue;
-    }
-    if (config.compareLifetime && a.alive !== b.alive) score += 5;
+  for (const [aId, bId] of map.entries())
+    score += pairScore(A, B, getAllocation(A, aId), getAllocation(B, bId), map, config, partial);
+  return score;
+}
 
-    const as = scalarSubobjects(a, A),
-      bs = scalarSubobjects(b, B);
-    if (as.length !== bs.length) {
-      score += 10;
+function pairScore(A, B, a, b, map, config, partial) {
+  if (!typeEquals(a.type, b.type)) return 10;
+  let score = config.compareLifetime && a.alive !== b.alive ? 5 : 0;
+  const as = scalarSubobjects(a, A),
+    bs = scalarSubobjects(b, B);
+  if (as.length !== bs.length) return score + 10;
+  for (let i = 0; i < as.length; i++) {
+    if (!samePath(as[i].ref.path, bs[i].ref.path)) {
+      score += 3;
       continue;
     }
-    for (let i = 0; i < as.length; i++) {
-      if (!samePath(as[i].ref.path, bs[i].ref.path)) {
-        score += 3;
-        continue;
-      }
-      score += scalarMismatchScore(A, B, as[i], bs[i], map, config, partial);
-    }
+    score += scalarMismatchScore(A, B, as[i], bs[i], map, config, partial);
   }
   return score;
 }

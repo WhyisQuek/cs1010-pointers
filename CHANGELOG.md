@@ -5,6 +5,8 @@
 ### Fixed
 
 - A code → diagram level whose answer has a one-past-the-end pointer is reported as undrawable instead of being impossible to solve: the diagram editor's target picker cannot choose a one-past boundary.
+- A loop that declares a large array no longer exhausts the browser's memory. Every step keeps a copy of memory, including expired loop locals, so `for (int i = 0; i < 40; i++) { int a[64][64]; }` used to hold about 1.2 GB. Execution now stops with a limit error once the steps together hold more than 2,048,000 scalars, enough for one 4096-scalar array over all 500 steps; playback up to that point is kept.
+- Grading no longer freezes on answers with many similar heap blocks. Heap matching tried every pairing of blocks, so nine identical leaked blocks took about 3 seconds and each extra block multiplied that by ten. It now stops at a perfect match, tries the cheapest pairings first, cuts branches that cannot beat the best so far, and tries only one of any set of blocks that cannot be told apart. Twenty such blocks compare in milliseconds, right or wrong. A search that still runs past 100,000 steps reports that it could not finish rather than guessing a mismatch.
 - A new call frame no longer opens on top of a heap block. Heap blocks keep the place they got when allocated, so in deep recursion (a recursive BST insert) later frames used to land on them; a new frame now skips past any heap block's column.
 
 ### Internal

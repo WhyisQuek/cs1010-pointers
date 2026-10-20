@@ -220,9 +220,12 @@ PointerViz executes in the browser, so the semantic layer enforces limits even w
 | Iterations per loop | 256 |
 | Visualized statements | 500 |
 | Total scalar subobjects per allocation | 4096 |
+| Scalars kept across all visualized steps | 2048000 |
 | Program output characters | 10000 |
 
 A loop that exceeds 256 iterations is stopped with an error. This prevents accidental infinite loops from freezing the page.
+
+Every visualized step keeps a copy of memory, including variables whose scope has ended, so the total is limited too. A single 4096-scalar array can stay in memory for all 500 steps. A loop that declares a large array in each iteration reaches the limit sooner, because every expired copy is kept.
 
 ## Other unsupported C features
 

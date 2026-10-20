@@ -140,7 +140,8 @@ Shared limits live in `language/limits.js`:
 - struct fields: 32;
 - call depth: 32;
 - iterations per loop: 256;
-- visualized statements: 500.
+- visualized statements: 500;
+- scalars kept across all snapshots: 4096 × 500.
 
 Limits belong in parser/interpreter code, not only the UI, because source input can bypass form controls.
 

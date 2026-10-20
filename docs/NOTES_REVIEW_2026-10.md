@@ -2,7 +2,12 @@
 
 This report checks the ten findings in `pointerviz-notes.pdf` against the code at
 `main`: whether each one reproduces, whether its suggested cause is right, what it
-missed, and what to change. No source code has been changed yet.
+missed, and what to change.
+
+**Status:** #10 (history budget) and #9 are fixed; see each section's
+*Resolution*. The regression tests are in
+[`test/notes-review.test.js`](../test/notes-review.test.js). Copy-on-write
+snapshots (#10) and findings 1–8 are still open.
 
 ## Method
 
@@ -321,6 +326,38 @@ Two problems compound (`equivalence.js:200–222`):
 **Test:** 12 identical leaked blocks, compared correct and wrong, each in under
 100 ms.
 
+**Resolution.** Fixed in `bestHeapMapping` (`src/pipeline/equivalence.js`),
+which is now a full branch and bound:
+
+- It stops at a score of 0 and prunes with `<`.
+- Before the search it computes a lower bound for every pairing: the cost that
+  does not depend on pointer targets. A branch is cut when the score so far plus
+  the cheapest remaining cost for every unpaired block cannot beat the best
+  mapping.
+- Candidates are tried cheapest first.
+- Only one block from each set of interchangeable blocks is tried. A block
+  counts as interchangeable when no *graded* object points to it. An
+  implementation detail matters here: the expired loop `p` in the repro does
+  point at its block, but it is not graded, so it must not stop the block from
+  counting as interchangeable.
+- The search gives up after 100 000 nodes with "PointerViz could not finish
+  comparing your memory: it has too many similar heap blocks". It never guesses
+  a mismatch.
+
+Comparison time after the fix (interpretation included):
+
+| Case | Before | After |
+| --- | --- | --- |
+| 8 identical blocks, correct / wrong | 276 / 268 ms | 22 / 7 ms |
+| 20 identical blocks, correct / wrong | hours (projected) | 15 / 15 ms |
+| 20 distinct values, all wrong | hours (projected) | 22 ms |
+| 12 pointers filled in reverse order | — | 11 ms |
+| 12-node ring vs two rings | — | 16 ms, specific diffs |
+
+The cap is still reachable by adversarial structure: 12 identical leaked nodes
+in two rings against four rings gives up after about 0.6 s. Before the fix, the
+same case would also have run for hours.
+
 ## 10. Execution history memory has no bound
 
 **Verdict: confirmed. The impact is much larger than the PDF says.**
@@ -362,6 +399,15 @@ The per-object, step and loop limits do not bound the product of the three.
 **Test:** `for (int i = 0; i < 120; i++) { int a[64][64]; }` either finishes
 under a set memory and time budget or raises the history-limit diagnostic.
 
+**Resolution (budget only).** `MAX_HISTORY_SCALARS` in `src/language/limits.js`
+is `MAX_OBJECT_SCALARS × MAX_TRACE_STEPS` (2 048 000), so one largest object can
+stay in memory for the longest trace. `snapshot()` in `runtime.js` adds each
+allocation's scalar count (from `validateObjectType`) before cloning, and throws
+a `LIMIT` diagnostic when the total is exceeded. Playback up to that point is
+kept. The repro now stops at step 65, after 0.9 s and 193 MB retained in
+Node, instead of running on to many gigabytes. Copy-on-write snapshots are still open; they would let
+programs like this run to completion.
+
 ---
 
 ## Recommended order
@@ -379,6 +425,6 @@ under a set memory and time budget or raises the history-limit diagnostic.
    states.
 
 Put each regression test in `test/c-semantics.test.js` (semantics),
-`test/maintenance.test.js` (equivalence and history limits) or
+`test/notes-review.test.js` (equivalence and history limits) or
 `e2e/sandbox.spec.js` (#7, #8). Record each fix in `CHANGELOG.md` and update
 `SUPPORTED_C.md` wherever the documented behaviour changes (#1, #2).

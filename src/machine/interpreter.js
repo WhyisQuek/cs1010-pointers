@@ -36,6 +36,7 @@ export function executeProgram(program) {
     trace: [],
     callDepth: 0,
     steps: 0,
+    historyScalars: 0,
     snapshotTraceIndex: 0,
     accesses: [],
     output: '',
