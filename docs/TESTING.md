@@ -23,7 +23,7 @@ npm run check:editions   # the student build must not contain the Level editor
 | `npm run test:addresses` | Simulated placement, LP64 offsets, provenance/status, history, atomic edits, view geometry, and address-independent grading/generation |
 | `npm run test:native` | Defined programs compared with a native LP64 C23 compiler |
 | `node --test test/maintenance.test.js` | Regressions from the [code audit](CODE_AUDIT.md): storage failures, level import, input range checks, labels, WASM paths; completion-only progress; course-pack loading and draft precedence |
-| `node --test test/notes-review.test.js` | Fixes from the [October 2026 review](NOTES_REVIEW_2026-10.md): the execution history limit, and heap matching that stays fast with many similar blocks |
+| `node --test test/notes-review.test.js` | Fixes from the [October 2026 review](NOTES_REVIEW_2026-10.md): copy-on-write snapshots and their limit, fast heap matching with many similar blocks, mismatched-type pointer arithmetic, one-past through `void *`, `free`'s dangling exemption, `malloc` sequencing, negative zero in generated C, and conversion-typed blocks. The editor keyboard escape and editing during playback are in `e2e/sandbox.spec.js` |
 
 `node --test test/diagnostics.test.js` checks that rejected programs carry the right [diagnostic category](SUPPORTED_C.md#diagnostics): not valid C, undefined behavior, not supported, or a PointerViz limit. `node --test test/c23.test.js` covers C23 behavior fixed after the [N3088 audit](C_SPEC_AUDIT_N3088.md): `bool` constants, integer constant types, `nullptr`, struct completeness, typedef scope, dangling temporary members, exact 64-bit integers, braced and empty initializers, `void *` and untyped `malloc` blocks, and `free` through a first member.
 

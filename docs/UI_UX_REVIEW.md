@@ -215,7 +215,7 @@ The existing typed target picker, explicit lifetime text, keyboard-operable fram
 Remaining concerns from source and browser inspection:
 
 - Names and “Value” labels look like static text until hover. Provide a clear selected-row treatment and a visible Details action on selection; make focus equivalent to hover.
-- The code editor intercepts Tab and Shift+Tab for indentation without an implemented keyboard escape convention. Add and disclose a way to leave the editor using the keyboard, then test it end to end.
+- ~~The code editor intercepts Tab and Shift+Tab for indentation without an implemented keyboard escape convention.~~ **Done (October 2026):** Escape then Tab (or Shift+Tab) leaves the editor. The textarea's accessible description discloses this, and an end-to-end test covers it.
 - Edge accessibility labels expose internal IDs such as `a1` and `a0`. Announce `p points to a` or the qualified member names instead.
 - Add understandable call-instance labels when repeated functions contain the same variable names. Avoid showing raw frame IDs as routine teaching copy.
 - Ensure Copy and target actions are usable on focus and touch, not only on hover. Keep keyboard target selection as a first-class alternative to dragging small handles.

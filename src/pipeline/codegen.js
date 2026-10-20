@@ -413,6 +413,8 @@ function numberToC(value, type) {
   if (type.name === 'long' && BigInt(value) === -(1n << 63n)) return '(-9223372036854775807L - 1)';
   let text = String(value);
   if (type.name === 'float' || type.name === 'double') {
+    // String(-0) is '0', but a negative zero is observable (printf prints -0.000000).
+    if (Object.is(value, -0)) text = '-0';
     if (!/[.eE]/.test(text)) text += '.0';
     return text + (type.name === 'float' ? 'f' : '');
   }

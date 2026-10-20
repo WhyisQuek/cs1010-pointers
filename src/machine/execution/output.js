@@ -7,6 +7,7 @@ import {
   parseFormat,
 } from '../../language/format.js';
 import { MAX_OUTPUT_CHARS } from '../../language/limits.js';
+import { CHAR } from '../../language/types.js';
 import { referenceLocation } from '../addresses.js';
 import { resolveRef } from '../memory.js';
 import { evalExpression } from './expressions.js';
@@ -91,7 +92,7 @@ function readString(ctx, pointer, limit, node) {
       throw diagnostic(UNDEFINED, `%s reads uninitialized ${resolved.label}`);
     if (resolved.value.value === 0) break;
     codes.push(resolved.value.value);
-    current = addToPointer(ctx.state, current, 1, node);
+    current = addToPointer(ctx.state, current, 1, node, CHAR);
   }
   return codes;
 }

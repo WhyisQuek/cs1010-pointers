@@ -114,7 +114,10 @@ export function evalSubscriptPointer(expr, ctx, env, frame) {
   requireInteger(index, expr);
   if (!isPointer(base.type) || base.value.kind !== 'pointer')
     throw semanticError(expr, 'subscript requires an array or concrete pointer', UNDEFINED);
-  return { type: base.type, value: addToPointer(ctx.state, base.value, index.value.value, expr) };
+  return {
+    type: base.type,
+    value: addToPointer(ctx.state, base.value, index.value.value, expr, base.type.to),
+  };
 }
 
 export function loadLValue(lvalue, ctx, node) {
@@ -137,12 +140,13 @@ export function loadLValue(lvalue, ctx, node) {
 
 /**
  * A pointer becomes indeterminate when its target's lifetime ends (C23 6.2.4p2), so using
- * its value is undefined. Every read of a pointer value, stored or temporary, checks this.
+ * its value is undefined. Every read of a pointer value, stored or temporary, checks this,
+ * except free's own argument (ctx.danglingReadExempt), so a second free reports a double free.
  */
 export function requireUsablePointerValue(value, ctx, node) {
   if (
     value.kind === 'pointer' &&
-    !ctx.allowDanglingRead &&
+    node !== ctx.danglingReadExempt &&
     !getAllocation(ctx.state, value.target.allocationId).alive
   ) {
     throw semanticError(node, 'use of dangling pointer whose target lifetime has ended', UNDEFINED);
@@ -154,6 +158,7 @@ export function assignToRef(targetRef, targetType, rv, ctx, node) {
     throw semanticError(node, 'cannot modify a string literal (undefined behavior)', UNDEFINED);
   const value = coerceRValue(targetType, rv, node, ctx).value;
   setRefValue(ctx.state, targetRef, value);
+  delete getAllocation(ctx.state, targetRef.allocationId).typedByConversion;
   ctx.accesses.push({ ref: targetRef, write: true, depth: ctx.callDepth });
   pushTrace(ctx, {
     kind: 'Write',
@@ -166,8 +171,9 @@ export function assignToRef(targetRef, targetType, rv, ctx, node) {
 }
 
 /**
- * Where a void * becomes a T *. An untyped malloc block takes T as its effective type
- * (C23 6.5p6), holding as many whole T objects as fit. Otherwise the result designates the
+ * Where a void * becomes a T *. An untyped malloc block takes T as its type, holding as many
+ * whole T objects as fit. This is a PointerViz simplification: in C (6.5p6) a malloc block's
+ * effective type comes from the first store, not a conversion. Otherwise the result designates the
  * T object at the same address, if one exists; if none does, it keeps pointing at the
  * original object and any access through it is diagnosed (see requireAccessType).
  */
@@ -183,6 +189,8 @@ function convertedTarget(target, type, ctx, node) {
       );
     const typed = typeHeapBlock(ctx.state, allocation, type);
     if (typed) {
+      // Until something is stored, C would let another type use the block (see requireAccessType).
+      allocation.typedByConversion = true;
       pushTrace(ctx, {
         kind: 'TypeBlock',
         allocationId: allocation.id,
@@ -208,6 +216,14 @@ function requireAccessType(resolved, type, node) {
       node,
       `the ${resolved.type.bytes}-byte heap block is too small to hold a ${typeToString(type)}`,
       UNDEFINED,
+    );
+  // C types a malloc block at its first store, so before one any type may use it; PointerViz
+  // typed it when it was first converted (convertedTarget) and cannot change it.
+  if (resolved.allocation.typedByConversion)
+    throw semanticError(
+      node,
+      `${resolved.label} was given the type ${typeToString(resolved.allocation.type)} when a pointer to it was first converted; using it as ${typeToString(type)} is not modeled`,
+      UNSUPPORTED,
     );
   // Character access to any object, and signed/unsigned twins, are defined but byte-level
   // views are not modeled; every other mismatch is undefined.

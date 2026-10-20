@@ -63,14 +63,27 @@ export function snapshot(ctx, stmt, frame) {
   ctx.steps++;
   if (ctx.steps > MAX_TRACE_STEPS)
     throw diagnostic(LIMIT, `execution exceeded ${MAX_TRACE_STEPS} visualized statements`);
-  // Every snapshot copies every allocation, expired ones included (validateObjectType counts scalars).
-  for (const a of ctx.state.allocations)
-    ctx.historyScalars += validateObjectType(a.type, ctx.state.structTypes);
+  // Copy-on-write: an allocation unchanged since the previous snapshot shares that snapshot's
+  // copy, so expired locals are stored once rather than at every later step. Snapshot states
+  // are read-only; the UI clones one before editing it (MemoryCanvas's mutate, Sandbox).
+  const previous = new Map(ctx.snapshots.at(-1)?.state.allocations.map(a => [a.id, a]));
+  let copied = 0;
+  const allocations = ctx.state.allocations.map(a => {
+    const before = previous.get(a.id);
+    // Nothing writes to an object whose lifetime has ended (every store requires a live one),
+    // so one that was already dead needs no comparison.
+    if (before && ((!before.alive && !a.alive) || sameData(before, a))) return before;
+    copied += validateObjectType(a.type, ctx.state.structTypes);
+    return structuredClone(a);
+  });
+  ctx.historyScalars += copied;
   if (ctx.historyScalars > MAX_HISTORY_SCALARS)
     throw diagnostic(
       LIMIT,
-      `execution history exceeded ${MAX_HISTORY_SCALARS} stored values (every step keeps a copy of memory)`,
+      `execution history exceeded ${MAX_HISTORY_SCALARS} stored values (every step keeps a copy of what changed in memory)`,
     );
+  const state = cloneState({ ...ctx.state, allocations: [] });
+  state.allocations = allocations;
   ctx.snapshots.push({
     line: stmt.loc?.startLine ?? null,
     nextLine: null,
@@ -80,9 +93,19 @@ export function snapshot(ctx, stmt, frame) {
     statement: stmt.kind,
     events: ctx.trace.slice(ctx.snapshotTraceIndex),
     output: ctx.output,
-    state: cloneState(ctx.state),
+    state,
   });
   ctx.snapshotTraceIndex = ctx.trace.length;
+}
+
+/** Deep equality of plain cloned data; Object.is keeps -0 and 0 apart. */
+function sameData(a, b) {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every(k => Object.hasOwn(b, k) && sameData(a[k], b[k]));
 }
 
 export function pushTrace(ctx, event) {

@@ -355,7 +355,10 @@ export function typeHeapBlock(state, allocation, elementType) {
  */
 export function outermostRefAtAddress(state, target) {
   const allocation = getAllocation(state, target.allocationId);
-  const offset = referenceOffset(state, target).offset;
+  const { offset, onePast } = referenceOffset(state, target);
+  // A one-past boundary designates no object; the object that may start there (the next row)
+  // is a different array, and pointer bounds follow the original one.
+  if (onePast) return target;
   return (
     addressableSubobjects(allocation, state).find(
       s => referenceOffset(state, s.ref).offset === offset,
@@ -369,7 +372,9 @@ export function outermostRefAtAddress(state, target) {
  */
 export function refAtSameAddress(state, target, type) {
   const allocation = getAllocation(state, target.allocationId);
-  const offset = referenceOffset(state, target).offset;
+  const { offset, onePast, type: element } = referenceOffset(state, target);
+  // One past an array of `type` stays one past it (see outermostRefAtAddress).
+  if (onePast) return typeEquals(element, type) ? target : null;
   return (
     addressableSubobjects(allocation, state).find(
       s => typeEquals(s.type, type) && referenceOffset(state, s.ref).offset === offset,

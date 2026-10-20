@@ -144,7 +144,7 @@ Supported:
 - rejection of freeing stack/interior pointers;
 - dangling aliases after `free`.
 
-`malloc` returns a `void *` to an **untyped block** of the requested size, shown in the diagram as an `n-byte block`. The size may be any arithmetic value; it converts to `size_t`. The block takes a type the first time a pointer to it is converted to `T *` (C23's effective-type rule, 6.5p6). It then holds as many whole `T` objects as fit, so `malloc(5)` converted to `int *` holds one `int` and one unused byte. If not even one `T` fits, the block stays untyped and dereferencing the pointer is undefined behavior. A `void *` converted back to `T *` designates the `T` object at that address. Reading an object through a pointer to a different type is diagnosed: as undefined behavior in general, or as not supported for the cases C allows but PointerViz does not model (character access, and the signed/unsigned twin of the type).
+`malloc` returns a `void *` to an **untyped block** of the requested size, shown in the diagram as an `n-byte block`. The size may be any arithmetic value; it converts to `size_t`. The block takes a type the first time a pointer to it is converted to `T *`. This is a PointerViz simplification: in C (6.5p6) a malloc block gets its effective type from the first store, so until then a pointer of another type may use it too. PointerViz reports that case as not supported, for example converting the block to both `int *` and `double *` and then storing a `double`. The block then holds as many whole `T` objects as fit, so `malloc(5)` converted to `int *` holds one `int` and one unused byte. If not even one `T` fits, the block stays untyped and dereferencing the pointer is undefined behavior. A `void *` converted back to `T *` designates the `T` object at that address. Reading an object through a pointer to a different type is diagnosed: as undefined behavior in general, or as not supported for the cases C allows but PointerViz does not model (character access, and the signed/unsigned twin of the type). Pointer arithmetic, subtraction and ordering through such a pointer (a `char *` into an `int`, say) are not supported either, since PointerViz counts steps in whole objects rather than bytes. A `void *` holding a one-past-the-end pointer keeps it: converted back, it is still one past the same array, not the start of the next row.
 
 `calloc(n, size)` allocates an untyped block of `n * size` bytes, like `malloc`, but every byte is zero: when the block takes a type, each object starts as `0`, `0.0`, `false` or a null pointer instead of uninitialized. Both arguments convert to `size_t`. If either is zero it returns `NULL`, like `malloc(0)`; if their product does not fit in `size_t` it returns `NULL`, as C requires.
 
@@ -220,12 +220,12 @@ PointerViz executes in the browser, so the semantic layer enforces limits even w
 | Iterations per loop | 256 |
 | Visualized statements | 500 |
 | Total scalar subobjects per allocation | 4096 |
-| Scalars kept across all visualized steps | 2048000 |
+| Scalars copied into the visualized steps | 2048000 |
 | Program output characters | 10000 |
 
 A loop that exceeds 256 iterations is stopped with an error. This prevents accidental infinite loops from freezing the page.
 
-Every visualized step keeps a copy of memory, including variables whose scope has ended, so the total is limited too. A single 4096-scalar array can stay in memory for all 500 steps. A loop that declares a large array in each iteration reaches the limit sooner, because every expired copy is kept.
+Every visualized step keeps a copy of each object that changed since the step before; unchanged objects, including variables whose scope has ended, are shared. The copies are limited in total: enough for the largest object (4096 scalars) to change at every one of the 500 steps.
 
 ## Other unsupported C features
 

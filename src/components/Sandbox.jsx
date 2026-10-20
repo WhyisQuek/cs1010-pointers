@@ -136,9 +136,18 @@ export default function Sandbox() {
   const onCode = value => {
     setBreakpoints(b => shiftBreakpoints(code, value, b));
     setCode(value);
+    if (snapshots) {
+      // Playback no longer matches the code. Keep the memory on screen (as Edit does) rather
+      // than falling back to the run's final state, and say why the steps went away.
+      setState(structuredClone(shownState));
+      setNotice({
+        kind: 'ok',
+        text: `Code changed, so playback ended. The diagram still shows step ${step}; Run to replay.`,
+      });
+      // Errors are about the old code; other notices (this one) expire by themselves.
+    } else setNotice(n => (n?.kind === 'err' ? null : n));
     setSnapshots(null);
     setSavedPlayback(null);
-    setNotice(null);
   };
 
   const memoryContext = shownSnapshot

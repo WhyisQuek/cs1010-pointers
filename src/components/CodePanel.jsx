@@ -1,5 +1,5 @@
 /** Syntax-highlighted C editor shared by the sandbox, challenges and level editor. */
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef } from 'react';
 import { highlightC } from '../language/highlight.js';
 import {
   INDENT,
@@ -12,10 +12,12 @@ import {
 // Keep in sync with .code-highlight padding and line-height (13px × 1.6) in styles.css.
 const PADDING_TOP = 12;
 const LINE_HEIGHT = 20.8;
+const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
 
 /**
  * Tab inserts four spaces and Shift+Tab outdents instead of moving browser focus; with a
  * selection across lines, both act on every selected line and keep the lines selected.
+ * Escape then Tab (or Shift+Tab) moves focus out instead, so the editor is no keyboard trap.
  * Enter carries indentation forward (one level deeper after `{`), and `}` on a blank line outdents.
  * With onToggleBreakpoint, clicking a line number or pressing F9 in the editor toggles a breakpoint.
  */
@@ -31,6 +33,8 @@ export function CodePanel({
   const activeClass = activeError ? ' error-line' : '';
   const lines = useMemo(() => highlightC(code), [code]);
   const wrap = useRef(null);
+  const escaped = useRef(false);
+  const hintId = useId();
   useEffect(() => {
     if (!activeLine || !wrap.current) return;
     const el = wrap.current;
@@ -41,6 +45,12 @@ export function CodePanel({
   }, [activeLine]);
 
   const onKeyDown = e => {
+    // Escape arms the next key; a Tab right after it leaves the editor as the browser would.
+    if (!MODIFIERS.has(e.key)) {
+      const leaving = escaped.current && e.key === 'Tab';
+      escaped.current = e.key === 'Escape';
+      if (leaving) return;
+    }
     if (e.key === 'F9' && onToggleBreakpoint && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       const el = e.currentTarget;
@@ -138,6 +148,7 @@ export function CodePanel({
         <textarea
           className="code-input"
           aria-label="C source code"
+          aria-describedby={readOnly ? undefined : hintId}
           wrap="off"
           spellCheck={false}
           value={code}
@@ -145,7 +156,13 @@ export function CodePanel({
           placeholder="int main(void) { ... }"
           onChange={e => onCode?.(e.target.value)}
           onKeyDown={onKeyDown}
+          onBlur={() => (escaped.current = false)}
         />
+        {!readOnly && (
+          <span id={hintId} className="sr-only">
+            Tab indents. Press Escape, then Tab, to leave the editor.
+          </span>
+        )}
       </div>
     </div>
   );

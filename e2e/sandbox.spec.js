@@ -355,3 +355,45 @@ test('the inspector overlays the canvas without resizing it', async ({ page }) =
   await expect(page.getByRole('complementary', { name: 'Inspect a' })).toBeVisible();
   expect(await canvas.boundingBox()).toEqual(before);
 });
+
+test('Escape then Tab leaves the code editor; Tab alone indents', async ({ page }) => {
+  await openApp(page);
+  const editor = code(page);
+  await editor.fill('int main(void) {}');
+  await editor.focus();
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Tab');
+  await expect(editor).toHaveValue('    int main(void) {}');
+  await page.keyboard.press('Shift+Tab');
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveAccessibleDescription(/Press Escape, then Tab, to leave the editor/);
+
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Tab');
+  await expect(editor).not.toBeFocused();
+  await expect(editor).toHaveValue('int main(void) {}');
+
+  await editor.focus();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Shift+Tab');
+  await expect(editor).not.toBeFocused();
+});
+
+test('editing code during playback keeps the step on screen and says why playback ended', async ({
+  page,
+}) => {
+  await openApp(page);
+  await code(page).fill('int main(void) {\n    int a = 1;\n    a = 2;\n    return 0;\n}');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await expect(page.locator('.mem-cell .val')).toHaveText('1');
+
+  await code(page).press('End');
+  await code(page).pressSequentially(' // edited');
+  await expect(
+    page.getByText(/^Code changed, so playback ended\. The diagram still shows step 2/),
+  ).toBeVisible();
+  await expect(page.locator('.mem-cell .val')).toHaveText('1');
+  await expect(page.locator('.step-count')).toHaveCount(0);
+});

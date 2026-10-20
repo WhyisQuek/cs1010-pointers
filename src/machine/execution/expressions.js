@@ -186,7 +186,13 @@ function evaluateExpression(expr, ctx, env, frame, expectedType = null) {
           throw semanticError(expr, 'pointer update requires a concrete pointer', UNDEFINED);
         next = {
           type: current.type,
-          value: addToPointer(ctx.state, current.value, expr.operator === '++' ? 1 : -1, expr),
+          value: addToPointer(
+            ctx.state,
+            current.value,
+            expr.operator === '++' ? 1 : -1,
+            expr,
+            current.type.to,
+          ),
         };
       } else {
         requireNumber(current, expr);

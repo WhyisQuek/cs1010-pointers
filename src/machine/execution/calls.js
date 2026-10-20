@@ -134,7 +134,11 @@ export function evalCall(expr, ctx, env, frame) {
   if (expr.name === 'malloc') {
     if (expr.arguments.length !== 1)
       throw semanticError(expr, 'malloc expects exactly one argument', INVALID);
-    return allocateBlock(expr, sizeArgument(expr.arguments[0], ctx, env, frame), ctx);
+    const start = ctx.accesses.length;
+    const bytes = sizeArgument(expr.arguments[0], ctx, env, frame);
+    // As for any call, the argument's side effects complete before the call (C23 6.5.2.2p8).
+    for (const access of ctx.accesses.slice(start)) access.update = false;
+    return allocateBlock(expr, bytes, ctx);
   }
 
   if (expr.name === 'calloc') {
@@ -162,13 +166,20 @@ export function evalCall(expr, ctx, env, frame) {
   if (expr.name === 'free') {
     if (expr.arguments.length !== 1)
       throw semanticError(expr, 'free expects exactly one argument', INVALID);
+    // Reading the freed pointer itself is allowed, so free(p); free(p); reports a double free.
+    // Only the argument's own load is exempt: reads while computing it (an argument to a
+    // call, an index, a called function's body) are checked as usual.
+    const arg = expr.arguments[0];
+    const saved = ctx.danglingReadExempt,
+      start = ctx.accesses.length;
+    ctx.danglingReadExempt = arg;
     let rv;
-    ctx.allowDanglingRead = true;
     try {
-      rv = evalExpression(expr.arguments[0], ctx, env, frame, null);
+      rv = evalExpression(arg, ctx, env, frame, null);
     } finally {
-      ctx.allowDanglingRead = false;
+      ctx.danglingReadExempt = saved;
     }
+    for (const access of ctx.accesses.slice(start)) access.update = false;
     if (isNullLike(rv)) return { type: { kind: 'void' }, value: { kind: 'void' } };
     if (!isPointer(rv.type) || rv.value.kind !== 'pointer')
       throw semanticError(expr, 'free expects a pointer or NULL', INVALID);

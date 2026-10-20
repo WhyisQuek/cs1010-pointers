@@ -4,10 +4,25 @@ This report checks the ten findings in `pointerviz-notes.pdf` against the code a
 `main`: whether each one reproduces, whether its suggested cause is right, what it
 missed, and what to change.
 
-**Status:** #10 (history budget) and #9 are fixed; see each section's
-*Resolution*. The regression tests are in
-[`test/notes-review.test.js`](../test/notes-review.test.js). Copy-on-write
-snapshots (#10) and findings 1–8 are still open.
+**Status: all ten findings are fixed.** For #2, only the "now" part is done:
+an honest diagnostic and corrected docs; store-time typing stays with the
+planned allocation redesign. The table below says how each was resolved and
+where it is tested. Unit tests are in
+[`test/notes-review.test.js`](../test/notes-review.test.js), and browser tests
+for #7 and #8 are in [`e2e/sandbox.spec.js`](../e2e/sandbox.spec.js).
+
+| # | Resolution |
+| --- | --- |
+| 1 | `addToPointer` takes the pointee type; `requireElementStride` (`pointerArithmetic.js`) reports `UNSUPPORTED` when the element and pointee sizes differ. Subtraction and ordering check it too, unless both pointers are at the same position. |
+| 2 | Conversion-typed blocks are marked `typedByConversion` until their first store. A different-type access before that store is `UNSUPPORTED` with an accurate message. `SUPPORTED_C.md` no longer attributes this to 6.5p6. |
+| 3 | `outermostRefAtAddress` and `refAtSameAddress` (`memory.js`) keep one-past references. |
+| 4 | `ctx.danglingReadExempt` holds the argument node of `free`, so only that node's own load is exempt. |
+| 5 | `malloc` and `free` clear the `update` flags of their argument accesses. |
+| 6 | `numberToC` emits `-0.0` / `-0.0f`. Grading still treats both zeros as equal, deliberately. |
+| 7 | Escape arms a one-shot; the next Tab or Shift+Tab moves focus. This is disclosed through `aria-describedby`. |
+| 8 | The first code edit during playback copies the displayed state and posts a notice. Later edits clear only error notices. |
+| 9 | Branch and bound with lower bounds, best-first ordering, symmetry breaking and a node cap (see below). |
+| 10 | Copy-on-write snapshots plus a total copy budget (see below). |
 
 ## Method
 
@@ -399,14 +414,25 @@ The per-object, step and loop limits do not bound the product of the three.
 **Test:** `for (int i = 0; i < 120; i++) { int a[64][64]; }` either finishes
 under a set memory and time budget or raises the history-limit diagnostic.
 
-**Resolution (budget only).** `MAX_HISTORY_SCALARS` in `src/language/limits.js`
-is `MAX_OBJECT_SCALARS × MAX_TRACE_STEPS` (2 048 000), so one largest object can
-stay in memory for the longest trace. `snapshot()` in `runtime.js` adds each
-allocation's scalar count (from `validateObjectType`) before cloning, and throws
-a `LIMIT` diagnostic when the total is exceeded. Playback up to that point is
-kept. The repro now stops at step 65, after 0.9 s and 193 MB retained in
-Node, instead of running on to many gigabytes. Copy-on-write snapshots are still open; they would let
-programs like this run to completion.
+**Resolution.** `snapshot()` in `runtime.js` is now copy-on-write. An
+allocation that is deep-equal to its copy in the previous snapshot, or was dead
+in both, reuses that copy. The deep-equality check uses `Object.is`, so `-0` and
+`0` stay distinct. Skipping dead objects is safe because every store requires a
+live object; without that shortcut the deep comparisons took 10 s for the repro.
+
+The audit of snapshot consumers found that all UI edits go through
+`MemoryCanvas`'s `mutate`, which clones first and only runs on editable
+diagrams, and that Sandbox clones before editing. So the shared objects are
+never mutated.
+
+`MAX_HISTORY_SCALARS` (`MAX_OBJECT_SCALARS × MAX_TRACE_STEPS` = 2 048 000) now
+counts only the scalars actually copied. When it is exceeded, `snapshot()`
+throws a `LIMIT` diagnostic and keeps playback up to that point.
+
+| Repro (`int a[64][64]` per iteration) | Before | After |
+| --- | --- | --- |
+| 40 iterations | 1.24 GB, 6.0 s | 37 MB, 0.16 s |
+| 120 iterations | about 12 GB (projected) | 111 MB, 0.46 s, runs to completion |
 
 ---
 

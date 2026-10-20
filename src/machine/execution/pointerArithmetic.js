@@ -1,10 +1,19 @@
 /** Pointer offsets are only defined within one array (or one object as a one-element array). */
-import { INVALID, UNDEFINED } from '../../language/diagnostics.js';
-import { isArray, isStruct, resolveStructType } from '../../language/types.js';
+import { INVALID, UNDEFINED, UNSUPPORTED } from '../../language/diagnostics.js';
+import {
+  isArray,
+  isStruct,
+  pointer,
+  resolveStructType,
+  sizeOf,
+  typeToString,
+} from '../../language/types.js';
+import { referenceOffset } from '../addresses.js';
 import { getAllocation, pointerValue, ref } from '../memory.js';
 import { semanticError } from './runtime.js';
 
-export function addToPointer(state, value, delta, node) {
+/** `pointeeType` is the type the pointer is declared to point to; one step moves its size. */
+export function addToPointer(state, value, delta, node, pointeeType) {
   // A 64-bit offset beyond 2^53 is stored as a BigInt; it lies far outside any object.
   if (typeof delta === 'bigint')
     throw semanticError(node, `pointer arithmetic moves outside allocation bounds`, UNDEFINED);
@@ -25,6 +34,7 @@ export function addToPointer(state, value, delta, node) {
       UNDEFINED,
     );
   }
+  if (delta !== 0) requireElementStride(state, pos, pointeeType, node);
   const next = pos.index + delta;
   if (next < 0 || next > pos.length)
     throw semanticError(
@@ -42,6 +52,22 @@ export function addToPointer(state, value, delta, node) {
         : [...pos.prefix, next],
     ),
   );
+}
+
+/**
+ * Positions count whole elements of the array (or the whole object) a pointer is in. A pointer
+ * converted through void * can have a different pointee type, such as a char * to an int; its
+ * steps would be bytes, and byte-level views are not modeled (see requireAccessType).
+ */
+export function requireElementStride(state, pos, pointeeType, node) {
+  const at = referenceOffset(state, ref(pos.allocationId, pos.prefix)).type;
+  const element = pos.singleton ? at : at.of;
+  if (sizeOf(element, state.structTypes) !== sizeOf(pointeeType, state.structTypes))
+    throw semanticError(
+      node,
+      `${typeToString(pointer(pointeeType))} arithmetic on ${typeToString(element)} is not modeled (the pointer type does not match the object it points into)`,
+      UNSUPPORTED,
+    );
 }
 
 /** Find the nearest array component in a reference path, including arrays inside structs. */

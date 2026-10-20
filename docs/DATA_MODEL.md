@@ -223,7 +223,7 @@ Typical control-flow trace events include:
 { kind: 'Continue', ... }
 ```
 
-Snapshots clone the full state so the UI can replay execution without re-running the program.
+Snapshots hold the full state so the UI can replay execution without re-running the program. They are copy-on-write: an allocation unchanged since the previous snapshot is the same object in both, so an expired loop local is stored once rather than at every later step. Snapshot states are therefore read-only; clone one before editing it, as the diagram editor and Sandbox already do. The total number of scalars copied into snapshots is limited (see [SUPPORTED_C.md](SUPPORTED_C.md#safety-limits)).
 
 ## 8. Presentation state
 

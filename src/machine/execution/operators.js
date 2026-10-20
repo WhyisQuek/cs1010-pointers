@@ -17,7 +17,7 @@ import {
 import { addressOffset } from '../addresses.js';
 import { ref, resolveRef, samePath } from '../memory.js';
 import { evalExpression } from './expressions.js';
-import { addToPointer, arrayPosition } from './pointerArithmetic.js';
+import { addToPointer, arrayPosition, requireElementStride } from './pointerArithmetic.js';
 import {
   intResult,
   isIntegerRuntime,
@@ -79,6 +79,7 @@ export function evalBinary(expr, ctx, env, frame) {
           left.value,
           expr.operator === '+' ? right.value.value : -right.value.value,
           expr,
+          left.type.to,
         ),
       };
     }
@@ -87,7 +88,7 @@ export function evalBinary(expr, ctx, env, frame) {
         throw semanticError(expr, 'pointer arithmetic requires a concrete pointer', UNDEFINED);
       return {
         type: right.type,
-        value: addToPointer(ctx.state, right.value, left.value.value, expr),
+        value: addToPointer(ctx.state, right.value, left.value.value, expr, right.type.to),
       };
     }
     if (isNumberRuntime(left) && isNumberRuntime(right)) {
@@ -109,6 +110,8 @@ export function evalBinary(expr, ctx, env, frame) {
           'pointer subtraction requires pointers into the same array',
           UNDEFINED,
         );
+      // Equal positions differ by 0 whatever the step; otherwise the units must be elements.
+      if (a.index !== b.index) requireElementStride(ctx.state, a, left.type.to, expr);
       return {
         type: { kind: 'primitive', name: 'long' },
         value: { kind: 'scalar', value: a.index - b.index },
@@ -141,6 +144,7 @@ export function evalCompoundAssignment(operator, left, right, ctx, node) {
         left.value,
         op === '+' ? right.value.value : -right.value.value,
         node,
+        left.type.to,
       ),
     };
   }
@@ -238,6 +242,7 @@ function compareScalars(left, right, ctx, node) {
         UNDEFINED,
       );
     }
+    if (a.index !== b.index) requireElementStride(ctx.state, a, left.type.to, node);
     return Math.sign(a.index - b.index);
   }
   throw semanticError(
