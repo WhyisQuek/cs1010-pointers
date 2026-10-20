@@ -174,3 +174,13 @@ test('C highlighting preserves text, multiline comments, strings and trailing li
   assert.ok(lines[3].some(t => t.kind === 'keyword' && t.text === 'int'));
   assert.ok(lines[3].some(t => t.kind === 'function' && t.text === 'main'));
 });
+
+test('C highlighting keeps digit-led tokens whole instead of dropping their digits', () => {
+  const code = "6int main() { double d = 1e+5 + .5 + 0x1p3; int b = 0b101, k = 1'000; f(1, 'a'); }";
+  const lines = highlightC(code);
+  assert.equal(lines.map(line => line.map(t => t.text).join('')).join('\n'), code);
+  const numbers = lines[0].filter(t => t.kind === 'number').map(t => t.text);
+  assert.deepEqual(numbers, ['6int', '1e+5', '.5', '0x1p3', '0b101', "1'000", '1']);
+  assert.ok(lines[0].some(t => t.kind === 'function' && t.text === 'main'));
+  assert.ok(lines[0].some(t => t.kind === 'string' && t.text === "'a'"));
+});

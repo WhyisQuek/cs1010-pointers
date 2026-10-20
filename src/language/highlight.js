@@ -1,10 +1,14 @@
 import { C_KEYWORDS } from './types.js';
 
-/** Lossless C tokenization for display, including incomplete code while typing. */
+/**
+ * Lossless C tokenization for display, including incomplete code while typing.
+ * Numbers follow the C pp-number rule (C23 6.4.8), so `1e+5`, `0x1p3`, `1'000` and typos
+ * like `6int` stay one token; the final `[\s\S]` keeps any other character from being dropped.
+ */
 export function highlightC(code) {
   const tokens =
     code.match(
-      /\/\*[\s\S]*?(?:\*\/|(?![\s\S]))|\/\/[^\n]*|"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?|^[\t ]*#[^\n]*|\b(?:0[xX][\da-fA-F]+|\d+(?:\.\d+)?)[uUlLfF]*\b|[A-Za-z_]\w*|\s+|[^\w\s]/gm,
+      /\/\*[\s\S]*?(?:\*\/|(?![\s\S]))|\/\/[^\n]*|"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?|^[\t ]*#[^\n]*|\.?\d(?:[eEpP][+-]|'\w|[\w.])*|[A-Za-z_]\w*|\s+|[^\w\s]|[\s\S]/gm,
     ) ?? [];
   let offset = 0;
   const lines = [[]];
@@ -16,7 +20,7 @@ export function highlightC(code) {
           ? 'preprocessor'
           : /^["']/.test(text)
             ? 'string'
-            : /^\d/.test(text) || text === 'NULL'
+            : /^\.?\d/.test(text) || text === 'NULL'
               ? 'number'
               : C_KEYWORDS.has(text)
                 ? 'keyword'
