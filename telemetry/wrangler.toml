@@ -1,0 +1,20 @@
+# Cloudflare Worker that collects PointerViz usage events. See docs/TELEMETRY.md.
+name = "pointerviz-telemetry"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Sites allowed to send events, comma-separated, without a path.
+ALLOWED_ORIGINS = "https://whyisquek.github.io,https://viz.cs1010.org"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pointerviz-telemetry"
+# Printed by `npx wrangler d1 create pointerviz-telemetry`.
+database_id = "9a1b0e53-7d81-4a1a-8ac6-7f520f262cc3"
+
+# Per-browser limit; a student pressing Run repeatedly stays well under it.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }

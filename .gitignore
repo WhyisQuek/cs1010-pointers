@@ -12,6 +12,10 @@ Thumbs.db
 playwright-report/
 test-results/
 
+# Wrangler's local state and secrets for the telemetry Worker
+.wrangler/
+.dev.vars
+
 # Archived working notes (kept locally only)
 docs/archive/
 

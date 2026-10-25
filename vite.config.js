@@ -3,8 +3,13 @@
  * web-tree-sitter is excluded from dependency pre-bundling so its WASM loader
  * can resolve the runtime correctly.
  */
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+// Vite reads VITE_* variables after loading this file, so the app (telemetry events) sees the
+// package version as import.meta.env.VITE_APP_VERSION.
+process.env.VITE_APP_VERSION ??= JSON.parse(readFileSync('package.json', 'utf8')).version;
 
 // Large, rarely changing libraries get their own long-cacheable chunks.
 const vendorChunk = (name, packages) => ({

@@ -36,6 +36,8 @@ jobs:
         run: npm run build -- --base "${PAGES_BASE_PATH}/"
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # Telemetry collector (docs/TELEMETRY.md); left unset, the site sends nothing.
+          VITE_TELEMETRY_URL: ${{ vars.TELEMETRY_URL }}
       # Built at the domain root; rebuild with --base for wherever it is hosted.
       - name: Build the instructor site
         run: npm run build:instructor

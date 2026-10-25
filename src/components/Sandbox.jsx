@@ -13,6 +13,7 @@ import { loadDraft, saveDraft } from '../data/drafts.js';
 import { pausedLine } from '../machine/navigation.js';
 import { leaksByStep } from '../flow/structureLayout.js';
 import { useViewPreference } from '../data/viewPreference.js';
+import { telemetry } from '../data/telemetry.js';
 
 const STARTER = `int main(void) {
     int a = 10;
@@ -45,11 +46,8 @@ export default function Sandbox() {
   useEffect(() => saveDraft(code, snapshots ? null : state), [code, state, snapshots]);
   const [canvasSession, setCanvasSession] = useState(0);
   const [savedPlayback, setSavedPlayback] = useState(null);
-  const reportError = e =>
-    setNotice({
-      kind: 'err',
-      text: e instanceof ValidationError ? e.errors.join('\n') : describeError(e),
-    });
+  const errorText = e => (e instanceof ValidationError ? e.errors.join('\n') : describeError(e));
+  const reportError = e => setNotice({ kind: 'err', text: errorText(e) });
   useEffect(() => {
     if (notice?.kind !== 'ok') return;
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);
@@ -67,14 +65,17 @@ export default function Sandbox() {
     try {
       const result = interpret(code);
       loadPlayback(result, 0);
+      telemetry.track('run', { code, steps: result.snapshots.length, error: null });
       setNotice({
         kind: 'ok',
         text: `Ready: ${result.snapshots.length} execution steps. Select Step into to begin.`,
       });
     } catch (e) {
+      // steps is null when the code did not compile, so no step ran.
+      const steps = e.playback ? e.playback.snapshots.length : null;
+      telemetry.track('run', { code, steps, error: errorText(e) });
       if (!e.playback) return reportError(e);
       // A runtime error opens playback at the step where execution stopped.
-      const steps = e.playback.snapshots.length;
       loadPlayback(e.playback, steps);
       setNotice({
         kind: 'err',
@@ -99,14 +100,19 @@ export default function Sandbox() {
 
   // Generates from the memory on screen, which during playback is the selected step.
   const diagramToCode = () => {
+    // step is null for an edited diagram, which is not part of a playback.
+    const shown = { state: shownState, step: snapshots ? step : null };
     try {
-      setCode(generate(shownState));
+      const generated = generate(shownState);
+      telemetry.track('generate', { ...shown, code: generated, error: null });
+      setCode(generated);
       setBreakpoints(new Set());
       if (snapshots) setState(structuredClone(shownState));
       setSnapshots(null);
       setSavedPlayback(null);
       setNotice({ kind: 'ok', text: 'Generated C from the memory shown.' });
     } catch (e) {
+      telemetry.track('generate', { ...shown, code: null, error: errorText(e) });
       reportError(e);
     }
   };

@@ -8,6 +8,7 @@ import { loadCourseLevels } from './data/levels.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Sandbox from './components/Sandbox.jsx';
 import Challenges from './components/Challenges.jsx';
+import TelemetryNotice from './components/TelemetryNotice.jsx';
 
 // [id, label, component, keepAlive]. A kept-alive page stays mounted while hidden, so the
 // sandbox keeps its code, diagram, playback, layout and undo history across tab switches,
@@ -62,6 +63,7 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <TelemetryNotice />
       </header>
       {PAGES.map(
         ([id, , Page, keepAlive]) =>

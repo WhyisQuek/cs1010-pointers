@@ -143,6 +143,8 @@ production hosting process.
 
 Accounts, shared class data, and cross-device progress would require adding
 a backend; moving the existing static files alone does not add those features.
+Usage telemetry is the exception: it is optional, and its small collector runs
+separately on Cloudflare (see [TELEMETRY.md](TELEMETRY.md)).
 
 References: [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site),
 [custom deployment workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages),

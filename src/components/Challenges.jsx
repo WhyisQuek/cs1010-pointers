@@ -19,6 +19,7 @@ import {
   markSolved,
 } from '../data/levels.js';
 import { INSTRUCTOR } from '../edition.js';
+import { telemetry } from '../data/telemetry.js';
 
 const UNSECTIONED = 'More challenges';
 const kindLabel = kind => (kind === 'code-to-diagram' ? 'Code → diagram' : 'Diagram → code');
@@ -219,12 +220,26 @@ function ChallengeRunner({ level, onExit, onNext }) {
   const check = () => {
     const attempt = attempts + 1;
     setAttempts(attempt);
+    const answer = isC2D ? { state: studentState } : { code: studentCode };
+    const report = v => {
+      setVerdict(v);
+      const { pass, failure, diffs } = v;
+      telemetry.track('check', {
+        level: level.id,
+        kind: level.kind,
+        attempt,
+        pass,
+        failure: pass ? null : failure,
+        diffs,
+        ...answer,
+      });
+    };
     let student;
     try {
       student = isC2D ? studentState : interpret(studentCode).state;
     } catch (e) {
       setBadIds(new Set());
-      setVerdict({ pass: false, failure: 'crash', diffs: [describeError(e)], attempt });
+      report({ pass: false, failure: 'crash', diffs: [describeError(e)], attempt });
       return;
     }
     // equivalent() throws only when the level's own target is invalid, not the answer.
@@ -232,12 +247,12 @@ function ChallengeRunner({ level, onExit, onNext }) {
     try {
       result = equivalent(target.state, student, level.grading ?? {});
     } catch (e) {
-      setVerdict({ pass: false, failure: 'level', diffs: [e.message], attempt });
+      report({ pass: false, failure: 'level', diffs: [e.message], attempt });
       return;
     }
     setBadIds(result.badIds ?? new Set());
     if (result.equal) markSolved(level.id);
-    setVerdict({ pass: result.equal, failure: 'mismatch', diffs: result.diffs, attempt });
+    report({ pass: result.equal, failure: 'mismatch', diffs: result.diffs, attempt });
   };
 
   const hintsLeft = hints.length - hintsShown;

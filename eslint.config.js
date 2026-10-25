@@ -47,5 +47,9 @@ export default [
     files: ['test/**/*.{js,mjs}', 'e2e/**/*.js', 'scripts/**/*.mjs', '*.config.js'],
     languageOptions: { globals: globals.node },
   },
+  {
+    files: ['telemetry/**/*.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
   prettier,
 ];

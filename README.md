@@ -86,6 +86,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Generated files are excluded by `.gitign
 - [`docs/C_SEMANTICS_AUDIT.md`](docs/C_SEMANTICS_AUDIT.md) — C11 audit, native compiler comparisons and explicit implementation limits.
 - [`docs/MEMORY_ADDRESSES_DESIGN.md`](docs/MEMORY_ADDRESSES_DESIGN.md) — simulated-address design, implementation scope, and remaining validation gates.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — GitHub Pages publishing, production preview and troubleshooting.
+- [`docs/TELEMETRY.md`](docs/TELEMETRY.md) — optional usage telemetry (Cloudflare Worker + D1): what is recorded and how to set it up.
 - [`docs/CODE_AUDIT.md`](docs/CODE_AUDIT.md) — September 2026 code audit: issues found, fixes and follow-ups.
 - [`docs/CHALLENGE_REVIEW.md`](docs/CHALLENGE_REVIEW.md) — review of the built-in challenges, the design of the current set and constraints for level authors.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
