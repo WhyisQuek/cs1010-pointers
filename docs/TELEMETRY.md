@@ -139,6 +139,30 @@ SELECT json_extract(data, '$.level') AS level, count(*) AS attempts,
 FROM events WHERE type = 'check' GROUP BY level ORDER BY attempts DESC;
 ```
 
+### Extract the code students wrote
+
+Export the database, then turn it into `.c` files. Both commands run from the repository
+root. Their output is student data, so git ignores both names; keep it out of the repository.
+
+```bash
+npx wrangler d1 export pointerviz-telemetry --remote --output telemetry-export.sql --config telemetry/wrangler.toml
+node telemetry/export-code.mjs telemetry-export.sql telemetry-code
+```
+
+This writes one file per sandbox **Run** and per diagram → code **Check answer**, in
+`telemetry-code/<browser ID>/`, numbered in the order they were sent. Each starts with a
+comment giving the time, session, outcome and any error. `telemetry-code/index.csv` lists
+them all. Its `source` column is `generate-c` for code run unchanged after **Generate C**,
+which the student did not type. Events whose code was dropped for size are skipped. It
+needs Node.js 22.13 or later.
+
+To pull only the code into a spreadsheet instead, run:
+
+```sql
+SELECT id, received_at, client, type, json_extract(data, '$.code') AS code
+FROM events WHERE type IN ('run', 'check') AND json_extract(data, '$.code') IS NOT NULL;
+```
+
 To save a copy, run
 `npx wrangler d1 export pointerviz-telemetry --remote --output telemetry.sql`. To delete
 old data, run `DELETE FROM events WHERE received_at < '2027-01-01';`.

@@ -14,6 +14,7 @@ export default [
       'node_modules/',
       'playwright-report/',
       'test-results/',
+      '**/.wrangler/',
     ],
   },
   js.configs.recommended,
@@ -44,7 +45,13 @@ export default [
     },
   },
   {
-    files: ['test/**/*.{js,mjs}', 'e2e/**/*.js', 'scripts/**/*.mjs', '*.config.js'],
+    files: [
+      'test/**/*.{js,mjs}',
+      'e2e/**/*.js',
+      'scripts/**/*.mjs',
+      'telemetry/**/*.mjs',
+      '*.config.js',
+    ],
     languageOptions: { globals: globals.node },
   },
   {

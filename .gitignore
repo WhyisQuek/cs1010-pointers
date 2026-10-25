@@ -15,6 +15,9 @@ test-results/
 # Wrangler's local state and secrets for the telemetry Worker
 .wrangler/
 .dev.vars
+# Student data exported from telemetry: never commit it
+telemetry-export*.sql
+telemetry-code/
 
 # Archived working notes (kept locally only)
 docs/archive/

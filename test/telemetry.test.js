@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTelemetry, MAX_EVENT_BYTES, telemetry } from '../src/data/telemetry.js';
-import worker, { MAX_BODY_BYTES, parseEvent } from '../telemetry/src/worker.js';
+import worker from '../telemetry/src/worker.js';
+import { MAX_BODY_BYTES, parseEvent } from '../telemetry/src/events.js';
 
 const COLLECTOR = 'https://collector.example/';
 const ORIGIN = 'https://whyisquek.github.io';
