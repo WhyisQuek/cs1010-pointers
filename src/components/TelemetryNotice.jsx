@@ -15,9 +15,8 @@ export default function TelemetryNotice() {
   return (
     <div className="telemetry-notice" role="region" aria-label="Research notice">
       <p>
-        <strong>For research:</strong> PointerViz records the code you run, the C you generate and
-        your challenge answers. No personal information, such as your name or student ID, is
-        collected, so please keep it out of your code.
+        For research purposes, the code you run and the C you generate is recorded to better understand how users use PointerViz. 
+        No personal information is recorded, but do avoid adding any into your code.
       </p>
       <button className="plain-btn" onClick={dismiss}>
         OK
