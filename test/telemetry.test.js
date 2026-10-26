@@ -28,7 +28,7 @@ function sender(options = {}) {
 
 test('telemetry is off when the build has no collector URL', () => {
   assert.equal(telemetry.enabled, false);
-  assert.equal(telemetry.getChoice(), 'off');
+  assert.equal(telemetry.noticeDue(), false);
   assert.equal(telemetry.track('run', { code: 'int main(void) {}' }), false);
 });
 
@@ -57,14 +57,17 @@ test('events carry a stable browser ID and a per-load session ID', () => {
   assert.notEqual(again.sent[0].event.session, first.session);
 });
 
-test('nothing is sent once the student turns telemetry off', () => {
-  const { t, sent } = sender();
-  assert.equal(t.getChoice(), null);
-  t.setChoice('off');
-  assert.equal(t.track('run', { code: 'a' }), false);
-  t.setChoice('on');
+test('the notice shows once per browser and events are sent either way', () => {
+  // An opt-out stored by an earlier version no longer stops events.
+  const storage = memoryStorage({ 'pointerviz.telemetry.v1': 'off' });
+  const { t, sent } = sender({ storage });
+  assert.equal(t.noticeDue(), true);
   assert.equal(t.track('run', { code: 'a' }), true);
-  assert.equal(sent.length, 1);
+  t.dismissNotice();
+  assert.equal(t.noticeDue(), false);
+  assert.equal(t.track('run', { code: 'b' }), true);
+  assert.equal(sent.length, 2);
+  assert.equal(sender({ storage }).t.noticeDue(), false);
 });
 
 test('oversized events drop the state, then the code, to fit', () => {

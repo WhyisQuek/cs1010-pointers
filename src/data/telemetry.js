@@ -1,6 +1,6 @@
 /**
- * Anonymous usage events, sent to the collector in telemetry/ (a Cloudflare Worker that writes
- * to D1). Off unless the build sets VITE_TELEMETRY_URL; then on until the student turns it off
+ * Anonymous usage events for research, sent to the collector in telemetry/ (a Cloudflare Worker
+ * that writes to D1). On whenever the build sets VITE_TELEMETRY_URL, with a notice saying so
  * (TelemetryNotice.jsx). Events carry a random per-browser ID, never a name or login.
  *
  * Bulky inputs go in `code` and `state`. The interpreter is deterministic, so a run's code is
@@ -8,7 +8,8 @@
  */
 import { toJSON } from './json.js';
 
-const CHOICE_KEY = 'pointerviz.telemetry.v1';
+// v1 held an opt-out choice, which no longer exists; v2 records that the notice was read.
+const NOTICE_KEY = 'pointerviz.telemetry.v2';
 const CLIENT_KEY = 'pointerviz.client.v1';
 export const EVENT_TYPES = Object.freeze(['run', 'generate', 'check']);
 /** Below the 64 KiB a page may have in flight in keepalive requests. */
@@ -62,7 +63,7 @@ export function createTelemetry({ url, edition, version, storage = browserStorag
   const session = randomId();
   // Kept in memory too, so blocked storage still gives one ID per page load.
   let client = null;
-  let choice = null;
+  let noticeRead = false;
   const clientId = () => {
     if (!client) {
       client = storage.get(CLIENT_KEY) ?? randomId();
@@ -70,18 +71,17 @@ export function createTelemetry({ url, edition, version, storage = browserStorag
     }
     return client;
   };
-  /** 'on', 'off', or null before the student has chosen (which counts as on). */
-  const getChoice = () => (enabled ? (choice ?? storage.get(CHOICE_KEY)) : 'off');
   return {
     enabled,
-    getChoice,
-    setChoice(value) {
-      choice = value;
-      storage.set(CHOICE_KEY, value);
+    /** Whether the notice still needs showing in this browser. */
+    noticeDue: () => enabled && !noticeRead && storage.get(NOTICE_KEY) === null,
+    dismissNotice() {
+      noticeRead = true;
+      storage.set(NOTICE_KEY, 'read');
     },
     /** Sends one event; never throws, since telemetry must not break the app. */
     track(type, data) {
-      if (getChoice() === 'off' || !EVENT_TYPES.includes(type)) return false;
+      if (!enabled || !EVENT_TYPES.includes(type)) return false;
       try {
         const body = encode({
           v: 1,

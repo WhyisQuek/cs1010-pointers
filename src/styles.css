@@ -94,18 +94,7 @@ button {
   color: var(--text);
   border-bottom-color: var(--text);
 }
-.telemetry-toggle {
-  margin-left: auto;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.telemetry-toggle:hover {
-  color: var(--text);
-}
-/* Fixed, so it stays clear of the topbar's 40 px until the student answers it. */
+/* Fixed, so it stays clear of the topbar's 40 px until the student dismisses it. */
 .telemetry-notice {
   position: fixed;
   right: 16px;

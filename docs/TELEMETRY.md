@@ -10,9 +10,9 @@ the Playwright build and forks without the setting send nothing.
 
 ## What is recorded
 
-When telemetry is on, a notice in the corner of the page says what is recorded. Students
-can turn it off with **Don't share**, and change their mind later with the **Usage data**
-button in the top bar. Until they choose, events are sent (opt-out). Events have no name,
+When telemetry is on, every event is sent; students can't opt out. A notice in the corner
+of the page tells them, once per browser until they press **OK**, that their code is
+recorded for research and that no personal information is collected. Events have no name,
 login or IP address, only:
 
 | Field | Meaning |
@@ -33,10 +33,11 @@ Runs don't include their snapshots. The interpreter is deterministic, so running
 `code` with the same `version` gives the same trace. An event over 60 KB drops `state`, then
 `code`, and gets `"truncated": true`.
 
-Students may put personal details in code comments. Tell them what is collected and how it
-is used, keep the data only as long as you need it, and check whether your use needs ethics
-approval. Research you intend to publish usually does. For opt-in instead of opt-out, make
-`getChoice` in `src/data/telemetry.js` treat `null` as `'off'`.
+Students may still put personal details in code comments; the notice asks them not to.
+Keep the data only as long as you need it, and check whether your research needs ethics
+approval. Research you intend to publish usually does, and the review board may require a
+way to opt out or to withdraw data. The wording of the notice is in
+`src/components/TelemetryNotice.jsx`.
 
 ## Set up
 
