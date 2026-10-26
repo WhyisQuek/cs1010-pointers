@@ -1360,6 +1360,293 @@ button:disabled {
   font-size: 12px;
   line-height: 1.5;
 }
+/* Start here: one readable column; each section is a heading, a line or two and a picture. */
+.tutorial-inner {
+  max-width: 920px;
+  margin: 0 auto;
+  line-height: 1.55;
+}
+.tutorial p {
+  margin: 0 0 12px;
+}
+.tutorial code,
+.tutorial kbd {
+  font: 12.5px var(--mono);
+}
+.tutorial kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+.tutorial-hero {
+  padding: 16px 0 8px;
+}
+.tutorial-hero h2 {
+  margin-bottom: 8px;
+  font-size: 26px;
+}
+.tutorial-hero p {
+  color: var(--muted);
+  font-size: 16px;
+}
+.tutorial-section {
+  margin-top: 40px;
+}
+.tutorial-section h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.tutorial-section > p {
+  color: var(--muted);
+}
+.tutorial-section > .primary-btn {
+  margin-top: 14px;
+}
+.tutorial-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+/* Natural size (2x images, so crisp), shrunk to fit the column. */
+.tutorial-shot {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+/* One row per step: what to do on the left, what it looks like on the right. */
+.tutorial-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.tutorial-steps li {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.tutorial-steps .tutorial-shot {
+  width: auto;
+  max-height: 190px;
+}
+.tutorial-steps strong {
+  font-size: 15px;
+  vertical-align: middle;
+}
+.tutorial-steps p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.tutorial-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: #238636;
+  font-size: 13px;
+  font-weight: 650;
+}
+.tutorial-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.tutorial-example {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ptr);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.tutorial-example.fails {
+  border-left-color: var(--err);
+}
+.tutorial-example span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.tutorial-example .tutorial-example-go {
+  margin-top: auto;
+  padding-top: 4px;
+  color: var(--ptr);
+}
+.tutorial-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.tutorial-column {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.tutorial-column h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.tutorial-column.works h4 {
+  color: var(--ok);
+}
+.tutorial-column.missing h4 {
+  color: #ff7b72;
+}
+.tutorial-column ul {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.tutorial-column li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #252b32;
+  font-size: 13.5px;
+}
+.tutorial-column li:last-child {
+  border-bottom: 0;
+}
+.tutorial-column li code {
+  color: #b5cea8;
+}
+.tutorial-column .tutorial-note {
+  margin: 0;
+}
+.tutorial-more {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.tutorial-more summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.tutorial-more ul,
+.tutorial-more dl {
+  margin: 0;
+  padding: 0 14px 12px 32px;
+  font-size: 13.5px;
+}
+.tutorial-more dl {
+  padding-left: 14px;
+}
+.tutorial-more dl > div + div {
+  margin-top: 8px;
+}
+.tutorial-more dt {
+  font-weight: 600;
+}
+.tutorial-more dd {
+  margin: 0;
+  color: var(--muted);
+}
+.tutorial-split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 20px;
+}
+.tutorial-legend {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+}
+.tutorial-legend li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  padding: 5px 0;
+  color: var(--muted);
+}
+.tutorial-legend strong {
+  color: var(--text);
+  font-weight: 600;
+}
+/* Each swatch copies how the canvas draws that thing. */
+.tutorial-swatch {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: #161b22;
+}
+.tutorial-swatch.stack {
+  border-top: 3px solid var(--stack);
+}
+.tutorial-swatch.heap {
+  box-shadow: inset 3px 0 var(--heap);
+}
+.tutorial-swatch.ptr {
+  height: 0;
+  border: 0;
+  border-top: 2px solid var(--ptr);
+  border-radius: 0;
+}
+.tutorial-swatch.changed {
+  background: #e3b34133;
+  border-color: #e3b341;
+}
+.tutorial-swatch.err {
+  border-color: var(--err);
+  background: #f8514922;
+}
+.tutorial-flow {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+}
+.tutorial-flow li + li {
+  margin-top: 10px;
+}
+.tutorial-challenge {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.tutorial-challenge p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+@media (max-width: 720px) {
+  .tutorial.page {
+    padding: 16px;
+  }
+  .tutorial-steps li,
+  .tutorial-columns,
+  .tutorial-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .challenge-head {
   min-height: 62px;
   display: flex;
@@ -1563,6 +1850,10 @@ button:disabled {
   }
   .topbar {
     gap: 12px;
+  }
+  .tab {
+    padding: 0 8px;
+    white-space: nowrap;
   }
 }
 .frame-group.selected,

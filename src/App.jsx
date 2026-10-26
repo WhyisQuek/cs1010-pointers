@@ -8,7 +8,9 @@ import { loadCourseLevels } from './data/levels.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Sandbox from './components/Sandbox.jsx';
 import Challenges from './components/Challenges.jsx';
+import Tutorial from './components/Tutorial.jsx';
 import TelemetryNotice from './components/TelemetryNotice.jsx';
+import { firstVisit } from './data/firstVisit.js';
 
 // [id, label, component, keepAlive]. A kept-alive page stays mounted while hidden, so the
 // sandbox keeps its code, diagram, playback, layout and undo history across tab switches,
@@ -18,6 +20,7 @@ import TelemetryNotice from './components/TelemetryNotice.jsx';
 // bundler folds `import.meta.env.MODE` here but not an imported constant, and only a
 // folded condition drops the editor chunk from the student build (npm run check:editions).
 const PAGES = [
+  ['start', 'Start here', Tutorial, false],
   ['sandbox', 'Sandbox', Sandbox, true],
   ['challenges', 'Challenges', Challenges, true],
   ...(import.meta.env.MODE === 'instructor'
@@ -28,7 +31,20 @@ const PAGES = [
 export default function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
-  const [tab, setTab] = useState('sandbox');
+  // A first visit opens Start here; after that the app opens on the Sandbox.
+  const [tab, setTab] = useState(() => (firstVisit() ? 'start' : 'sandbox'));
+  // Try it on Start here: the sandbox loads and runs `example`. `seq` makes a second click on
+  // the same example a new request.
+  const [example, setExample] = useState(null);
+  const tryExample = ({ code }) => {
+    setExample(e => ({ code, seq: (e?.seq ?? 0) + 1 }));
+    setTab('sandbox');
+  };
+  const pageProps = {
+    start: { onOpen: setTab, onTry: tryExample },
+    // Declining to replace their own code takes the student back to where they clicked.
+    sandbox: { example, onExampleDeclined: () => setTab('start') },
+  };
 
   useEffect(() => {
     // Pages project sites live under /<repository>/; the grammar in public/ is
@@ -71,7 +87,7 @@ export default function App() {
             <div key={id} className="page-host" hidden={tab !== id}>
               <ErrorBoundary resetKey={tab}>
                 <Suspense fallback={<div className="loading-screen">Loading…</div>}>
-                  <Page shown={tab === id} />
+                  <Page shown={tab === id} {...pageProps[id]} />
                 </Suspense>
               </ErrorBoundary>
             </div>

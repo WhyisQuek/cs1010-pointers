@@ -145,7 +145,7 @@ test('the struct level is solved by drawing struct objects', async ({ page }) =>
 test('the student build has no Level editor', async ({ page }) => {
   await openApp(page);
   const sections = page.getByRole('navigation', { name: 'sections' });
-  await expect(sections.getByRole('button')).toHaveText(['Sandbox', 'Challenges']);
+  await expect(sections.getByRole('button')).toHaveText(['Start here', 'Sandbox', 'Challenges']);
 });
 
 test.describe('course levels', () => {

@@ -28,7 +28,7 @@ npm run dev
 
 Open the **HTTP** URL printed by Vite, normally `http://127.0.0.1:3000/` with the supplied configuration.
 
-This is the student app. For the instructor app, which adds the Level editor, run `npm run dev:instructor`. Levels reach students through the course pack `public/levels/course.json`; see [publishing levels](docs/DEPLOYMENT.md#publishing-levels-to-students).
+This is the student app; a first visit opens the **Start here** tutorial. Its examples and C lists live in `src/data/tutorialExamples.js`, and `npm run screenshots:tutorial` retakes its screenshots while the dev server runs. For the instructor app, which adds the Level editor, run `npm run dev:instructor`. Levels reach students through the course pack `public/levels/course.json`; see [publishing levels](docs/DEPLOYMENT.md#publishing-levels-to-students).
 
 ## Test and check
 

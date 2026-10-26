@@ -130,6 +130,22 @@ An array may contain at most **64 elements**. Heap allocations are also limited 
 
 Array members and subarrays decay to their first element. Pointer arithmetic preserves the innermost array boundary: an adjacent row is not an extension of the current row. Pointer-to-array declarators and `i[a]` are supported. `&a[n]` may form a one-past pointer, and `&*p` cancels the dereference even for null/one-past pointers.
 
+## Strings
+
+Supported:
+
+- string literals anywhere an expression may appear, for example `char *s = "hi";`, a function argument, or `"hello" + 1`;
+- `char` arrays initialized from a literal, optionally in braces: `char s[] = "hi";` (three elements, including the final `'\0'`) or `char s[] = {"hi"};`;
+- adjacent literals, which concatenate (`"ab" "cd"`);
+- `sizeof("hi")`, which is 3;
+- the same escapes as character constants (`\n`, `\0`, `\x41`, `\101`, ...).
+
+A string literal is a read-only, static `char` array that exists for the whole run. The diagram shows it in its own column below the heap, named by its C spelling (`"hi"`), at a low simulated address (from `0x00400000`), and it cannot be edited there. Equal literals share one object, so `"x" == "x"` is true; C permits either choice (6.4.5p7). Writing through a pointer into a literal is diagnosed as undefined behavior.
+
+A `char` array initialized from a literal is an ordinary, writable copy. When the array has room for exactly the characters, the final `'\0'` is left out (`char s[2] = "hi";`); an array too short for the characters is not valid C.
+
+A literal may hold at most 63 characters, so that it and its `'\0'` fit within the array limit. **Generate C** reproduces pointers into literals (`p = "hello" + 1;`). The diagram editor cannot create a literal, so a code → diagram challenge cannot require one. Not supported: wide and UTF-8 literals (`L"..."`, `u8"..."`) and the `<string.h>` functions such as `strlen` and `strcpy`.
+
 ## Dynamic memory
 
 Supported:
@@ -160,7 +176,7 @@ Supported:
 - comparisons and logical operators listed above;
 - supported pointer arithmetic;
 - `sizeof(type)` and unevaluated, type-checked `sizeof(expression)`;
-- character and integer literals;
+- character, integer and string literals ([Strings](#strings));
 - `NULL`, zero and `nullptr` as null pointer constants in pointer context.
 
 `NULL`, `malloc`, `calloc`, `free` and `printf` are reserved: they cannot name a function, variable or parameter, in code or in a diagram. (C reserves the library functions as external names; PointerViz also forbids them as local names so every program state can be regenerated as C.) A diagram variable also cannot reuse a struct typedef name.
@@ -204,7 +220,7 @@ Flags `-`, `+`, space, `0` and `#`, field widths, precisions and `*` are support
 
 Formatting matches glibc. Doubles print their exact decimal value, with ties rounded to even (`%.0f` of `2.5` is `2`). `%p` prints the simulated address shown in the diagram, and `(nil)` for `NULL`.
 
-Diagnosed before running: a non-literal format, too few arguments, an argument type that does not match its conversion (like GCC's `-Wformat`), and unsupported conversions (`%n`, `%a`, `ll`/`j`/`t`/`L` lengths, wide `%lc`/`%ls`). Extra arguments are evaluated and ignored, as in C. At run time, `%s` is rejected if it would read past the array without finding `'\0'`, read an uninitialized char, or receive `NULL`. Output is limited to 10,000 characters. String literals are not supported anywhere else.
+Diagnosed before running: a non-literal format, too few arguments, an argument type that does not match its conversion (like GCC's `-Wformat`), and unsupported conversions (`%n`, `%a`, `ll`/`j`/`t`/`L` lengths, wide `%lc`/`%ls`). Extra arguments are evaluated and ignored, as in C. At run time, `%s` is rejected if it would read past the array without finding `'\0'`, read an uninitialized char, or receive `NULL`. Output is limited to 10,000 characters. String literals are not limited to `printf`; see [Strings](#strings).
 
 ## Safety limits
 
@@ -215,6 +231,7 @@ PointerViz executes in the browser, so the semantic layer enforces limits even w
 | Array elements | 64 |
 | Heap elements per allocation | 64 |
 | Bytes requested by one `malloc` or `calloc` | 16384 |
+| String literal characters | 63 |
 | Struct fields | 32 |
 | Call depth | 32 |
 | Iterations per loop | 256 |
@@ -233,7 +250,7 @@ Every visualized step keeps a copy of each object that changed since the step be
 - `realloc`;
 - macros and real preprocessing;
 - standard-library calls other than `malloc`, `calloc`, `free` and `printf`;
-- string literals outside `printf` and other C string semantics;
+- `<string.h>` functions, and wide or UTF-8 string literals;
 - VLAs;
 - `long long`, unsigned char/short, long double, wide/multicharacter constants and hexadecimal floating literals;
 - complete undefined-behavior analysis, implementation-defined behavior across other ABIs, floating environments, infinities and NaNs.
@@ -254,6 +271,7 @@ C23 leaves these to the implementation (Annex J.3 lists what an implementation m
 | Order of evaluation | Operands and arguments are evaluated left to right. Where C leaves the order unspecified, conflicting unsequenced accesses are still diagnosed as undefined behavior. | 6.5p2–3, 6.5.2.2p8 |
 | `malloc` | Every block is aligned to 16 bytes, the largest fundamental alignment, so converting its pointer to any object pointer type is defined. A nonzero request always succeeds within the [safety limits](#safety-limits). `malloc(0)` returns `NULL` (glibc instead returns a unique pointer). | 7.24.3p1 |
 | `calloc` | As `malloc`; a zero count or size returns `NULL`. A null pointer is all bits zero, so pointers in a `calloc` block start as `NULL`. | 7.24.3.2, 6.2.6.1 |
+| String literals | Read-only static `char` arrays at low addresses; equal literals share one object | 6.4.5p7 |
 | Lifetime ends | Expired stack frames and freed blocks stay visible as dead objects; any use of a pointer to them is diagnosed | 6.2.4p2 |
 | Optional features | Not provided: variable-length arrays, atomics, threads, complex numbers, decimal floating point | 6.10.9.3 (`__STDC_NO_VLA__` and related macros) |
 

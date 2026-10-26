@@ -18,8 +18,12 @@ export const test = base.extend({
 
 export { expect };
 
-/** Open the app and wait until the C parser (both WASM files) has loaded. */
+/**
+ * Open the app on the Sandbox, as a returning visitor (a first visit opens Start here), and
+ * wait until the C parser (both WASM files) has loaded.
+ */
 export async function openApp(page) {
+  await page.addInitScript(() => localStorage.setItem('pointerviz.visited.v1', '1'));
   await page.goto('./');
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
 }

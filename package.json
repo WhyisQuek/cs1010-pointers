@@ -12,6 +12,7 @@
     "build": "vite build",
     "build:instructor": "vite build --mode instructor --outDir dist-instructor",
     "check:editions": "node scripts/check-editions.mjs",
+    "screenshots:tutorial": "node scripts/tutorial-screenshots.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",

@@ -1,5 +1,5 @@
 /** Bidirectional code/memory sandbox with step-through playback. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CodePanel } from './CodePanel.jsx';
 import MemoryCanvas from './MemoryCanvas.jsx';
 import Stepper from './Stepper.jsx';
@@ -14,6 +14,7 @@ import { pausedLine } from '../machine/navigation.js';
 import { leaksByStep } from '../flow/structureLayout.js';
 import { useViewPreference } from '../data/viewPreference.js';
 import { telemetry } from '../data/telemetry.js';
+import { EXAMPLES } from '../data/tutorialExamples.js';
 
 const STARTER = `int main(void) {
     int a = 10;
@@ -21,8 +22,15 @@ const STARTER = `int main(void) {
 }
 `;
 const NOTICE_MS = 5000;
+// Code a student can get back with one click, so replacing it needs no confirmation.
+const REPLACEABLE = new Set(['', STARTER, ...EXAMPLES.map(e => e.code)]);
 
-export default function Sandbox() {
+/**
+ * `example` ({ code, seq }) comes from Try it on Start here: each new `seq` loads that code and
+ * runs it. If that would replace the student's own code or edited diagram, they are asked
+ * first; declining calls `onExampleDeclined` and leaves everything as it was.
+ */
+export default function Sandbox({ example, onExampleDeclined }) {
   const [draft] = useState(loadDraft);
   const [code, setCode] = useState(draft?.code ?? STARTER);
   const [state, setState] = useState(() => draft?.diagram ?? makeState());
@@ -61,11 +69,11 @@ export default function Sandbox() {
     setSnapshots(result.snapshots);
     setStep(startStep);
   };
-  const codeToDiagram = () => {
+  const codeToDiagram = (source = code) => {
     try {
-      const result = interpret(code);
+      const result = interpret(source);
       loadPlayback(result, 0);
-      telemetry.track('run', { code, steps: result.snapshots.length, error: null });
+      telemetry.track('run', { code: source, steps: result.snapshots.length, error: null });
       setNotice({
         kind: 'ok',
         text: `Ready: ${result.snapshots.length} execution steps. Select Step into to begin.`,
@@ -73,7 +81,7 @@ export default function Sandbox() {
     } catch (e) {
       // steps is null when the code did not compile, so no step ran.
       const steps = e.playback ? e.playback.snapshots.length : null;
-      telemetry.track('run', { code, steps, error: errorText(e) });
+      telemetry.track('run', { code: source, steps, error: errorText(e) });
       if (!e.playback) return reportError(e);
       // A runtime error opens playback at the step where execution stopped.
       loadPlayback(e.playback, steps);
@@ -156,6 +164,23 @@ export default function Sandbox() {
     setSavedPlayback(null);
   };
 
+  // The effect below runs only when a new example arrives, so it reads the rest from here.
+  const current = useRef(null);
+  current.current = { code, state, snapshots, run: codeToDiagram, onExampleDeclined };
+  useEffect(() => {
+    if (!example) return;
+    const { code, state, snapshots, run, onExampleDeclined } = current.current;
+    if (code === example.code) return run();
+    const ownCode = !REPLACEABLE.has(code);
+    const ownDiagram = !snapshots && state.allocations.length > 0;
+    const replacing = ownCode ? 'your code' : ownDiagram ? 'the diagram you are editing' : null;
+    if (replacing && !window.confirm(`Replace ${replacing} with this example?`))
+      return onExampleDeclined?.();
+    setCode(example.code);
+    setBreakpoints(new Set());
+    run(example.code);
+  }, [example]);
+
   const memoryContext = shownSnapshot
     ? `step ${step}/${snapshots.length} · ${shownSnapshot.function}() line ${shownSnapshot.line}`
     : snapshots
@@ -176,7 +201,7 @@ export default function Sandbox() {
               snapshots && !nextLine && <span className="panel-context">Execution complete</span>
             )}
             <div className="panel-actions">
-              <button className="primary-btn head-btn" onClick={codeToDiagram}>
+              <button className="primary-btn head-btn" onClick={() => codeToDiagram()}>
                 Run
               </button>
             </div>
