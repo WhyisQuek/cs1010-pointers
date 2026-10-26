@@ -11,7 +11,7 @@ import { toJSON } from './json.js';
 const CHOICE_KEY = 'pointerviz.telemetry.v1';
 const CLIENT_KEY = 'pointerviz.client.v1';
 export const EVENT_TYPES = Object.freeze(['run', 'generate', 'check']);
-/** Below the 64 KiB a page may have in flight through sendBeacon/keepalive. */
+/** Below the 64 KiB a page may have in flight in keepalive requests. */
 export const MAX_EVENT_BYTES = 60000;
 
 const randomId = () =>
@@ -36,9 +36,10 @@ const browserStorage = {
   },
 };
 
+// Not sendBeacon: blockers' EasyPrivacy rules (uBlock Origin Lite's by default) block every
+// third-party "ping", which is what a beacon is. A keepalive fetch is sent just as reliably.
 // text/plain keeps it a CORS "simple" request: no preflight, and the page never reads a reply.
-function beacon(url, body) {
-  if (navigator.sendBeacon?.(url, body)) return;
+function post(url, body) {
   fetch(url, { method: 'POST', body, mode: 'no-cors', keepalive: true }).catch(() => {});
 }
 
@@ -56,13 +57,7 @@ function encode(event) {
   return byteLength(body) <= MAX_EVENT_BYTES ? body : null;
 }
 
-export function createTelemetry({
-  url,
-  edition,
-  version,
-  storage = browserStorage,
-  send = beacon,
-}) {
+export function createTelemetry({ url, edition, version, storage = browserStorage, send = post }) {
   const enabled = Boolean(url);
   const session = randomId();
   // Kept in memory too, so blocked storage still gives one ID per page load.

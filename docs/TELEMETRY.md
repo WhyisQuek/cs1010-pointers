@@ -115,7 +115,12 @@ The Worker accepts only `POST` requests from `ALLOWED_ORIGINS`, of at most 64 KB
 like a PointerViz event. It also limits each browser ID to 120 events a minute. The limit
 is per browser, not per IP, because a whole lab can share one campus address. Anyone can
 read the collector's address in the site's JavaScript and send forged events, so treat the
-data as indicative, not proof. For stronger protection, add a Cloudflare WAF rate-limiting
+data as indicative, not proof.
+
+Events go out as ordinary `fetch` requests, not `navigator.sendBeacon`. EasyPrivacy, which
+uBlock Origin Lite and most ad blockers enable by default, blocks every third-party "ping",
+and that includes beacons. Some blockers or school networks may still block the collector,
+so expect events to be missing from some students. For stronger protection, add a Cloudflare WAF rate-limiting
 rule on the Worker's route.
 
 ## Read the data
