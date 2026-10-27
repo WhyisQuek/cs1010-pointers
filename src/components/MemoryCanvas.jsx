@@ -10,10 +10,11 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { edgeTypes, nodeTypes } from '../flow/memoryFlow.jsx';
-import { GEOMETRY, pathFromHandle, stateToFlow } from '../flow/layout.js';
+import { densityMetrics, pathFromHandle, stateToFlow } from '../flow/layout.js';
 import {
   captureLayout,
   contentSize,
+  densityLayout,
   editTimeline,
   emptyLayout,
   emptyTimeline,
@@ -21,6 +22,7 @@ import {
   layoutHistory,
   moveNode,
   resizeFrame,
+  withDensityLayout,
 } from '../flow/workspace.js';
 import { isPointer, primitive, typeToString } from '../language/types.js';
 import {
@@ -40,8 +42,10 @@ import { describePointer, formatAddress } from '../flow/addressPresentation.js';
 import MemoryInspector from './MemoryInspector.jsx';
 import {
   CHAR_MODES,
+  DENSITY_MODES,
   VIEW_MODES,
   useCharPreference,
+  useDensityPreference,
   useViewPreference,
 } from '../data/viewPreference.js';
 
@@ -123,7 +127,25 @@ export default function MemoryCanvas({
     updateTimeline({ type: 'forgetEdits' });
   }, [rawState, updateTimeline]);
   const wrap = useRef(null);
-  const setLayout = useCallback(layout => dispatch({ type: 'set', layout }), [dispatch]);
+  // Layout operations read and write the arrangement of the current box density only.
+  const densityRef = useRef('full');
+  const currentLayout = () => densityLayout(historyRef.current.present, densityRef.current);
+  const setLayout = useCallback(
+    layout =>
+      dispatch({
+        type: 'set',
+        layout: withDensityLayout(historyRef.current.present, densityRef.current, layout),
+      }),
+    [dispatch],
+  );
+  const syncLayout = useCallback(
+    layout =>
+      dispatch({
+        type: 'sync',
+        layout: withDensityLayout(historyRef.current.present, densityRef.current, layout),
+      }),
+    [dispatch],
+  );
   const begin = useCallback(() => dispatch({ type: 'begin' }), [dispatch]);
   const end = useCallback(() => dispatch({ type: 'end' }), [dispatch]);
   const [showExpired, setShowExpired] = useState(false);
@@ -139,6 +161,8 @@ export default function MemoryCanvas({
     editable && VIEW_MODES.find(m => m.id === preferredView)?.readOnly ? 'arrows' : preferredView;
   const structure = view === 'structure';
   const [chars, setChars] = useCharPreference();
+  const [density, setDensity] = useDensityPreference();
+  densityRef.current = density;
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   // Structure view: every recursive call shown instead of folded, and the stack variable
   // whose line and cursor label are highlighted together while hovered.
@@ -146,7 +170,8 @@ export default function MemoryCanvas({
   const [linkedLocal, setLinkedLocal] = useState(null);
   const { nodes, edges } = useMemo(() => {
     const result = stateToFlow(state, {
-      ...history.present,
+      ...densityLayout(history.present, density),
+      density,
       editable,
       badIds: badIds ?? new Set(),
       showExpired,
@@ -189,14 +214,15 @@ export default function MemoryCanvas({
     chars,
     unfold,
     unreachable,
+    density,
   ]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   useEffect(() => {
     // Structure view's positions are computed, never remembered: the other views keep theirs.
     if (structure) return;
-    dispatch({ type: 'sync', layout: captureLayout(historyRef.current.present, nodes) });
-  }, [nodes, dispatch, structure]);
+    syncLayout(captureLayout(densityLayout(historyRef.current.present, density), nodes));
+  }, [nodes, syncLayout, structure, density]);
 
   const emit = useCallback(
     next => {
@@ -315,7 +341,13 @@ export default function MemoryCanvas({
               : { ...p, [ch.id]: ch.dimensions },
           );
         if (ch.type === 'position' && ch.position && node?.draggable) {
-          const next = moveNode(historyRef.current.present, currentNodes, ch.id, ch.position);
+          const next = moveNode(
+            densityLayout(historyRef.current.present, densityRef.current),
+            currentNodes,
+            ch.id,
+            ch.position,
+            densityRef.current,
+          );
           setLayout(next);
           currentNodes = currentNodes.map(n => ({
             ...n,
@@ -403,12 +435,10 @@ export default function MemoryCanvas({
         storage: storageKind === 'stack' ? { kind: 'stack', frameId } : { kind: 'heap' },
       });
       if (position) {
-        const layout = captureLayout(historyRef.current.present, nodes);
-        layout.positions[a.id] = {
-          x: Math.max(GEOMETRY.padding, position.x),
-          y: Math.max(GEOMETRY.top, position.y),
-        };
-        dispatch({ type: 'sync', layout });
+        const layout = captureLayout(currentLayout(), nodes);
+        const { padding, top } = densityMetrics(density).geometry;
+        layout.positions[a.id] = { x: Math.max(padding, position.x), y: Math.max(top, position.y) };
+        syncLayout(layout);
       }
       setSelectedId(a.id);
       setMenu(null);
@@ -446,10 +476,7 @@ export default function MemoryCanvas({
       : nodes.find(n => n.id === selectedNode?.parentId);
   const addFrameId = selectedFrame?.data.editable ? selectedFrame.data.frame.id : 'main';
   const resetRoute = id => {
-    const layout = {
-      ...historyRef.current.present,
-      routes: { ...historyRef.current.present.routes },
-    };
+    const layout = { ...currentLayout(), routes: { ...currentLayout().routes } };
     delete layout.routes[id];
     setLayout(layout);
   };
@@ -460,6 +487,7 @@ export default function MemoryCanvas({
       ...n.data,
       view,
       chars,
+      density,
       linkedLocal,
       onLink: setLinkedLocal,
       onUnfold: () => setUnfold(true),
@@ -469,11 +497,11 @@ export default function MemoryCanvas({
       onGestureStart: begin,
       onGestureEnd: end,
       onResize: (rect, direction) =>
-        setLayout(resizeFrame(historyRef.current.present, nodesRef.current, n.id, rect, direction)),
+        setLayout(resizeFrame(currentLayout(), nodesRef.current, n.id, rect, direction, density)),
       onFit: () =>
         setLayout({
-          ...historyRef.current.present,
-          sizes: { ...historyRef.current.present.sizes, [n.id]: contentSize(nodes, n.id) },
+          ...currentLayout(),
+          sizes: { ...currentLayout().sizes, [n.id]: contentSize(nodes, n.id, density) },
         }),
       onAdd: () => addBox('stack', n.data.frame?.id),
     },
@@ -597,7 +625,7 @@ export default function MemoryCanvas({
             </ControlButton>
             <ControlButton
               onClick={() => setLayout(emptyLayout())}
-              title="Reset layout (Ctrl+Z undoes it)"
+              title={`Reset the ${density === 'compact' ? 'Compact' : 'Full'} layout (Ctrl+Z undoes it)`}
               aria-label="Reset layout"
             >
               ↺
@@ -609,6 +637,7 @@ export default function MemoryCanvas({
             view={view}
             editable={editable}
             chars={chars}
+            density={density}
             open={viewMenuOpen}
             onOpenChange={setViewMenuOpen}
             onChange={next => {
@@ -617,6 +646,10 @@ export default function MemoryCanvas({
             }}
             onCharsChange={next => {
               setChars(next);
+              setViewMenuOpen(false);
+            }}
+            onDensityChange={next => {
+              setDensity(next);
               setViewMenuOpen(false);
             }}
           />
@@ -639,7 +672,7 @@ export default function MemoryCanvas({
               {showExpired ? 'Hide out-of-scope memory' : `Show out-of-scope (${hiddenCount})`}
             </button>
           )}
-          {structure && unfold && (
+          {unfold && (
             <button className="plain-btn canvas-chip" onClick={() => setUnfold(false)}>
               Fold recursive calls
             </button>
@@ -729,7 +762,17 @@ export default function MemoryCanvas({
  * "View: Both ▾" with a menu of the three presets, plus how char values read.
  * The menu closes on outside clicks.
  */
-function ViewMenu({ view, editable, chars, open, onOpenChange, onChange, onCharsChange }) {
+function ViewMenu({
+  view,
+  editable,
+  chars,
+  density,
+  open,
+  onOpenChange,
+  onChange,
+  onCharsChange,
+  onDensityChange,
+}) {
   const root = useRef(null);
   const toggle = useRef(null);
   useEffect(() => {
@@ -779,6 +822,33 @@ function ViewMenu({ view, editable, chars, open, onOpenChange, onChange, onChars
                 {mode.id === view ? '✓' : ''}
               </span>
               {mode.label}
+            </button>
+          ))}
+          <div className="view-menu-heading" role="presentation">
+            Box detail
+          </div>
+          {DENSITY_MODES.map(mode => (
+            <button
+              key={mode.id}
+              role="menuitemradio"
+              aria-checked={mode.id === density}
+              title={
+                mode.id === 'compact'
+                  ? 'One line per value. Addresses and sizes are in tooltips and the inspector.'
+                  : 'Every box shows its address and size, and pointers say where they point.'
+              }
+              onClick={() => {
+                onDensityChange(mode.id);
+                toggle.current?.focus();
+              }}
+            >
+              <span className="view-menu-check" aria-hidden="true">
+                {mode.id === density ? '✓' : ''}
+              </span>
+              {mode.label}
+              <code className="view-menu-example" aria-hidden="true">
+                {mode.example}
+              </code>
             </button>
           ))}
           <div className="view-menu-heading" role="presentation">

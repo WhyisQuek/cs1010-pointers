@@ -22,6 +22,16 @@ export const CHAR_MODES = Object.freeze([
   { id: 'character', label: 'Character', example: "'a'" },
 ]);
 
+/**
+ * How much each box shows. Compact boxes are one line per value (name, type, value) with no
+ * addresses, sizes or pointer captions; those stay in tooltips and the inspector. Each density
+ * keeps its own arrangement, since the boxes are different sizes.
+ */
+export const DENSITY_MODES = Object.freeze([
+  { id: 'full', label: 'Full', example: 'address · size' },
+  { id: 'compact', label: 'Compact', example: 'name type value' },
+]);
+
 function preference(key, modes, fallback) {
   // Tells other mounted canvases (sandbox, challenges, level editor) that the choice changed.
   const event = `pointerviz:${key}`;
@@ -66,8 +76,10 @@ function preference(key, modes, fallback) {
 
 const view = preference('pointerviz.view.v1', VIEW_MODES, 'both');
 const chars = preference('pointerviz.chars.v1', CHAR_MODES, 'number');
+const density = preference('pointerviz.density.v1', DENSITY_MODES, 'full');
 
 export const loadView = view.load;
 export const saveView = view.save;
 export const useViewPreference = view.usePreference;
 export const useCharPreference = chars.usePreference;
+export const useDensityPreference = density.usePreference;

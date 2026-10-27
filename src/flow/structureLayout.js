@@ -37,10 +37,24 @@ const OPEN_CALLS = 2;
 /**
  * The column's entries, oldest call first. The first call and the newest OPEN_CALLS stay
  * open; between them, two or more consecutive live calls of one function fold into a single
- * `{ folded: [frames] }` entry. `unfold` shows every call.
+ * `{ folded: [frames] }` entry. Calls in `keepOpen` never fold. `unfold` shows every call.
  */
-export function foldFrames(frames, unfold = false) {
+export function foldFrames(frames, unfold = false, keepOpen = new Set()) {
   if (unfold) return frames.map(frame => ({ frame }));
+  return foldRuns(
+    frames,
+    (frame, i) =>
+      i > 0 && i < frames.length - OPEN_CALLS && frame.active && !keepOpen.has(frame.id),
+  );
+}
+
+/** Returned calls, oldest first: two or more consecutive ones of one function fold together. */
+export function foldReturned(frames, unfold = false, keepOpen = new Set()) {
+  if (unfold) return frames.map(frame => ({ frame }));
+  return foldRuns(frames, frame => !keepOpen.has(frame.id));
+}
+
+function foldRuns(frames, foldable) {
   const out = [];
   let run = [];
   const flush = () => {
@@ -49,9 +63,9 @@ export function foldFrames(frames, unfold = false) {
     run = [];
   };
   frames.forEach((frame, i) => {
-    const foldable = i > 0 && i < frames.length - OPEN_CALLS && frame.active;
-    if (run.length && (!foldable || run[0].name !== frame.name)) flush();
-    if (foldable) run.push(frame);
+    const can = foldable(frame, i);
+    if (run.length && (!can || run[0].name !== frame.name)) flush();
+    if (can) run.push(frame);
     else out.push({ frame });
   });
   flush();

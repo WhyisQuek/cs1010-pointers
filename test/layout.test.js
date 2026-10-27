@@ -9,8 +9,15 @@ import {
   pointerStatus,
   ref,
 } from '../src/machine/memory.js';
-import { array, pointer, primitive, structRef, structType } from '../src/language/types.js';
-import { GEOMETRY, handleId, pathFromHandle, stateToFlow } from '../src/flow/layout.js';
+import {
+  array,
+  pointer,
+  primitive,
+  structRef,
+  structType,
+  typeToString,
+} from '../src/language/types.js';
+import { DENSITY, GEOMETRY, handleId, pathFromHandle, stateToFlow } from '../src/flow/layout.js';
 import { crossesBox, routePointer } from '../src/flow/routing.js';
 
 const int = primitive('int');
@@ -62,8 +69,23 @@ test('each invocation has a separate non-overlapping frame, independent of depth
   assert.equal(frames.length, 3);
   for (let i = 0; i < frames.length; i++)
     for (let j = i + 1; j < frames.length; j++) assert.ok(!overlaps(frames[i], frames[j]));
-  assert.ok(
-    frames.every(n => n.draggable && !n.deletable && n.dragHandle === '.frame-group-label'),
+  assert.ok(frames.every(n => !n.deletable && n.dragHandle === '.frame-group-label'));
+  // Live calls can be dragged; returned ones sit on the shelf, placed afresh each step.
+  assert.deepEqual(
+    frames.filter(n => n.draggable).map(n => n.id),
+    ['frame:main', 'frame:second'],
+  );
+});
+
+test('frames are not remembered until dragged, so the column reflows', () => {
+  const state = fixture();
+  const nodes = stateToFlow(state).nodes;
+  const layout = captureLayout(emptyLayout(), nodes);
+  assert.ok(!Object.keys(layout.positions).some(id => id.startsWith('frame:')));
+  const dragged = moveNode(layout, nodes, 'frame:first', { x: 700, y: 400 });
+  assert.deepEqual(
+    Object.keys(dragged.positions).filter(id => id.startsWith('frame:')),
+    ['frame:first'],
   );
 });
 
@@ -238,6 +260,7 @@ test('routing detours around a middle box instead of passing through it', () => 
 import {
   captureLayout,
   contentSize,
+  densityLayout,
   editTimeline,
   emptyLayout,
   emptyTimeline,
@@ -245,6 +268,7 @@ import {
   layoutHistory,
   moveNode,
   resizeFrame,
+  withDensityLayout,
 } from '../src/flow/workspace.js';
 import { curvePointer } from '../src/flow/routing.js';
 
@@ -408,7 +432,14 @@ test('curves choose both attachment sides and manual bends follow moving endpoin
     ...layout,
     positions: { ...layout.positions, 'frame:first': { x: -800, y: 72 } },
   }).edges.find(e => e.source === 'p');
-  const backward = stateToFlow(state, layout).edges.find(e => e.source === 'p');
+  const backward = stateToFlow(state, {
+    ...layout,
+    positions: { ...layout.positions, 'frame:first': { x: 800, y: 72 } },
+  }).edges.find(e => e.source === 'p');
+  // A call under its caller links along the right sides.
+  const stacked = stateToFlow(state, layout).edges.find(e => e.source === 'p');
+  assert.equal(stacked.sourceHandle.endsWith(':right'), true);
+  assert.equal(stacked.targetHandle.endsWith(':right'), true);
   assert.equal(forward.sourceHandle.endsWith(':right'), true);
   assert.equal(forward.targetHandle.endsWith(':left'), true);
   assert.equal(backward.sourceHandle.endsWith(':left'), true);
@@ -441,4 +472,81 @@ test('active non-main frames are editable only in an editable diagram', () => {
     assert.equal(node.data.editable, editable);
     assert.equal(node.deletable, editable);
   }
+});
+
+test('compact boxes are one line per value, and frames shrink to fit them', () => {
+  const g = DENSITY.compact.geometry;
+  const state = fixture();
+  addAllocation(state, { id: 'arr', name: 'arr', type: array(pointer(int), 3) });
+  const full = stateToFlow(state).nodes;
+  const compact = stateToFlow(state, { density: 'compact' }).nodes;
+  const box = (nodes, id) => nodes.find(n => n.id === id);
+  // A scalar or pointer has no header and no caption line: its one row is the whole box.
+  assert.equal(box(compact, 'value').height, g.row + g.footer);
+  assert.equal(box(compact, 'p').height, g.row + g.footer);
+  // An aggregate keeps a one-line header over its rows.
+  assert.equal(box(compact, 'arr').height, g.header + 3 * g.row + g.footer);
+  for (const id of ['value', 'p', 'arr', 'frame:main', 'frame:first'])
+    assert.ok(box(compact, id).height < box(full, id).height, id);
+  // Boxes in one frame share a width and name/type columns, like a table.
+  const main = compact.filter(n => n.parentId === 'frame:main');
+  assert.deepEqual(main.map(n => n.id).sort(), ['arr', 'value']);
+  assert.equal(new Set(main.map(n => n.width)).size, 1);
+  assert.deepEqual(main[0].data.columns, {
+    name: 'value'.length,
+    type: typeToString(array(pointer(int), 3)).length,
+  });
+  assert.deepEqual(main[1].data.columns, main[0].data.columns);
+  // Long names and types are capped (and cut with an ellipsis) instead of widening the rest.
+  addAllocation(state, {
+    id: 'long',
+    name: 'a_really_long_variable_name',
+    type: array(pointer(structRef('Node')), 2),
+  });
+  const capped = stateToFlow(state, { density: 'compact' }).nodes.find(n => n.id === 'long');
+  assert.deepEqual(capped.data.columns, { name: 12, type: 14 });
+  // Out of scope still says so above the line.
+  endFrame(state, 'first');
+  const dead = stateToFlow(state, { density: 'compact', showExpired: true }).nodes;
+  assert.equal(box(dead, 'p').height, g.lifetime + g.row + g.footer);
+  // Arrows still meet the middle of the line they point from and to.
+  const { nodes, edges } = stateToFlow(fixture(), { density: 'compact' });
+  const edge = edges.find(e => e.source === 'p');
+  const world = id => {
+    const n = box(nodes, id),
+      parent = box(nodes, n.parentId);
+    return { y: n.position.y + parent.position.y };
+  };
+  assert.equal(edge.data.points[0].y, world('p').y + 1 + g.row / 2);
+  assert.equal(edge.data.points.at(-1).y, world('value').y + 1 + g.row / 2);
+});
+
+test('each density keeps its own arrangement in one layout', () => {
+  const state = fixture();
+  let layout = emptyLayout();
+  for (const density of ['full', 'compact']) {
+    const nodes = stateToFlow(state, { ...densityLayout(layout, density), density }).nodes;
+    const part = moveNode(
+      captureLayout(densityLayout(layout, density), nodes),
+      nodes,
+      'value',
+      { x: density === 'full' ? 300 : 150, y: 200 },
+      density,
+    );
+    layout = withDensityLayout(layout, density, part);
+  }
+  assert.deepEqual(densityLayout(layout, 'full').positions.value, { x: 300, y: 200 });
+  assert.deepEqual(densityLayout(layout, 'compact').positions.value, { x: 150, y: 200 });
+  // Resetting one density leaves the other alone.
+  const reset = withDensityLayout(layout, 'compact', emptyLayout());
+  assert.deepEqual(densityLayout(reset, 'full').positions.value, { x: 300, y: 200 });
+  assert.equal(densityLayout(reset, 'compact').positions.value, undefined);
+  // A compact frame grows by compact padding around a moved box.
+  const nodes = stateToFlow(state, { density: 'compact' }).nodes;
+  const moved = moveNode(emptyLayout(), nodes, 'value', { x: 400, y: 300 }, 'compact');
+  const valueBox = nodes.find(n => n.id === 'value');
+  assert.equal(
+    moved.sizes['frame:main'].width,
+    400 + valueBox.width + DENSITY.compact.geometry.padding,
+  );
 });

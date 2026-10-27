@@ -24,7 +24,13 @@ import {
   pointerCaption,
   scalarText,
 } from './addressPresentation.js';
-import { allocationMetrics, handleId, memoryMetricsStyle, pathFromHandle } from './layout.js';
+import {
+  allocationMetrics,
+  compactColumns,
+  handleId,
+  memoryMetricsStyle,
+  pathFromHandle,
+} from './layout.js';
 import { NODE } from './structureLayout.js';
 
 function FrameGroupNode({ id, data, selected }) {
@@ -146,9 +152,13 @@ function valueText(state, value, type, chars) {
   return value.kind === 'scalar' ? scalarText(type, value.value, chars) : 'uninitialized';
 }
 
-/** The value drawn inside its own slot, like a memory cell in a textbook diagram. */
-function Value({ state, value, type, showAddresses, chars }) {
+/**
+ * The value drawn inside its own slot, like a memory cell in a textbook diagram. `caption`
+ * joins the tooltip when the box has no caption line (compact boxes).
+ */
+function Value({ state, value, type, showAddresses, chars, caption }) {
   const full = valueText(state, value, type, chars);
+  const title = caption ? `${full} · ${caption}` : full;
   if (isPointer(type)) {
     const d = describePointer(state, value);
     const shown =
@@ -171,13 +181,13 @@ function Value({ state, value, type, showAddresses, chars }) {
             ? 'dangling'
             : 'ptr';
     return (
-      <span className={`val pointer-value ${kind}${shown === '●' ? ' dot' : ''}`} title={full}>
+      <span className={`val pointer-value ${kind}${shown === '●' ? ' dot' : ''}`} title={title}>
         {shown}
       </span>
     );
   }
   return (
-    <span className={`val ${value.kind}`} title={full}>
+    <span className={`val ${value.kind}`} title={title}>
       {value.kind === 'scalar' ? full : '?'}
     </span>
   );
@@ -196,12 +206,18 @@ function MemoryAllocationNode({ id, data, selected }) {
     targetPaths,
     view = 'both',
     chars = 'number',
+    density = 'full',
   } = data;
   // Rows (or the whole object, "[]") that some pointer stores the address of.
   const targeted = path => targetPaths?.has(JSON.stringify(path));
   // Arrows hides numeric addresses; the boxes keep their size so changing view never overlaps them.
   // Structure view draws its other boxes the way Arrows does.
   const showAddresses = view !== 'arrows' && view !== 'structure';
+  // Compact boxes leave the address, size and pointer captions to tooltips and the inspector,
+  // and line their name and type up in the columns their frame (or the heap column) shares.
+  const compact = density === 'compact';
+  const columns = compact ? (data.columns ?? compactColumns([a], state)) : null;
+  const size = `${sizeOf(a.type, state.structTypes)} bytes`;
   const fromHandle = useConnection(connection => connection.fromHandle);
   const sourceType =
     fromHandle?.type === 'source'
@@ -209,7 +225,7 @@ function MemoryAllocationNode({ id, data, selected }) {
       : null;
   const targetProps = { state, allocation: a, sourceType, editable };
   const updateNodeInternals = useUpdateNodeInternals();
-  const { rows: scalars, aggregate } = allocationMetrics(a, state);
+  const { rows: scalars, aggregate, oneLine } = allocationMetrics(a, state, density);
   const aggregateHandles = new Set();
   const rowTargets = scalars.map(s => {
     const paths = [s.ref.path];
@@ -223,47 +239,62 @@ function MemoryAllocationNode({ id, data, selected }) {
     }
     return paths;
   });
-  const signature = `${view}:${a.alive}:${JSON.stringify(a.type)}:${scalars.map(s => s.ref.path.join('.')).join('|')}`;
+  const signature = `${view}:${density}:${a.alive}:${JSON.stringify(a.type)}:${scalars.map(s => s.ref.path.join('.')).join('|')}`;
   // Type/array-size edits change handle geometry even when the node ID survives. The view is
   // included too: a box first measured while its arrow was hidden (Addresses view after a
   // reload) otherwise sometimes kept no usable handle bounds, and switching to Both drew no arrow.
   useLayoutEffect(() => {
     updateNodeInternals(id);
   }, [id, signature, updateNodeInternals]);
+  const nameAndType = (
+    <>
+      <button
+        className="name inspect-label nodrag"
+        title={
+          compact
+            ? `${allocationDisplayName(state, a)} · ${formatAddress(a.baseAddress)} · ${size}`
+            : allocationDisplayName(state, a)
+        }
+        onClick={e => {
+          e.stopPropagation();
+          data.onInspect?.([]);
+        }}
+      >
+        {allocationDisplayName(state, a)}
+      </button>
+      <span className="type" title={typeToString(a.type)}>
+        {typeToString(a.type)}
+      </span>
+    </>
+  );
   return (
     <div
-      style={memoryMetricsStyle}
-      className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}${showAddresses ? '' : ' no-addresses'}`}
+      style={{
+        ...(memoryMetricsStyle[density] ?? memoryMetricsStyle.full),
+        ...(columns && { '--name-ch': columns.name, '--type-ch': columns.type }),
+      }}
+      className={`mem-cell ${a.storage.kind}${!a.alive ? ' dead' : ''}${selected ? ' selected' : ''}${bad ? ' bad' : ''}${changed ? ' memory-changed' : ''}${showAddresses ? '' : ' no-addresses'}${compact ? ' compact' : ''}`}
     >
-      <div className="head">
-        {(isArray(a.type) || isStruct(a.type)) && <TargetHandles {...targetProps} />}
-        <div className="head-line">
-          <button
-            className="name inspect-label nodrag"
-            title={allocationDisplayName(state, a)}
-            onClick={e => {
-              e.stopPropagation();
-              data.onInspect?.([]);
-            }}
-          >
-            {allocationDisplayName(state, a)}
-          </button>
-          <span className="type" title={typeToString(a.type)}>
-            {typeToString(a.type)}
-          </span>
-        </div>
-        <div className="mem-meta">
-          {showAddresses && (
-            <>
-              <code className={targeted([]) ? 'targeted' : ''} title="Address of this object">
-                {formatAddress(a.baseAddress)}
-              </code>
-              {' · '}
-            </>
+      {/* A compact scalar has no header: its one row carries the name and type. */}
+      {!oneLine && (
+        <div className="head">
+          {(isArray(a.type) || isStruct(a.type)) && <TargetHandles {...targetProps} />}
+          <div className="head-line">{nameAndType}</div>
+          {!compact && (
+            <div className="mem-meta">
+              {showAddresses && (
+                <>
+                  <code className={targeted([]) ? 'targeted' : ''} title="Address of this object">
+                    {formatAddress(a.baseAddress)}
+                  </code>
+                  {' · '}
+                </>
+              )}
+              {size}
+            </div>
           )}
-          {sizeOf(a.type, state.structTypes)} bytes
         </div>
-      </div>
+      )}
       {!a.alive && (
         <div className="lifetime-banner">
           {a.storage.kind === 'heap' ? 'freed' : 'out of scope'}
@@ -288,6 +319,7 @@ function MemoryAllocationNode({ id, data, selected }) {
                 <TargetHandles key={path.join('.')} path={path} {...targetProps} />
               ))}
               <div className="memory-value-line">
+                {oneLine && nameAndType}
                 {/* A single value needs no label: the card's name already says what it is. */}
                 {s.ref.path.length > 0 && (
                   <button
@@ -301,7 +333,7 @@ function MemoryAllocationNode({ id, data, selected }) {
                     {formatPath(s.ref.path)}
                   </button>
                 )}
-                {aggregate && showAddresses && (
+                {aggregate && showAddresses && !compact && (
                   <code
                     className="sub-address"
                     title={targeted(s.ref.path) ? 'A pointer stores this address' : undefined}
@@ -315,9 +347,10 @@ function MemoryAllocationNode({ id, data, selected }) {
                   value={s.value}
                   showAddresses={showAddresses}
                   chars={chars}
+                  caption={compact && pointerInfo ? pointerCaption(pointerInfo) : null}
                 />
               </div>
-              {pointerInfo && (
+              {pointerInfo && !compact && (
                 <div
                   className={`pointer-caption ${['dangling', 'invalid', 'one-past'].includes(pointerInfo.status) ? 'warning' : ''}`}
                   title={pointerCaption(pointerInfo)}
@@ -446,12 +479,13 @@ function StackLocalNode({ data, selected }) {
   );
 }
 
-/** Structure view: consecutive recursive calls folded into one row of the stack column. */
+/** Consecutive recursive (or returned) calls folded into one row of the stack column. */
 function FrameFoldNode({ data }) {
   return (
-    <div className="frame-fold" title={data.calls.join(', ')}>
+    <div className={`frame-fold${data.returned ? ' returned' : ''}`} title={data.calls.join(', ')}>
       <strong>
         {data.name}() × {data.calls.length}
+        {data.returned && ' returned'}
       </strong>
       <button className="plain-btn nodrag" onClick={() => data.onUnfold?.()}>
         Show all calls

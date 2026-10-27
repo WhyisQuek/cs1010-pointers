@@ -17,6 +17,7 @@ import {
   STACK,
   callLabels,
   foldFrames,
+  foldReturned,
   layoutStructures,
   linkRoute,
   structureAnchor,
@@ -38,8 +39,36 @@ export const GEOMETRY = {
 };
 /** Smallest frame a user can resize to, shared with workspace operations. */
 export const FRAME_MIN = { width: 240, height: 160 };
-// Space between call frames and between the stack and the heap column.
+/**
+ * Metrics for each box density (DENSITY_MODES in viewPreference.js). Compact drops the
+ * "address · size" line and pointer captions, and a scalar is a single name-type-value line.
+ */
+export const DENSITY = {
+  full: { geometry: GEOMETRY, frameMin: FRAME_MIN, reserve: 340 },
+  compact: {
+    geometry: {
+      header: 26,
+      row: 26,
+      pointerStatus: 0,
+      footer: 2,
+      lifetime: 18,
+      padding: 12,
+      top: 42,
+      gap: 8,
+    },
+    frameMin: { width: 180, height: 80 },
+    reserve: 240,
+  },
+};
+export const densityMetrics = density => DENSITY[density] ?? DENSITY.full;
+// Space between the stack column and the heap column.
 const FRAME_SPACING = 64;
+// The free layout's call stack: where it starts and the space between calls. Each density
+// also keeps the column a width (`reserve`), so heap boxes start at the same x however wide
+// the frames there are now.
+const STACK_COLUMN = { x: 30, y: 72, gap: 32 };
+// Space between the live stack and the shelf of returned calls under it.
+const SHELF_GAP = 72;
 // Structure view: space between the call stack column and the heap region beside it, and
 // how wide a row of other heap objects grows before wrapping.
 const HEAP_REGION_GAP = 96;
@@ -47,18 +76,26 @@ const HEAP_ROW_WIDTH = 1100;
 // SVG markers need literal colours; keep these in sync with --err, --heap and --ptr in styles.css.
 const EDGE_COLORS = { dangling: '#f85149', changed: '#e3b341', normal: '#58a6ff' };
 export const memoryMetricsStyle = Object.fromEntries(
-  Object.entries(GEOMETRY).map(([key, value]) => [`--memory-${key}`, `${value}px`]),
+  Object.entries(DENSITY).map(([density, { geometry }]) => [
+    density,
+    Object.fromEntries(
+      Object.entries(geometry).map(([key, value]) => [`--memory-${key}`, `${value}px`]),
+    ),
+  ]),
 );
-export function allocationMetrics(a, state) {
+export function allocationMetrics(a, state, density = 'full') {
+  const g = densityMetrics(density).geometry;
   const aggregate = isArray(a.type) || isStruct(a.type);
-  let top = GEOMETRY.header + (a.alive ? 0 : GEOMETRY.lifetime);
+  // A compact scalar has no header: its one row carries the name and type.
+  const oneLine = density === 'compact' && !aggregate;
+  let top = (oneLine ? 0 : g.header) + (a.alive ? 0 : g.lifetime);
   const rows = scalarSubobjects(a, state).map(s => {
-    const height = GEOMETRY.row + (isPointer(s.type) ? GEOMETRY.pointerStatus : 0);
+    const height = g.row + (isPointer(s.type) ? g.pointerStatus : 0);
     const row = { ...s, top, height };
     top += height;
     return row;
   });
-  return { aggregate, rows, height: top + GEOMETRY.footer };
+  return { aggregate, oneLine, rows, height: top + g.footer };
 }
 const locationKey = (state, scalar) => {
   try {
@@ -74,14 +111,33 @@ export function pathFromHandle(id) {
   return !raw || raw === 'root' ? [] : raw.split('.').map(x => (/^\d+$/.test(x) ? Number(x) : x));
 }
 
-function allocationSize(a, state) {
-  const textWidth = (allocationDisplayName(state, a).length + typeToString(a.type).length) * 8 + 40;
+/**
+ * Compact boxes in one frame, or in the heap column, share their columns like a table: the
+ * name and type columns are as wide (in characters) as the longest there, capped so one long
+ * declaration cannot stretch the rest; longer text ends in an ellipsis.
+ */
+const COMPACT_COLUMNS = { name: [3, 12], type: [3, 14] };
+export function compactColumns(allocations, state) {
+  const longest = (length, [min, cap]) => Math.min(cap, Math.max(min, ...allocations.map(length)));
+  return {
+    name: longest(a => allocationDisplayName(state, a).length, COMPACT_COLUMNS.name),
+    type: longest(a => typeToString(a.type).length, COMPACT_COLUMNS.type),
+  };
+}
+// The columns are drawn in `ch`, so they line up in any monospace font; the box is sized for
+// the widest common one (0.6em) at the name (12px), type (11px) and value (12px) sizes, with
+// side padding and the gaps between columns. The value slot is 11ch, enough for INT_MIN.
+const compactWidth = ({ name, type }) =>
+  Math.ceil(8 + name * 7.2 + 8 + type * 6.6 + 8 + (11 * 7.2 + 14) + 8);
+
+function allocationSize(a, state, density = 'full', columns = null) {
+  const height = allocationMetrics(a, state, density).height;
+  if (density === 'compact')
+    return { width: compactWidth(columns ?? compactColumns([a], state)), height };
+  const text = allocationDisplayName(state, a).length + typeToString(a.type).length;
   // Aggregate rows also show a per-element address column.
   const aggregate = isArray(a.type) || isStruct(a.type);
-  return {
-    width: Math.min(440, Math.max(aggregate ? 260 : 200, textWidth)),
-    height: allocationMetrics(a, state).height,
-  };
+  return { width: Math.min(440, Math.max(aggregate ? 260 : 200, text * 8 + 40)), height };
 }
 
 /**
@@ -110,8 +166,10 @@ function layoutFlow(
     unfold = false,
     // Heap objects to mark unreachable; playback passes leaksByStep's, which looks ahead.
     unreachable: knownUnreachable = null,
+    density = 'full',
   } = {},
 ) {
+  const { geometry: g, frameMin, reserve } = densityMetrics(density);
   const nodes = [];
   const oldAllocations = new Map(previousState?.allocations.map(a => [a.id, a]) ?? []);
   const semanticEdges = pointerEdges(state);
@@ -148,31 +206,85 @@ function layoutFlow(
     : state.allocations.some(a => a.storage.kind === 'stack')
       ? [{ id: 'main', name: 'main', depth: 0, active: true }]
       : [];
-  let frameX = 30,
-    rightEdge = 30;
-  // Remembered heap boxes and frames. A new frame skips past them: heap blocks keep the
-  // place they got when allocated, and later calls (deep recursion) used to open on top.
-  // Frames grow downward as locals are declared, so a heap box blocks its whole column.
-  const occupiedStack = [
-    ...heapAllocations(state).flatMap(a =>
-      positions[a.id]
-        ? [{ x: positions[a.id].x, y: 0, width: allocationSize(a, state).width, height: Infinity }]
-        : [],
-    ),
-    ...frames.flatMap(f => {
-      const id = `frame:${f.id}`;
-      return (f.active || showExpired) && positions[id] && frameSizes[id]
-        ? [{ ...positions[id], ...frameSizes[id] }]
-        : [];
+  const labels = callLabels(frames);
+  const foldNode = (folded, position, names, returned = false) => ({
+    id: `fold:${folded[0].id}`,
+    type: 'frameFold',
+    position,
+    width: STACK.width,
+    height: STACK.header,
+    style: { width: STACK.width, height: STACK.header },
+    draggable: false,
+    selectable: false,
+    deletable: false,
+    zIndex: 0,
+    data: { name: folded[0].name, calls: folded.map(f => names.get(f.id).label), returned },
+  });
+  // Free layout: live calls form a column, each opening under the one above it, so the next
+  // call at a depth takes the space a returned one left. Frames are placed afresh each step
+  // (captureLayout does not remember them); one the user dragged or resized stays put. Heap
+  // boxes have their own column to the right and never push frames aside.
+  const allocationById = new Map(state.allocations.map(a => [a.id, a]));
+  const frameOf = id => {
+    const a = allocationById.get(id);
+    return a?.storage.kind === 'stack' ? a.storage.frameId : null;
+  };
+  // Calls holding something a pointer elsewhere targets stay unfolded, so no arrow loses its end.
+  const keepOpen = new Set(
+    semanticEdges.flatMap(e => {
+      const target = frameOf(e.target?.allocationId);
+      return target && target !== frameOf(e.source.allocationId) ? [target] : [];
     }),
-  ];
-  // Structure view stacks the frames in a column instead (stackColumn below).
-  for (const frame of structure ? [] : frames) {
-    if (!frame.active && !showExpired) continue;
+  );
+  // Frames, fold rows and (for the shelf) heap boxes already on the canvas this step.
+  const placedFrames = [];
+  const placeAt = (start, size) => {
+    let position = start;
+    for (let b; (b = placedFrames.find(r => overlapping(position, size.width, size.height, r)));)
+      position = { ...position, y: b.y + b.height + STACK_COLUMN.gap };
+    placedFrames.push({ ...position, ...size });
+    return position;
+  };
+  const below = above =>
+    above
+      ? { x: above.x, y: above.y + above.height + STACK_COLUMN.gap }
+      : { x: STACK_COLUMN.x, y: STACK_COLUMN.y };
+  // Structure view stacks the frames in its own column instead (stackColumn below).
+  const column = structure
+    ? []
+    : foldFrames(
+        frames.filter(f => f.active),
+        unfold,
+        keepOpen,
+      );
+  const columnBoxes = new Map(
+    column.flatMap(e => (e.frame ? [[e.frame.id, frameBox(e.frame)]] : [])),
+  );
+  for (const box of columnBoxes.values())
+    if (positions[box.id]) placedFrames.push({ ...positions[box.id], ...box.size });
+  let above = null,
+    columnWidth = 0;
+  for (const entry of column) {
+    if (entry.folded) {
+      const position = placeAt(below(above), { width: STACK.width, height: STACK.header });
+      nodes.push(foldNode(entry.folded, position, labels));
+      above = { ...position, height: STACK.header };
+      continue;
+    }
+    const box = columnBoxes.get(entry.frame.id);
+    const position = positions[box.id] ?? placeAt(below(above), box.size);
+    pushFrame(entry.frame, box, position);
+    above = { ...position, height: box.size.height };
+    columnWidth = Math.max(columnWidth, box.size.width);
+  }
+  const heapX = STACK_COLUMN.x + Math.max(reserve, columnWidth) + FRAME_SPACING;
+
+  function frameBox(frame) {
     const allocations = frameAllocations(state, frame.id).filter(a => a.alive || showExpired);
-    const sizes = allocations.map(a => allocationSize(a, state));
+    const columns = density === 'compact' ? compactColumns(allocations, state) : null;
+    const sizes = allocations.map(a => allocationSize(a, state, density, columns));
     const id = `frame:${frame.id}`;
-    let y = GEOMETRY.top;
+    let y = g.top;
     // New objects occupy unused space; remembered positions are never reflowed.
     const occupied = allocations.flatMap((a, i) =>
       positions[a.id] ? [{ ...positions[a.id], ...sizes[i] }] : [],
@@ -180,50 +292,45 @@ function layoutFlow(
     const locals = allocations.map((a, i) => {
       let p = positions[a.id];
       if (!p) {
-        p = { x: GEOMETRY.padding, y };
+        p = { x: g.padding, y };
         while (
           occupied.some(
             r =>
-              p.x < r.x + r.width + GEOMETRY.gap &&
-              p.x + sizes[i].width + GEOMETRY.gap > r.x &&
-              p.y < r.y + r.height + GEOMETRY.gap &&
-              p.y + sizes[i].height + GEOMETRY.gap > r.y,
+              p.x < r.x + r.width + g.gap &&
+              p.x + sizes[i].width + g.gap > r.x &&
+              p.y < r.y + r.height + g.gap &&
+              p.y + sizes[i].height + g.gap > r.y,
           )
         )
-          p = { ...p, y: p.y + GEOMETRY.gap };
+          p = { ...p, y: p.y + g.gap };
       }
-      p = { x: Math.max(GEOMETRY.padding, p.x), y: Math.max(GEOMETRY.top, p.y) };
+      p = { x: Math.max(g.padding, p.x), y: Math.max(g.top, p.y) };
       occupied.push({ ...p, ...sizes[i] });
-      y = p.y + sizes[i].height + GEOMETRY.gap;
+      y = p.y + sizes[i].height + g.gap;
       return p;
     });
     // Frames hug their contents unless the user has resized them.
     const width = Math.max(
       frameSizes[id]?.width ?? 0,
-      FRAME_MIN.width,
-      ...sizes.map((s, i) => locals[i].x + s.width + GEOMETRY.padding),
+      frameMin.width,
+      ...sizes.map((s, i) => locals[i].x + s.width + g.padding),
     );
     const height = Math.max(
       frameSizes[id]?.height ?? 0,
-      FRAME_MIN.height,
-      ...sizes.map((s, i) => locals[i].y + s.height + GEOMETRY.padding),
+      frameMin.height,
+      ...sizes.map((s, i) => locals[i].y + s.height + g.padding),
     );
-    let position = positions[id];
-    if (!position) {
-      position = { x: frameX, y: 72 };
-      for (
-        let blocker;
-        (blocker = occupiedStack.find(r => overlapping(position, width, height, r)));
-      )
-        position = { ...position, x: blocker.x + blocker.width + FRAME_SPACING };
-      occupiedStack.push({ ...position, width, height });
-    }
+    return { id, allocations, columns, sizes, locals, size: { width, height } };
+  }
+  function pushFrame(frame, { id, allocations, columns, sizes, locals, size }, position) {
+    const { width, height } = size;
     nodes.push({
       id,
       type: 'frameGroup',
       position,
       data: { frame, editable: editable && frame.active },
-      draggable: true,
+      // Returned calls sit on the shelf, which is laid out afresh every step.
+      draggable: frame.active,
       dragHandle: '.frame-group-label',
       selectable: true,
       deletable: false,
@@ -255,18 +362,22 @@ function layoutFlow(
           ...changes(a),
           editable: editable && frame.active && a.alive,
           bad: badIds.has(a.id),
+          columns,
         },
       });
     });
-    // Every invocation gets a distinct slot, even with the same depth/name.
-    frameX = Math.max(frameX + width, position.x + width) + FRAME_SPACING;
-    rightEdge = Math.max(rightEdge, position.x + width);
   }
   let heapY = 124;
   // String literals share the free-standing column below the heap and are never editable.
   const heap = [...heapAllocations(state), ...staticAllocations(state)];
+  // The free layout's heap column shares one set of compact columns; Structure view's other
+  // heap boxes sit in rows, each sized to itself (no `columns`: MemoryAllocationNode then
+  // measures the box alone, as allocationSize does).
+  const heapColumns = density === 'compact' && !structure ? compactColumns(heap, state) : null;
   const occupiedHeap = heap.flatMap(a =>
-    positions[a.id] ? [{ ...positions[a.id], ...allocationSize(a, state) }] : [],
+    positions[a.id]
+      ? [{ ...positions[a.id], ...allocationSize(a, state, density, heapColumns) }]
+      : [],
   );
   // Structure view: the call stack as a column, then one heap region beside it, lists and
   // trees first, with nodes no pointer reaches set apart at the end.
@@ -299,23 +410,7 @@ function layoutFlow(
       right = 0;
     for (const entry of foldFrames(visible, unfold)) {
       if (entry.folded) {
-        const [first] = entry.folded;
-        nodes.push({
-          id: `fold:${first.id}`,
-          type: 'frameFold',
-          position: { x: 30, y },
-          width: STACK.width,
-          height: STACK.header,
-          style: { width: STACK.width, height: STACK.header },
-          draggable: false,
-          selectable: false,
-          deletable: false,
-          zIndex: 0,
-          data: {
-            name: first.name,
-            calls: entry.folded.map(f => labels.get(f.id).label),
-          },
-        });
+        nodes.push(foldNode(entry.folded, { x: 30, y }, labels));
         y += STACK.header + STACK.frameGap;
         right = Math.max(right, 30 + STACK.width);
         continue;
@@ -328,7 +423,7 @@ function layoutFlow(
         const compact = isPointer(a.type) || !(isArray(a.type) || isStruct(a.type));
         const size = compact
           ? { width: STACK.width - STACK.pad * 2, height: STACK.row }
-          : allocationSize(a, state);
+          : allocationSize(a, state, density);
         const position = { x: STACK.pad, y: localY };
         localY += size.height + STACK.rowGap;
         return { a, compact, size, position };
@@ -411,29 +506,30 @@ function layoutFlow(
   for (const a of heap) {
     if (structures.cards.has(a.id)) continue;
     const readOnly = a.storage.kind === 'static';
-    const size = allocationSize(a, state);
+    const columns = heapColumns;
+    const size = allocationSize(a, state, density, columns);
     let position = positions[a.id];
     if (structure) {
       if (row.x > region.x && row.x + size.width > region.x + HEAP_ROW_WIDTH)
-        row = { x: region.x, y: row.y + row.height + GEOMETRY.gap, height: 0 };
+        row = { x: region.x, y: row.y + row.height + g.gap, height: 0 };
       position = { x: row.x, y: row.y };
       row = {
         ...row,
-        x: row.x + size.width + GEOMETRY.gap,
+        x: row.x + size.width + g.gap,
         height: Math.max(row.height, size.height),
       };
     } else if (!position) {
-      position = { x: rightEdge + FRAME_SPACING, y: heapY };
+      position = { x: heapX, y: heapY };
       while (
         occupiedHeap.some(
           r =>
-            position.x < r.x + r.width + GEOMETRY.gap &&
-            position.x + size.width + GEOMETRY.gap > r.x &&
-            position.y < r.y + r.height + GEOMETRY.gap &&
-            position.y + size.height + GEOMETRY.gap > r.y,
+            position.x < r.x + r.width + g.gap &&
+            position.x + size.width + g.gap > r.x &&
+            position.y < r.y + r.height + g.gap &&
+            position.y + size.height + g.gap > r.y,
         )
       )
-        position = { ...position, y: position.y + GEOMETRY.gap };
+        position = { ...position, y: position.y + g.gap };
     }
     occupiedHeap.push({ ...position, ...size });
     nodes.push({
@@ -453,9 +549,36 @@ function layoutFlow(
         ...changes(a),
         editable: editable && a.alive && !readOnly,
         bad: badIds.has(a.id),
+        columns,
       },
     });
-    heapY += size.height + GEOMETRY.gap;
+    heapY += size.height + g.gap;
+  }
+  // Returned calls, when shown, sit on a shelf under the live stack. It is placed afresh every
+  // step, so showing or hiding it never moves the live layout, and keeps clear of heap boxes.
+  if (!structure && showExpired) {
+    const shelf = foldReturned(
+      frames.filter(f => !f.active),
+      unfold,
+      keepOpen,
+    );
+    let start = {
+      x: STACK_COLUMN.x,
+      y: Math.max(STACK_COLUMN.y, ...placedFrames.map(r => r.y + r.height)) + SHELF_GAP,
+    };
+    placedFrames.push(...occupiedHeap);
+    for (const entry of shelf) {
+      if (entry.folded) {
+        const position = placeAt(start, { width: STACK.width, height: STACK.header });
+        nodes.push(foldNode(entry.folded, position, labels, true));
+        start = below({ ...position, height: STACK.header });
+        continue;
+      }
+      const box = frameBox(entry.frame);
+      const position = placeAt(start, box.size);
+      pushFrame(entry.frame, box, position);
+      start = below({ ...position, height: box.size.height });
+    }
   }
   const byId = new Map(nodes.map(n => [n.id, n]));
   const boxes = new Map(
@@ -481,7 +604,7 @@ function layoutFlow(
     // A one-line stack variable: arrows leave and arrive at the middle of its side.
     if (node.type === 'stackLocal')
       return { x: box.x + (side === 'right' ? box.width : 0), y: box.y + box.height / 2 };
-    const rows = allocationMetrics(node.data.allocation, state).rows;
+    const rows = allocationMetrics(node.data.allocation, state, density).rows;
     let row = rows.findIndex(s => JSON.stringify(s.ref.path) === JSON.stringify(r.path));
     if (row < 0 && r.path.length) {
       const resolved = resolveRef(state, r);
@@ -492,7 +615,7 @@ function layoutFlow(
     if (row < 0 && r.path.length) return null;
     return {
       x: box.x + (side === 'right' ? box.width : 0),
-      y: box.y + 1 + (row < 0 ? GEOMETRY.header / 2 : rows[row].top + GEOMETRY.row / 2),
+      y: box.y + 1 + (row < 0 ? g.header / 2 : rows[row].top + g.row / 2),
     };
   }
   const edges = [];
@@ -502,11 +625,16 @@ function layoutFlow(
     const sourceBox = boxes.get(e.source.allocationId),
       targetBox = boxes.get(e.target.allocationId);
     const self = e.source.allocationId === e.target.allocationId;
+    // Boxes one above the other (a call under its caller, or a column of heap boxes) link
+    // along their right sides, toward the heap, instead of looping around to a far side.
+    const stacked =
+      self ||
+      (targetBox.x < sourceBox.x + sourceBox.width && sourceBox.x < targetBox.x + targetBox.width);
     const sourceSide =
-      self || targetBox.x + targetBox.width / 2 >= sourceBox.x + sourceBox.width / 2
+      stacked || targetBox.x + targetBox.width / 2 >= sourceBox.x + sourceBox.width / 2
         ? 'right'
         : 'left';
-    const side = self ? 'right' : sourceSide === 'right' ? 'left' : 'right';
+    const side = stacked ? 'right' : sourceSide === 'right' ? 'left' : 'right';
     const source = anchor(e.source, sourceSide, 'source');
     if (!source) continue;
     const target = anchor(e.target, side, 'target');

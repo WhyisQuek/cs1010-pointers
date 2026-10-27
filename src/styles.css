@@ -735,6 +735,47 @@ button:disabled {
 .no-addresses .targeted .val {
   border-color: var(--ptr);
 }
+/* Compact boxes: no "address · size" line or pointer captions, and a scalar is one line of
+   name, type and value. Heights come from DENSITY.compact in layout.js. */
+.mem-cell.compact .head {
+  padding: 4px 8px 0;
+}
+.mem-cell.compact .name {
+  font-size: 12px;
+}
+.mem-cell.compact .memory-value-line {
+  gap: 8px;
+  padding: 0 8px;
+}
+/* Name and type sit in columns their frame (or the heap column) shares, set in characters
+   by compactColumns in layout.js; longer text ends in an ellipsis, with the whole in the
+   tooltip. The value slot has one width everywhere and takes the right edge. */
+.mem-cell.compact .name {
+  flex: none;
+  width: calc(var(--name-ch) * 1ch);
+}
+.mem-cell.compact .type {
+  flex: none;
+  width: calc(var(--type-ch) * 1ch);
+  max-width: none;
+  margin-left: 0;
+}
+/* An array element or member label spans both columns. */
+.mem-cell.compact .sub-label {
+  flex: 1 1 auto;
+  max-width: none;
+}
+.mem-cell.compact .val {
+  width: calc(11ch + 14px);
+  min-width: 0;
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mem-cell.compact .lifetime-banner {
+  padding: 2px 8px;
+  font-size: 10px;
+}
 .mem-handle {
   width: 9px !important;
   height: 9px !important;
@@ -1057,6 +1098,13 @@ button:disabled {
 }
 .frame-fold strong {
   color: var(--stack);
+}
+.frame-fold.returned {
+  border-left-color: var(--line-strong);
+  background: #14181c;
+}
+.frame-fold.returned strong {
+  color: var(--muted);
 }
 .frame-fold .plain-btn {
   padding: 2px 8px;

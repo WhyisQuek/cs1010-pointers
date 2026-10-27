@@ -1,26 +1,44 @@
 /** Presentation-only workspace operations. Never stored in MemoryState. */
-import { FRAME_MIN, GEOMETRY } from './layout.js';
+import { densityMetrics } from './layout.js';
 export const emptyLayout = () => ({ positions: {}, sizes: {}, routes: {} });
-const { padding: PAD, top: TOP } = GEOMETRY;
+// Frame padding, the top of a frame's contents, and the smallest frame, for a box density.
+const frameMetrics = density => {
+  const { geometry, frameMin } = densityMetrics(density);
+  return { PAD: geometry.padding, TOP: geometry.top, MIN: frameMin };
+};
+
+/**
+ * Boxes are different sizes in each density, so each keeps its own arrangement: Full's at the
+ * top level of the layout, Compact's under `compact`. One undo history covers both.
+ */
+export const densityLayout = (layout, density) =>
+  density === 'compact' ? (layout.compact ?? emptyLayout()) : layout;
+export const withDensityLayout = (layout, density, part) =>
+  density === 'compact' ? { ...layout, compact: part } : { ...part, compact: layout.compact };
 
 export function captureLayout(layout, nodes) {
   const next = { ...layout, positions: { ...layout.positions }, sizes: { ...layout.sizes } };
   for (const n of nodes) {
-    next.positions[n.id] = { ...n.position };
+    // The stack column places frames afresh every step; dragging or resizing one (moveNode,
+    // resizeFrame) is what pins it. Fold rows are never remembered.
+    if (n.type === 'frameFold') continue;
     if (n.type === 'frameGroup') next.sizes[n.id] = { width: n.width, height: n.height };
+    else next.positions[n.id] = { ...n.position };
   }
   return next;
 }
 
-export function contentSize(nodes, frameId) {
+export function contentSize(nodes, frameId, density = 'full') {
+  const { PAD, MIN } = frameMetrics(density);
   const children = nodes.filter(n => n.parentId === frameId);
   return {
-    width: Math.max(FRAME_MIN.width, ...children.map(n => n.position.x + n.width + PAD)),
-    height: Math.max(FRAME_MIN.height, ...children.map(n => n.position.y + n.height + PAD)),
+    width: Math.max(MIN.width, ...children.map(n => n.position.x + n.width + PAD)),
+    height: Math.max(MIN.height, ...children.map(n => n.position.y + n.height + PAD)),
   };
 }
 
-export function moveNode(layout, nodes, id, position) {
+export function moveNode(layout, nodes, id, position, density = 'full') {
+  const { PAD, TOP } = frameMetrics(density);
   const next = captureLayout(layout, nodes),
     node = nodes.find(n => n.id === id);
   if (!node) return layout;
@@ -45,7 +63,8 @@ export function moveNode(layout, nodes, id, position) {
 }
 
 /** Resize any edge while keeping children fixed in world coordinates. */
-export function resizeFrame(layout, nodes, id, rect, direction) {
+export function resizeFrame(layout, nodes, id, rect, direction, density = 'full') {
+  const { PAD, TOP, MIN } = frameMetrics(density);
   const next = captureLayout(layout, nodes),
     frame = nodes.find(n => n.id === id);
   if (!frame) return layout;
@@ -59,20 +78,16 @@ export function resizeFrame(layout, nodes, id, rect, direction) {
   const oldRight = frame.position.x + frame.width,
     oldBottom = frame.position.y + frame.height;
   const left = direction.includes('w')
-    ? Math.min(rect.x, oldRight - FRAME_MIN.width, ...world.map(n => n.x - PAD))
+    ? Math.min(rect.x, oldRight - MIN.width, ...world.map(n => n.x - PAD))
     : frame.position.x;
   const top = direction.includes('n')
-    ? Math.min(rect.y, oldBottom - FRAME_MIN.height, ...world.map(n => n.y - TOP))
+    ? Math.min(rect.y, oldBottom - MIN.height, ...world.map(n => n.y - TOP))
     : frame.position.y;
   const right = direction.includes('e')
-    ? Math.max(rect.x + rect.width, left + FRAME_MIN.width, ...world.map(n => n.x + n.width + PAD))
+    ? Math.max(rect.x + rect.width, left + MIN.width, ...world.map(n => n.x + n.width + PAD))
     : oldRight;
   const bottom = direction.includes('s')
-    ? Math.max(
-        rect.y + rect.height,
-        top + FRAME_MIN.height,
-        ...world.map(n => n.y + n.height + PAD),
-      )
+    ? Math.max(rect.y + rect.height, top + MIN.height, ...world.map(n => n.y + n.height + PAD))
     : oldBottom;
   next.positions[id] = { x: left, y: top };
   next.sizes[id] = { width: right - left, height: bottom - top };
