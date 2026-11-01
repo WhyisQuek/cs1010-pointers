@@ -846,9 +846,6 @@ function ViewMenu({
                 {mode.id === density ? '✓' : ''}
               </span>
               {mode.label}
-              <code className="view-menu-example" aria-hidden="true">
-                {mode.example}
-              </code>
             </button>
           ))}
           <div className="view-menu-heading" role="presentation">

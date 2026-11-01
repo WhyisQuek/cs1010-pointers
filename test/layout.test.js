@@ -466,6 +466,79 @@ test('curves choose both attachment sides and manual bends follow moving endpoin
   assert.ok(loop.points.some(p => p.x > 350));
 });
 
+test('arrows to one spot merge into one straight arrival, wherever they come from', () => {
+  const target = { x: 400, y: 100 };
+  const last = route => route.points.at(-2);
+  const near = curvePointer({ x: 300, y: 300 }, target, 'right', 'right', []);
+  const far = curvePointer({ x: 900, y: 20 }, target, 'left', 'right', []);
+  const bent = curvePointer({ x: 900, y: 20 }, target, 'left', 'right', [], { x: 10, y: 60 });
+  const detour = curvePointer({ x: 900, y: 100 }, target, 'left', 'right', [
+    { x: 600, y: 50, width: 100, height: 100 },
+  ]);
+  assert.match(detour.path, / Q /);
+  for (const route of [near, far, bent, detour]) {
+    assert.deepEqual(route.points.at(-1), target);
+    assert.equal(last(route).y, target.y);
+    assert.ok(last(route).x >= target.x + 20);
+    assert.ok(route.path.endsWith(` L ${target.x} ${target.y}`));
+  }
+  assert.ok(near.path.includes(`420 100 L 400 100`));
+  assert.ok(far.path.includes(`420 100 L 400 100`));
+  assert.ok(bent.path.includes(`420 100 L 400 100`));
+});
+
+test('a pointer row keeps arrows in and out of one side apart, without crossing', () => {
+  const state = makeState();
+  addFrame(state, { id: 'main', name: 'main' });
+  addAllocation(state, { id: 'v', name: 'v', type: int, value: { kind: 'scalar', value: 1 } });
+  addAllocation(state, {
+    id: 'p',
+    name: 'p',
+    type: pointer(int),
+    value: { kind: 'pointer', target: ref('v') },
+  });
+  addAllocation(state, {
+    id: 'pp',
+    name: 'pp',
+    type: pointer(pointer(int)),
+    value: { kind: 'pointer', target: ref('p') },
+  });
+  const { edges, nodes } = stateToFlow(state);
+  const out = edges.find(e => e.source === 'p'),
+    incoming = edges.find(e => e.source === 'pp');
+  assert.equal(out.sourceHandle.endsWith(':right'), true);
+  assert.equal(incoming.targetHandle.endsWith(':right'), true);
+  // v is above p and pp below it, so the arrow out takes the upper point.
+  assert.equal(incoming.data.points.at(-1).y - out.data.points[0].y, 12);
+  // Rows with arrows only one way stay centred.
+  const frame = nodes.find(n => n.id === 'frame:main').position;
+  const pp = nodes.find(n => n.id === 'pp');
+  assert.equal(incoming.data.points[0].y, frame.y + pp.position.y + 1 + GEOMETRY.header + 16);
+});
+
+test('a changed arrow draws after the plain arrows it may share an arrowhead with', () => {
+  const state = fixture();
+  const previousState = structuredClone(state);
+  addAllocation(state, {
+    id: 'other',
+    name: 'other',
+    type: int,
+    value: { kind: 'scalar', value: 4 },
+  });
+  state.allocations.find(a => a.id === 'p').value = { kind: 'pointer', target: ref('other') };
+  state.allocations.find(a => a.id === 'q').value = { kind: 'pointer', target: ref('other') };
+  previousState.allocations.find(a => a.id === 'q').value = {
+    kind: 'pointer',
+    target: ref('other'),
+  };
+  previousState.allocations.push(structuredClone(state.allocations.find(a => a.id === 'other')));
+  const edges = stateToFlow(state, { previousState }).edges;
+  assert.deepEqual(
+    edges.map(e => e.source),
+    ['q', 'p'],
+  );
+});
+
 test('active non-main frames are editable only in an editable diagram', () => {
   for (const editable of [true, false]) {
     const node = stateToFlow(fixture(), { editable }).nodes.find(n => n.id === 'p');

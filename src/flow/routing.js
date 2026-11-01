@@ -96,6 +96,9 @@ function cubic(a, b, c, d, t) {
   };
 }
 
+// Every arrow arrives along this straight run, so arrows to one spot merge into one line.
+const ARRIVAL = 20;
+
 /** Adaptive curves; manual bends are offsets from the endpoint midpoint. */
 export function curvePointer(
   source,
@@ -109,10 +112,12 @@ export function curvePointer(
   const midpoint = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 };
   const reach = Math.max(48, Math.min(180, Math.abs(target.x - source.x) * 0.45));
   const first = { x: source.x + (sourceSide === 'right' ? reach : -reach), y: source.y };
-  const last = { x: target.x + (targetSide === 'right' ? reach : -reach), y: target.y };
+  const outward = targetSide === 'right' ? 1 : -1;
+  const arrival = { x: target.x + outward * ARRIVAL, y: target.y };
+  const last = { x: arrival.x + outward * reach, y: target.y };
   function candidate(bend) {
     let segments;
-    if (!bend) segments = [[source, first, last, target]];
+    if (!bend) segments = [[source, first, last, arrival]];
     else {
       const dx = target.x - source.x,
         dy = target.y - source.y,
@@ -120,13 +125,17 @@ export function curvePointer(
       const tangent = self ? { x: 0, y: 48 } : { x: (dx / length) * 40, y: (dy / length) * 40 };
       segments = [
         [source, first, { x: bend.x - tangent.x, y: bend.y - tangent.y }, bend],
-        [bend, { x: bend.x + tangent.x, y: bend.y + tangent.y }, last, target],
+        [bend, { x: bend.x + tangent.x, y: bend.y + tangent.y }, last, arrival],
       ];
     }
-    const points = segments.flatMap(s => Array.from({ length: 33 }, (_, i) => cubic(...s, i / 32)));
+    const points = [
+      ...segments.flatMap(s => Array.from({ length: 33 }, (_, i) => cubic(...s, i / 32))),
+      target,
+    ];
     const path =
       `M ${source.x} ${source.y}` +
-      segments.map(s => ` C ${s[1].x} ${s[1].y} ${s[2].x} ${s[2].y} ${s[3].x} ${s[3].y}`).join('');
+      segments.map(s => ` C ${s[1].x} ${s[1].y} ${s[2].x} ${s[2].y} ${s[3].x} ${s[3].y}`).join('') +
+      ` L ${target.x} ${target.y}`;
     const collisions = points
       .slice(1, -1)
       .filter(p =>
@@ -141,7 +150,7 @@ export function curvePointer(
     return {
       path,
       points,
-      bend: bend ?? cubic(source, first, last, target, 0.5),
+      bend: bend ?? cubic(source, first, last, arrival, 0.5),
       midpoint,
       collisions,
     };
@@ -155,7 +164,7 @@ export function curvePointer(
   const direct = candidate(null);
   if (!direct.collisions) return direct;
   // Keep the obstacle-aware fallback for dense diagrams, with generous curves.
-  const points = routePointer(source, target, targetSide, obstacles, 0, sourceSide);
+  const points = [...routePointer(source, arrival, targetSide, obstacles, 0, sourceSide), target];
   return {
     path: roundedPath(points, 24),
     points,

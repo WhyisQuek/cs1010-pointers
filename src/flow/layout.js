@@ -73,6 +73,8 @@ const SHELF_GAP = 72;
 // how wide a row of other heap objects grows before wrapping.
 const HEAP_REGION_GAP = 96;
 const HEAP_ROW_WIDTH = 1100;
+// How far above and below a row's middle its arrows in and out attach, when they share a side.
+const ROW_SPLIT = 6;
 // SVG markers need literal colours; keep these in sync with --err, --heap and --ptr in styles.css.
 const EDGE_COLORS = { dangling: '#f85149', changed: '#e3b341', normal: '#58a6ff' };
 export const memoryMetricsStyle = Object.fromEntries(
@@ -618,10 +620,12 @@ function layoutFlow(
       y: box.y + 1 + (row < 0 ? g.header / 2 : rows[row].top + g.row / 2),
     };
   }
-  const edges = [];
-  for (const e of semanticEdges) {
-    if (e.status === 'invalid' || e.status === 'one-past') continue;
-    if (!boxes.has(e.source.allocationId) || !boxes.has(e.target.allocationId)) continue;
+  const drawable = e =>
+    e.status !== 'invalid' &&
+    e.status !== 'one-past' &&
+    boxes.has(e.source.allocationId) &&
+    boxes.has(e.target.allocationId);
+  function sidesOf(e) {
     const sourceBox = boxes.get(e.source.allocationId),
       targetBox = boxes.get(e.target.allocationId);
     const self = e.source.allocationId === e.target.allocationId;
@@ -634,22 +638,59 @@ function layoutFlow(
       stacked || targetBox.x + targetBox.width / 2 >= sourceBox.x + sourceBox.width / 2
         ? 'right'
         : 'left';
-    const side = stacked ? 'right' : sourceSide === 'right' ? 'left' : 'right';
-    const source = anchor(e.source, sourceSide, 'source');
-    if (!source) continue;
-    const target = anchor(e.target, side, 'target');
-    if (!target) continue;
+    return { sourceSide, side: stacked ? 'right' : sourceSide === 'right' ? 'left' : 'right' };
+  }
+  // A stack variable holding a whole node is a cursor: a label on that node, not an arrow.
+  const isCursor = e =>
+    structure &&
+    byId.get(e.source.allocationId).data.allocation.storage.kind === 'stack' &&
+    byId.get(e.target.allocationId).type === 'structureNode' &&
+    !e.target.path.length;
+  // A pointer row with arrows both in and out of one side would read as one line through it.
+  const endKey = (r, side) => `${r.allocationId}:${r.path.join('.')}:${side}`;
+  const rowEnds = new Map();
+  const rowEnd = key => {
+    if (!rowEnds.has(key)) rowEnds.set(key, { from: [], to: null });
+    return rowEnds.get(key);
+  };
+  for (const e of semanticEdges) {
+    if (!drawable(e) || isCursor(e)) continue;
+    const { sourceSide, side } = sidesOf(e);
+    const source = anchor(e.source, sourceSide, 'source'),
+      target = anchor(e.target, side, 'target');
+    if (!source || !target) continue;
+    rowEnd(endKey(e.source, sourceSide)).to = target.y;
+    rowEnd(endKey(e.target, side)).from.push(source.y);
+  }
+  // The end leading higher up takes the upper point, so the two lines do not cross.
+  function rowSplit(r, side, role) {
+    const end = rowEnds.get(endKey(r, side));
+    if (!end?.from.length || end.to === null) return 0;
+    const from = end.from.reduce((sum, y) => sum + y, 0) / end.from.length;
+    const outgoingFirst = end.to < from;
+    return (role === 'source') === outgoingFirst ? -ROW_SPLIT : ROW_SPLIT;
+  }
+  const edges = [];
+  for (const e of semanticEdges) {
+    if (!drawable(e)) continue;
+    const sourceBox = boxes.get(e.source.allocationId),
+      targetBox = boxes.get(e.target.allocationId);
+    const self = e.source.allocationId === e.target.allocationId;
+    const { sourceSide, side } = sidesOf(e);
+    const sourceAnchor = anchor(e.source, sourceSide, 'source');
+    if (!sourceAnchor) continue;
+    const targetAnchor = anchor(e.target, side, 'target');
+    if (!targetAnchor) continue;
+    const source = {
+      ...sourceAnchor,
+      y: sourceAnchor.y + rowSplit(e.source, sourceSide, 'source'),
+    };
+    const target = { ...targetAnchor, y: targetAnchor.y + rowSplit(e.target, side, 'target') };
     byId.get(e.source.allocationId).data.sourceSides[JSON.stringify(e.source.path)] = sourceSide;
     const id = `${e.source.allocationId}:${e.source.path.join('.')}->${e.target.allocationId}:${e.target.path.join('.')}`;
-    // A stack variable holding a whole node is a cursor: a label on that node, not an arrow.
     const sourceNode = byId.get(e.source.allocationId),
       targetNode = byId.get(e.target.allocationId);
-    if (
-      structure &&
-      sourceNode.data.allocation.storage.kind === 'stack' &&
-      targetNode.type === 'structureNode' &&
-      !e.target.path.length
-    ) {
+    if (isCursor(e)) {
       targetNode.data.cursors.push({
         id,
         sourceId: e.source.allocationId,
@@ -734,6 +775,9 @@ function layoutFlow(
       markerEnd: { type: 'arrowclosed', color, width: 18, height: 18 },
     });
   }
+  // Arrows to one spot share their last stretch and arrowhead: the coloured one draws on top.
+  const prominent = e => e.style.stroke !== EDGE_COLORS.normal;
+  edges.sort((a, b) => prominent(a) - prominent(b));
   return { nodes, edges };
 }
 

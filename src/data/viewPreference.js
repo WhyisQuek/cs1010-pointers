@@ -28,8 +28,8 @@ export const CHAR_MODES = Object.freeze([
  * keeps its own arrangement, since the boxes are different sizes.
  */
 export const DENSITY_MODES = Object.freeze([
-  { id: 'full', label: 'Full', example: 'address · size' },
-  { id: 'compact', label: 'Compact', example: 'name type value' },
+  { id: 'full', label: 'Full' },
+  { id: 'compact', label: 'Compact' },
 ]);
 
 function preference(key, modes, fallback) {
