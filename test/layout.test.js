@@ -487,6 +487,24 @@ test('arrows to one spot merge into one straight arrival, wherever they come fro
   assert.ok(bent.path.includes(`420 100 L 400 100`));
 });
 
+test('a self-pointer between two rows is one plain curve, even when bent', () => {
+  const source = { x: 300, y: 200 },
+    target = { x: 300, y: 120 };
+  // A knot would swing tens of pixels past the rows; a bend may ease a few past them.
+  const between = (route, slack = 0) =>
+    route.points.every(p => p.y >= target.y - slack && p.y <= source.y + slack);
+  const plain = curvePointer(source, target, 'right', 'right', [], undefined, true);
+  assert.equal(plain.path.match(/ C /g).length, 1);
+  assert.ok(between(plain));
+  assert.ok(plain.points.some(p => p.x > 330));
+  // Upward and downward arrows alike.
+  const down = curvePointer(target, source, 'right', 'right', [], undefined, true);
+  assert.ok(between(down));
+  const bend = { x: 100, y: 0 };
+  assert.ok(between(curvePointer(source, target, 'right', 'right', [], bend, true), 6));
+  assert.ok(between(curvePointer(target, source, 'right', 'right', [], bend, true), 6));
+});
+
 test('a pointer row keeps arrows in and out of one side apart, without crossing', () => {
   const state = makeState();
   addFrame(state, { id: 'main', name: 'main' });

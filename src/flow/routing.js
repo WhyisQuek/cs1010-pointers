@@ -122,7 +122,10 @@ export function curvePointer(
       const dx = target.x - source.x,
         dy = target.y - source.y,
         length = Math.hypot(dx, dy) || 1;
-      const tangent = self ? { x: 0, y: 48 } : { x: (dx / length) * 40, y: (dy / length) * 40 };
+      // A self-pointer passes its bend heading for its target, or it doubles back into a knot.
+      const tangent = self
+        ? { x: 0, y: dy < 0 ? -48 : 48 }
+        : { x: (dx / length) * 40, y: (dy / length) * 40 };
       segments = [
         [source, first, { x: bend.x - tangent.x, y: bend.y - tangent.y }, bend],
         [bend, { x: bend.x + tangent.x, y: bend.y + tangent.y }, last, arrival],
@@ -156,11 +159,9 @@ export function curvePointer(
     };
   }
   if (offset) return candidate({ x: midpoint.x + offset.x, y: midpoint.y + offset.y });
-  if (self)
-    return candidate({
-      x: Math.max(source.x, target.x) + 100,
-      y: midpoint.y - (source.y === target.y ? 60 : 0),
-    });
+  // Only a pointer to its own exact spot needs a loop; otherwise a plain curve joins the rows.
+  if (self && source.y === target.y)
+    return candidate({ x: Math.max(source.x, target.x) + 100, y: midpoint.y - 60 });
   const direct = candidate(null);
   if (!direct.collisions) return direct;
   // Keep the obstacle-aware fallback for dense diagrams, with generous curves.
