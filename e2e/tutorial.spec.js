@@ -46,7 +46,7 @@ test('Try it asks before replacing the student’s own code', async ({ page }) =
 
   page.once('dialog', dialog => dialog.dismiss());
   await page.getByRole('button', { name: /Walk an array/ }).click();
-  await expect(page.getByRole('heading', { name: 'Try it' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Start with an example' })).toBeVisible();
   await openTab(page, 'Sandbox');
   await expect(code(page)).toHaveValue(/int mine = 1;/);
 

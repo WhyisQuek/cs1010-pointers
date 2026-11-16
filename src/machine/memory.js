@@ -309,6 +309,28 @@ export function pointerEdges(state) {
   return out;
 }
 
+/**
+ * The allocations a program can still observe, which are the ones grading compares and
+ * Generate C reproduces: every live stack object and every heap block (freed or not), plus
+ * any out-of-scope local or string literal that one of those refers to. An out-of-scope
+ * local nothing points to (a returned call's parameter, a loop temporary) is history; one a
+ * pointer still refers to is a dangling target, which is part of the answer.
+ */
+export function gradedIds(state) {
+  const optional = a => (a.storage.kind === 'stack' && !a.alive) || a.storage.kind === 'static';
+  const ids = new Set(state.allocations.filter(a => !optional(a)).map(a => a.id));
+  for (let added = true; added;) {
+    added = false;
+    for (const a of state.allocations.filter(a => ids.has(a.id)))
+      for (const s of scalarSubobjects(a, state))
+        if (s.value.kind === 'pointer' && !ids.has(s.value.target.allocationId)) {
+          ids.add(s.value.target.allocationId);
+          added = true;
+        }
+  }
+  return ids;
+}
+
 export const stackAllocations = state => state.allocations.filter(a => a.storage.kind === 'stack');
 export const heapAllocations = state => state.allocations.filter(a => a.storage.kind === 'heap');
 /** String literal objects: named by their C spelling, never written, alive for the whole run. */

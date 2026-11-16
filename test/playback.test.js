@@ -74,7 +74,7 @@ test('struct pointer declarations work with anonymous, tagged and forward typede
     assert.equal(state.allocations.find(a => a.name === 'a').value.fields.value.value, 20);
     assert.equal(state.allocations.find(a => a.name === 'uninitialized').value.kind, 'uninit');
     const generated = generate(state);
-    assert.match(generated, /Node \*b;/);
+    assert.match(generated, /Node \*b = &a;/);
     assert.equal(equivalent(state, interpret(generated).state).equal, true);
   }
 });

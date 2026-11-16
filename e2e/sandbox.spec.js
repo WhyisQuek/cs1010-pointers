@@ -281,7 +281,7 @@ test('diagram edits are range-checked and generate matching C', async ({ page })
   await page.getByRole('button', { name: 'Generate C' }).click();
   await expect(page.getByText('Generated C from the memory shown.')).toBeVisible();
   const code = page.getByRole('textbox', { name: 'C source code' });
-  await expect(code).toHaveValue(/int a;\n\s+a = 42;/);
+  await expect(code).toHaveValue(/int a = 42;/);
 });
 
 test('reserved variable names are refused in the inspector', async ({ page }) => {
@@ -293,6 +293,81 @@ test('reserved variable names are refused in the inspector', async ({ page }) =>
   await expect(page.getByText("Name not changed: 'NULL' is reserved")).toBeVisible();
   await expect(name).toHaveValue('a');
   await expect(page.locator('.mem-cell .name')).toHaveText('a');
+});
+
+test('Generate C works after function calls, tidies the diagram, and can be undone', async ({
+  page,
+}) => {
+  await openApp(page);
+  const source =
+    'int *make(int v) {\n    int *p = malloc(sizeof(int));\n    *p = v;\n    return p;\n}\n\nint main(void) {\n    int *a = make(3);\n    return 0;\n}\n';
+  await code(page).fill(source);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const generate = page.getByRole('button', { name: 'Generate C' });
+  // Step 0 shows no memory, so there is nothing to generate from.
+  await expect(generate).toBeDisabled();
+
+  // Inside make(), the diagram cannot become one main(); Edit says so before any editing.
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.getByText(/^Cannot generate C: make\(\) has not returned/)).toBeVisible();
+  await page.getByRole('button', { name: 'Back to playback' }).click();
+
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Show out-of-scope/ })).toBeVisible();
+  // The last step is what the code builds, so there is nothing to generate unless asked.
+  await generate.click();
+  await expect(page.getByText('The code already builds the memory shown.')).toBeVisible();
+  await expect(code(page)).toHaveValue(source);
+  await page.getByRole('button', { name: 'Rewrite from scratch' }).click();
+  await expect(code(page)).toHaveValue(/int \*a = malloc\(sizeof\(int\)\);\n\s+\*a = 3;/);
+  await expect(code(page)).not.toHaveValue(/make/);
+  // The returned call is not part of what the new code builds.
+  await expect(page.getByRole('button', { name: /Show out-of-scope/ })).toBeHidden();
+
+  await page.getByRole('button', { name: 'Restore previous code' }).click();
+  await expect(code(page)).toHaveValue(source);
+  await expect(page.getByText('Execution complete')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Show out-of-scope/ })).toBeVisible();
+});
+
+test('Generate C adds lines to code it can keep, and rewrites when it cannot', async ({ page }) => {
+  await openApp(page);
+  const source =
+    'int *make(int v) {\n    int *p = malloc(sizeof(int));\n    *p = v;\n    return p;\n}\n\nint main(void) {\n    int *a = make(3);\n    return 0;\n}\n';
+  await code(page).fill(source);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+
+  // A new variable is one more line; make() and the call to it stay.
+  await page.getByRole('button', { name: '+ Variable' }).click();
+  await page.getByRole('spinbutton', { name: 'Value of b' }).fill('7');
+  await page.getByRole('button', { name: 'Generate C' }).click();
+  await expect(page.getByText('Added 1 line to your code.')).toBeVisible();
+  await expect(code(page)).toHaveValue(
+    source.replace('    return 0;', '    int b = 7;\n    return 0;'),
+  );
+  await expect(page.locator('.added-line')).toHaveText('    int b = 7;');
+
+  // A second edit builds on the code as it now is.
+  await page.getByRole('spinbutton', { name: 'Value of b' }).fill('8');
+  await page.getByRole('button', { name: 'Generate C' }).click();
+  await expect(page.getByText('Added 1 line to your code.')).toBeVisible();
+  await expect(page.locator('.added-line')).toHaveText('    b = 8;');
+  await page.getByRole('button', { name: 'Restore previous code' }).click();
+  await expect(code(page)).toHaveValue(/int b = 7;\n {4}return 0;/);
+  await expect(page.locator('.added-line')).toHaveCount(0);
+
+  // Deleting a variable cannot be a new line, so the program is written again, with why.
+  await page.keyboard.press('Delete');
+  await page.getByRole('button', { name: 'Generate C' }).click();
+  await expect(
+    page.getByText(/^Rewrote the code from the memory shown: removing 'b'/),
+  ).toBeVisible();
+  await expect(code(page)).not.toHaveValue(/make/);
 });
 
 test('generate during playback uses the step on screen', async ({ page }) => {

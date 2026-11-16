@@ -42,6 +42,30 @@ button {
   outline: 2px solid var(--ptr);
   outline-offset: 1px;
 }
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* The transparent border insets the thumb, so it floats inside the 10 px gutter. */
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background: var(--line-strong) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #6e7681 padding-box;
+}
+/* Chrome ignores ::-webkit-scrollbar once scrollbar-color is set, so limit that to other browsers. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-color: var(--line-strong) transparent;
+    scrollbar-width: thin;
+  }
+}
 
 .app {
   height: 100%;
@@ -256,6 +280,11 @@ button {
 .pane-message.ok {
   color: #7ee787;
 }
+.notice-action {
+  margin-left: 10px;
+  padding: 1px 8px;
+  font: 12px var(--ui);
+}
 .plain-btn,
 .step-btn,
 .primary-btn,
@@ -370,6 +399,11 @@ button:disabled {
 .next-line {
   background: #e3b34122;
   box-shadow: -3px 0 #e3b341;
+}
+/* Lines Generate C has just added to existing code. */
+.added-line {
+  background: #2ea04326;
+  box-shadow: -3px 0 #2ea043;
 }
 /* Line numbers that toggle breakpoints; a dot sits in the gutter's left padding. */
 .gutter.with-breakpoints {
@@ -1408,18 +1442,21 @@ button:disabled {
   font-size: 12px;
   line-height: 1.5;
 }
-/* Start here: one readable column; each section is a heading, a line or two and a picture. */
+/* Start here: one readable column. Only screenshots and the example buttons are boxed;
+   spacing and type separate everything else. */
 .tutorial-inner {
-  max-width: 920px;
+  max-width: 880px;
   margin: 0 auto;
-  line-height: 1.55;
+  padding-bottom: 48px;
+  font-size: 15px;
+  line-height: 1.6;
 }
 .tutorial p {
   margin: 0 0 12px;
 }
 .tutorial code,
 .tutorial kbd {
-  font: 12.5px var(--mono);
+  font: 0.87em var(--mono);
 }
 .tutorial kbd {
   padding: 1px 5px;
@@ -1429,32 +1466,42 @@ button:disabled {
   background: var(--panel-2);
 }
 .tutorial-hero {
-  padding: 16px 0 8px;
+  padding-top: 24px;
 }
 .tutorial-hero h2 {
-  margin-bottom: 8px;
-  font-size: 26px;
+  margin: 0 0 8px;
+  font-size: 30px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 .tutorial-hero p {
   color: var(--muted);
-  font-size: 16px;
+  font-size: 17px;
 }
-.tutorial-section {
-  margin-top: 40px;
+.tutorial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-top: 20px;
 }
-.tutorial-section h3 {
-  margin: 0 0 10px;
-  font-size: 18px;
+.tutorial-actions .primary-btn {
+  padding: 9px 16px;
+  font-weight: 600;
 }
-.tutorial-section > p {
-  color: var(--muted);
+.tutorial-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ptr);
+  cursor: pointer;
 }
-.tutorial-section > .primary-btn {
-  margin-top: 14px;
+.tutorial-link:hover {
+  text-decoration: underline;
 }
 .tutorial-note {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 13.5px;
 }
 /* Natural size (2x images, so crisp), shrunk to fit the column. */
 .tutorial-shot {
@@ -1465,164 +1512,86 @@ button:disabled {
   border-radius: 6px;
   background: var(--panel);
 }
-/* One row per step: what to do on the left, what it looks like on the right. */
-.tutorial-steps {
+/* The three steps as one picture: code and controls stacked on the left, memory on the right. */
+.tutorial-tour {
   display: grid;
-  gap: 10px;
-  margin: 0 0 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 288px);
+  grid-template-rows: auto 1fr;
+  gap: 24px 32px;
+  margin: 40px 0 16px;
   padding: 0;
   list-style: none;
 }
-.tutorial-steps li {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  align-items: center;
-  gap: 20px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
+.tutorial-tour li:nth-child(3) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
-.tutorial-steps .tutorial-shot {
-  width: auto;
-  max-height: 190px;
-}
-.tutorial-steps strong {
-  font-size: 15px;
-  vertical-align: middle;
-}
-.tutorial-steps p {
-  margin: 6px 0 0;
+.tutorial-tour p {
+  margin: 0 0 8px;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 14px;
 }
-.tutorial-step-number {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  margin-right: 8px;
-  vertical-align: middle;
-  border-radius: 50%;
-  background: #238636;
-  font-size: 13px;
-  font-weight: 650;
+.tutorial-tour strong {
+  color: var(--text);
+}
+.tutorial-section {
+  margin-top: 56px;
+}
+.tutorial-section h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.tutorial-section > p {
+  max-width: 68ch;
+  color: var(--muted);
 }
 .tutorial-examples {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
 }
 .tutorial-example {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--ptr);
-  border-radius: 4px;
-  background: var(--panel);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-.tutorial-example.fails {
-  border-left-color: var(--err);
-}
-.tutorial-example span {
-  color: var(--muted);
-  font-size: 13px;
-}
-.tutorial-example .tutorial-example-go {
-  margin-top: auto;
-  padding-top: 4px;
-  color: var(--ptr);
-}
-.tutorial-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-.tutorial-column {
+  gap: 4px;
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
-}
-.tutorial-column h4 {
-  margin: 0 0 10px;
-  font-size: 14px;
-}
-.tutorial-column.works h4 {
-  color: var(--ok);
-}
-.tutorial-column.missing h4 {
-  color: #ff7b72;
-}
-.tutorial-column ul {
-  margin: 0 0 10px;
-  padding: 0;
-  list-style: none;
-}
-.tutorial-column li {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 2px 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid #252b32;
-  font-size: 13.5px;
-}
-.tutorial-column li:last-child {
-  border-bottom: 0;
-}
-.tutorial-column li code {
-  color: #b5cea8;
-}
-.tutorial-column .tutorial-note {
-  margin: 0;
-}
-.tutorial-more {
-  margin-top: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-}
-.tutorial-more summary {
-  padding: 10px 14px;
+  color: var(--text);
+  text-align: left;
   cursor: pointer;
-  font-weight: 600;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
 }
-.tutorial-more ul,
-.tutorial-more dl {
-  margin: 0;
-  padding: 0 14px 12px 32px;
-  font-size: 13.5px;
+.tutorial-example:hover {
+  border-color: var(--ptr);
+  background: var(--panel-2);
 }
-.tutorial-more dl {
-  padding-left: 14px;
-}
-.tutorial-more dl > div + div {
-  margin-top: 8px;
-}
-.tutorial-more dt {
-  font-weight: 600;
-}
-.tutorial-more dd {
-  margin: 0;
+.tutorial-example span {
   color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.45;
 }
 .tutorial-split {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  align-items: start;
-  gap: 20px;
+  align-items: center;
+  gap: 32px;
+  margin-top: 16px;
+}
+/* The diagram keeps its natural width, which leaves the legend room for one line per row. */
+.tutorial-split.natural {
+  grid-template-columns: auto minmax(0, 1fr);
 }
 .tutorial-legend {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   padding: 0;
   list-style: none;
-  font-size: 13.5px;
+  font-size: 14px;
 }
 .tutorial-legend li {
   display: flex;
@@ -1669,30 +1638,79 @@ button:disabled {
 .tutorial-flow {
   margin: 0;
   padding-left: 20px;
-  font-size: 14px;
 }
 .tutorial-flow li + li {
   margin-top: 10px;
 }
-.tutorial-challenge {
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
+/* Reference, below the tour: a rule sets it apart from the sections a student reads once. */
+.tutorial-reference {
+  padding-top: 40px;
+  border-top: 1px solid var(--line);
 }
-.tutorial-challenge p {
-  margin: 4px 0 0;
+.tutorial-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 48px;
+  margin: 20px 0;
+}
+.tutorial-reference h4 {
+  margin: 0 0 4px;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tutorial-reference ul,
+.tutorial-reference dl {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.tutorial-reference li,
+.tutorial-reference dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid #252b32;
+}
+.tutorial-reference li code {
+  color: #adb7c2;
+}
+.tutorial-reference dl > div {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+.tutorial-reference dt {
+  font-weight: 600;
+}
+.tutorial-reference dd {
+  margin: 0;
+  color: var(--muted);
+}
+.tutorial-reference h4 + dl {
+  margin-bottom: 0;
 }
 @media (max-width: 720px) {
   .tutorial.page {
     padding: 16px;
   }
-  .tutorial-steps li,
+  .tutorial-hero h2 {
+    font-size: 24px;
+  }
+  .tutorial-tour,
   .tutorial-columns,
-  .tutorial-split {
+  .tutorial-split,
+  .tutorial-split.natural,
+  .tutorial-reference dl > div {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .tutorial-tour li:nth-child(3) {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 .challenge-head {

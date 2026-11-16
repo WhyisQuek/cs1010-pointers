@@ -19,7 +19,8 @@ machine/interpreter.js    semantic execution         (implementation: machine/ex
 machine/memory.js         MemoryState
   ├────────► flow/memoryFlow.jsx       React Flow view
   ├────────► pipeline/equivalence.js   challenge grading
-  └────────► pipeline/codegen.js       canonical C
+  ├────────► pipeline/codegen.js       canonical C
+  └────────► pipeline/patch.js         lines added to existing C
 ```
 
 The browser never executes a native C binary.

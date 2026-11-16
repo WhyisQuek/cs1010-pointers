@@ -37,7 +37,7 @@ import {
   setRefValue,
 } from '../machine/memory.js';
 import { upgradeMemoryState } from '../machine/addresses.js';
-import { removeAllocation } from '../machine/editing.js';
+import { removeAllocation, removeReturnedFrame } from '../machine/editing.js';
 import { describePointer, formatAddress } from '../flow/addressPresentation.js';
 import MemoryInspector from './MemoryInspector.jsx';
 import {
@@ -443,6 +443,14 @@ export default function MemoryCanvas({
       setSelectedId(a.id);
       setMenu(null);
     });
+  const removeCall = frame => {
+    const removed = mutate(s => {
+      const cleared = removeReturnedFrame(s, frame.id);
+      const pointers = cleared === 1 ? 'A pointer into it is' : `${cleared} pointers into it are`;
+      return `Removed the returned call ${frame.name}().${cleared ? ` ${pointers} now uninitialized.` : ''} Ctrl+Z undoes it.`;
+    });
+    if (removed) closeInspector();
+  };
   const clearDiagram = () => {
     const empty = makeState(state.structTypes);
     dispatch({ type: 'clear' });
@@ -504,6 +512,11 @@ export default function MemoryCanvas({
           sizes: { ...currentLayout().sizes, [n.id]: contentSize(nodes, n.id, density) },
         }),
       onAdd: () => addBox('stack', n.data.frame?.id),
+      // A returned call is history: removing it is how a diagram stops referring to it.
+      onRemove:
+        editable && n.type === 'frameGroup' && !n.data.frame.active
+          ? () => removeCall(n.data.frame)
+          : undefined,
     },
   }));
   const interactiveEdges = edges.map(e => ({

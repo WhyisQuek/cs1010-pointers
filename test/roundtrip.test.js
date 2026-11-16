@@ -16,7 +16,7 @@ import {
   resolveRef,
   setRefValue,
 } from '../src/machine/memory.js';
-import { changeAllocationType } from '../src/machine/editing.js';
+import { changeAllocationType, removeReturnedFrame } from '../src/machine/editing.js';
 import { primitive } from '../src/language/types.js';
 import { seedLevels } from '../src/data/levels.js';
 
@@ -224,13 +224,231 @@ test('two live variables with one name in a frame are still rejected', () => {
   assert.throws(() => validate(state), /duplicate variable name 't'/);
 });
 
-test('a heap block reachable only through an interior pointer cannot be generated', () => {
-  const state = interpret(`struct S { int x; int y; };
-int main(void) { struct S *s = malloc(sizeof(struct S)); int *q = &s->y; s = NULL; return 0; }`).state;
-  assert.throws(
-    () => generate(state),
-    /q has type int \* but heap 1 needs a struct S \* pointer to allocate it/,
+// Generate C reproduces what grading compares, so history nothing can observe is left out.
+const history = [
+  'int main(void) { int sum = 0; for (int i = 0; i < 3; i++) { sum += i; } return 0; }',
+  'int main(void) { int x = 1; { int t = 2; x = t; } return 0; }',
+  'void set(int *p) { *p = 5; } int main(void) { int a = 0; set(&a); return 0; }',
+  'int *make(int v) { int *p = malloc(sizeof(int)); *p = v; return p; } int main(void) { int *a = make(3); return 0; }',
+  'struct N { int v; struct N *next; }; struct N *push(struct N *h, int v) { struct N *n = malloc(sizeof(struct N)); n->v = v; n->next = h; return n; } int main(void) { struct N *head = NULL; for (int i = 1; i <= 3; i++) { head = push(head, i); } return 0; }',
+  'int fact(int n) { if (n < 2) { return 1; } return n * fact(n - 1); } int main(void) { int r = fact(4); return 0; }',
+];
+for (const source of history) {
+  test(`round trip past returned calls and ended scopes: ${source.slice(0, 50)}`, () => {
+    const before = interpret(source).state;
+    const generated = generate(before);
+    // Nothing was out of reach, so the code needs no inner block.
+    assert.doesNotMatch(generated, /^ {4}\{$/m);
+    const result = equivalent(before, interpret(generated).state);
+    assert.ok(result.equal, `${result.diffs.join('; ')}\n${generated}`);
+  });
+}
+
+// What no pointer in the diagram can allocate, or what is out of scope but still pointed
+// to, is rebuilt in a block inside main() that ends before main() does.
+const scoped = [
+  // A leak, with and without contents.
+  'int main(void) { int *p = malloc(sizeof(int)); *p = 1; p = NULL; return 0; }',
+  'int main(void) { int *p = malloc(sizeof(int)); p = NULL; return 0; }',
+  // A leaked list: one temporary allocates the head, which allocates the rest.
+  'struct N { int v; struct N *next; }; int main(void) { struct N *h = malloc(sizeof(struct N)); h->v = 1; h->next = malloc(sizeof(struct N)); h->next->v = 2; h->next->next = NULL; h = NULL; return 0; }',
+  // A leaked cycle, where every block has a pointer to it.
+  'struct N { int v; struct N *next; }; int main(void) { struct N *a = malloc(sizeof(struct N)); a->next = malloc(sizeof(struct N)); a->next->next = a; a->v = 1; a->next->v = 2; a = NULL; return 0; }',
+  // Freed, and no pointer to it survives.
+  'int main(void) { int *p = malloc(sizeof(int)); *p = 4; free(p); p = NULL; return 0; }',
+  // Reachable only through an interior pointer.
+  'struct S { int x; int y; }; int main(void) { struct S *s = malloc(sizeof(struct S)); s->x = 1; int *q = &s->y; s = NULL; return 0; }',
+  // A pointer dangling into a scope that has ended.
+  'int main(void) { int *p; { int t = 2; p = &t; } return 0; }',
+  'int main(void) { int a = 1; int **pp; { int *t = &a; pp = &t; } return 0; }',
+  // A variable of the diagram already uses the temporary's first name.
+  'int main(void) { int tmp = 3; int *p = malloc(sizeof(int)); p = NULL; return 0; }',
+];
+for (const source of scoped) {
+  test(`round trip through an inner block: ${source.slice(0, 60)}`, () => {
+    const before = interpret(source).state;
+    const generated = generate(before);
+    assert.match(generated, /^ {4}\{$/m);
+    const result = equivalent(before, interpret(generated).state);
+    assert.ok(result.equal, `${result.diffs.join('; ')}\n${generated}`);
+  });
+}
+
+test('a leaked block is allocated through a temporary that goes out of scope', () => {
+  const state = interpret(
+    'int main(void) { int n = 2; int *p = malloc(sizeof(int)); *p = 1; p = NULL; return 0; }',
+  ).state;
+  assert.equal(
+    generate(state),
+    `#include <stdlib.h>
+
+int main(void) {
+    int n = 2;
+    int *p = NULL;
+
+    {
+        int *tmp = malloc(sizeof(int));
+        *tmp = 1;
+    }
+    return 0;
+}
+`,
   );
+});
+
+// Generated C reads like C a person would write. Each case is main()'s body, which must
+// come back exactly as written.
+const readable = [
+  ['a scalar is declared with its value', 'int n = 3;'],
+  ['an uninitialized variable is only declared', 'int n;\n    int *p;'],
+  ['a pointer is declared with its target', 'int x = 1;\n    int *p = &x;\n    int **pp = &p;'],
+  ['an array has an initializer list', 'int a[5] = {1, 2, 3, 4, 5};'],
+  ['a zeroed array is {0}', 'int a[8] = {0};'],
+  ['a nested array nests its lists', 'int m[2][2] = {{1, 2}, {3, 4}};'],
+  ['a char array holding a string is a string', 'char x[6] = "Hello";'],
+  ['a shorter string is padded by the initializer', 'char x[6] = "Hi";'],
+  ['a string keeps its escapes', 'char x[6] = "a\\n\\"b";'],
+  ['a char is a character literal', "char c = 'A';\n    char end = '\\0';\n    char nl = '\\n';"],
+  ['an unreadable char stays a number', 'char c = 1;\n    char d = -3;'],
+  [
+    'an array decays to its first element',
+    'int a[3] = {1, 2, 3};\n    int *p = a;\n    int *q = &a[2];',
+  ],
+  ['a row of a 2D array decays too', 'int m[2][2] = {0};\n    int *p = m[1];'],
+  ['a pointer into a literal', 'char *s = "hi";\n    char *t = "hello" + 2;'],
+  [
+    'a pointer is declared with malloc',
+    'int *p = malloc(sizeof(int));\n    *p = 42;\n    int *q = p;',
+  ],
+  ['a zeroed heap array is calloc', 'int *p = calloc(3, sizeof(int));'],
+  [
+    'a block is filled before its pointer moves',
+    'int *y = malloc(3 * sizeof(int));\n    y[0] = 5;\n    y[1] = 7;\n    y = y + 1;',
+  ],
+  [
+    'a pointer to the start allocates, whatever the order',
+    'int *q;\n    int *p = malloc(3 * sizeof(int));\n    p[0] = 1;\n    q = p + 2;',
+  ],
+  [
+    'a partly set array is assigned element by element',
+    "int a[3];\n    a[0] = 1;\n    char s[4];\n    s[0] = 'a';",
+  ],
+  ['a pointer to a later variable is assigned after it', 'int *p;\n    int x = 1;\n    p = &x;'],
+];
+for (const [name, body] of readable) {
+  test(`readable C: ${name}`, () => {
+    const source = `int main(void) {\n    ${body}\n    return 0;\n}\n`;
+    const state = interpret(source).state;
+    const generated = generate(state);
+    assert.equal(generated.slice(generated.indexOf('int main')), source);
+    assert.ok(equivalent(state, interpret(generated).state).equal);
+  });
+}
+
+test('readable C: structs use initializers and member chains need no brackets', () => {
+  const source = `#include <stdlib.h>
+
+struct N {
+    int v;
+    struct N *next;
+};
+
+int main(void) {
+    struct N a = {1, NULL};
+    struct N b = {2, &a};
+    struct N *head = malloc(sizeof(struct N));
+    head->v = 1;
+    head->next = malloc(sizeof(struct N));
+    head->next->v = 2;
+    head->next->next = NULL;
+    return 0;
+}
+`;
+  assert.equal(generate(interpret(source).state), source);
+});
+
+test('readable C: a block of pointers is filled after its pointer moves', () => {
+  // t[0]'s block is reached through t, so t must be where it stays before that is written.
+  const { state } = interpret(`struct N { int v; };
+int main(void) { struct N **t = malloc(2 * sizeof(struct N *)); t[0] = malloc(sizeof(struct N)); t[0]->v = 1; t[1] = NULL; t = t + 1; return 0; }`);
+  const generated = generate(state);
+  assert.match(generated, /t = t \+ 1;\n {4}\(t - 1\)\[0\] = malloc\(sizeof\(struct N\)\);/);
+  assert.match(generated, /\(t - 1\)\[0\]->v = 1;/);
+  assert.ok(equivalent(state, interpret(generated).state).equal);
+});
+
+test('readable C: an initializer never stands in for an uninitialized part', () => {
+  // {1, 2} would zero c[2], and "ab" would zero the rest of s.
+  const { state } = interpret(
+    "int main(void) { int c[3]; c[0] = 1; c[1] = 2; char s[4]; s[0] = 'a'; s[1] = 'b'; s[2] = 0; return 0; }",
+  );
+  const generated = generate(state);
+  assert.doesNotMatch(generated, /= \{|= "/);
+  assert.ok(equivalent(state, interpret(generated).state).equal);
+});
+
+test('every step of every round-trip program generates C that reproduces it', () => {
+  let checked = 0;
+  for (const source of [...programs, ...history, ...scoped]) {
+    for (const { state } of interpret(source).snapshots) {
+      let generated;
+      try {
+        generated = generate(state);
+      } catch (e) {
+        // A step inside a call is refused; nothing else may be.
+        assert.match(e.errors?.[0] ?? String(e), /has not returned/, source);
+        continue;
+      }
+      const result = equivalent(state, interpret(generated).state);
+      assert.ok(result.equal, `${result.diffs.join('; ')}\n${source}\n${generated}`);
+      checked++;
+    }
+  }
+  assert.ok(checked > 150);
+});
+
+test('generation says what to do about a call that is running or still pointed into', () => {
+  const running = interpret(
+    'void f(int *p) { *p = 1; } int main(void) { int a; f(&a); return 0; }',
+  );
+  const inside = running.snapshots.find(s => s.function === 'f').state;
+  assert.throws(() => generate(inside), /f\(\) has not returned.*Step until f\(\) returns/);
+
+  const dangling = interpret(
+    'int *bad(void) { int t = 4; return &t; } int main(void) { int *p = bad(); return 0; }',
+  ).state;
+  assert.throws(
+    () => generate(dangling),
+    /p still points to 't' in the returned call bad\(\).*remove that call/,
+  );
+  // Removing the call is the fix the message offers.
+  removeReturnedFrame(dangling, dangling.frames.find(f => f.name === 'bad').id);
+  assert.equal(named(dangling, 'p').value.kind, 'uninit');
+  assert.ok(dangling.frames.every(f => f.name === 'main'));
+  assert.ok(equivalent(dangling, interpret(generate(dangling)).state).equal);
+
+  const shadow = interpret(
+    'int main(void) { int *p; { int t = 2; p = &t; } int t = 3; return 0; }',
+  );
+  assert.throws(() => generate(shadow.state), /out-of-scope 't'.*another variable of that name/);
+});
+
+test('removing a returned call keeps the rest of the diagram', () => {
+  const { state } = interpret(
+    'int g(int v) { return v + 1; } int f(int v) { return g(v); } int main(void) { int a = f(1); return 0; }',
+  );
+  const f = state.frames.find(x => x.name === 'f');
+  assert.equal(removeReturnedFrame(state, f.id), 0);
+  assert.deepEqual(
+    state.frames.map(x => [x.name, x.callerId]),
+    [
+      ['main', null],
+      ['g', 'main'],
+    ],
+  );
+  assert.equal(named(state, 'a').value.value, 2);
+  assert.doesNotThrow(() => validate(state));
+  assert.throws(() => removeReturnedFrame(state, 'main'), /only a call that has returned/);
 });
 
 test('generated C keeps bool and size_t spellings and their headers', () => {
@@ -240,10 +458,8 @@ test('generated C keeps bool and size_t spellings and their headers', () => {
   assert.equal(named(state, 'b').value.value, 1);
   const generated = generate(state);
   assert.match(generated, /^#include <stdbool.h>\n#include <stddef.h>\n/);
-  assert.match(generated, /bool b;/);
-  assert.match(generated, /size_t n;/);
-  assert.match(generated, /b = true;/);
-  assert.match(generated, /n = 8UL;/);
+  assert.match(generated, /bool b = true;/);
+  assert.match(generated, /size_t n = 8UL;/);
 });
 
 test('size_t and unsigned long are the same type for pointers', () => {

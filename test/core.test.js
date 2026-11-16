@@ -101,9 +101,8 @@ test('stack array subobject pointers generate address-of element', () => {
   });
   stack(s, 'p', pointer(INT), pointerValue(ref(arr.id, [1])));
   const c = generate(s);
-  assert.match(c, /int arr\[3\];/);
-  assert.match(c, /arr\[1\] = 2;/);
-  assert.match(c, /p = &arr\[1\];/);
+  assert.match(c, /int arr\[3\] = \{1, 2, 3\};/);
+  assert.match(c, /int \*p = &arr\[1\];/);
 });
 
 test('heap arrays retain one allocation with element values', () => {
@@ -277,10 +276,10 @@ test('equivalence matches anonymous freed heap IDs up to relabeling', () => {
   assert.equal(equivalent(a, b).equal, true);
 });
 
-test('initialized unreachable heap allocations are rejected by canonical generator', () => {
+test('an unreachable heap allocation is generated through a block-scope temporary', () => {
   const s = fresh();
   heap(s, INT, { kind: 'scalar', value: 7 }, true);
-  assert.throws(() => generate(s), /initialized heap allocation .* is unreachable/);
+  assert.match(generate(s), /\{\n {8}int \*tmp = malloc\(sizeof\(int\)\);\n {8}\*tmp = 7;\n {4}\}/);
 });
 
 test('pointer target subobject path is part of grading', () => {
@@ -740,7 +739,5 @@ test('canonical generator emits named struct definitions and field assignments',
   const c = generate(s);
   assert.match(c, /struct Node \{/);
   assert.match(c, /struct Node \*next;/);
-  assert.match(c, /struct Node a;/);
-  assert.match(c, /a\.value = 5;/);
-  assert.match(c, /a\.next = NULL;/);
+  assert.match(c, /struct Node a = \{5, NULL\};/);
 });

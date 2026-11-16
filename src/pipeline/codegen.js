@@ -1,5 +1,5 @@
 /** MemoryState -> one canonical PointerViz Mini-C program. */
-import { encodeStringLiteral } from '../language/literals.js';
+import { encodeCharLiteral, encodeStringLiteral } from '../language/literals.js';
 import {
   CHAR,
   VOID,
@@ -22,6 +22,7 @@ import {
 import {
   allocationDisplayName,
   getAllocation,
+  gradedIds,
   heapAllocations,
   pointerEdges,
   resolveRef,
@@ -173,16 +174,52 @@ function validateValueShape(type, value, label, errors, structs) {
   errors.push(`${label} uses unsupported type ${typeToString(type)}`);
 }
 
-export function generate(state) {
-  validate(state);
-  const nonMain = stackAllocations(state).filter(a => (a.storage.frameId ?? 'main') !== 'main');
-  if (nonMain.length)
-    throw new ValidationError([
-      'diagram-to-code generation currently requires a single main() stack frame; function-call snapshots can still be viewed and graded',
-    ]);
-  const deadStack = stackAllocations(state).filter(a => !a.alive);
-  if (deadStack.length)
-    throw new ValidationError(['cannot generate final C from expired stack objects']);
+/**
+ * Generation reproduces what grading compares (gradedIds), so a returned call's locals and
+ * out-of-scope loop or block variables that nothing points to are left out.
+ */
+export function observableState(state) {
+  const keep = gradedIds(state);
+  const allocations = state.allocations.filter(a => keep.has(a.id));
+  // A returned call stays only while something still points into it.
+  const frames = (state.frames ?? []).filter(
+    f => f.active || allocations.some(a => a.storage.frameId === f.id),
+  );
+  return { ...state, allocations, frames };
+}
+
+/** Why the stack objects left after observableState() cannot all be written into main(). */
+function stackIssue(state, stack) {
+  const call = a =>
+    `${state.frames?.find(f => f.id === a.storage.frameId)?.name ?? 'a function'}()`;
+  const outside = stack.filter(a => (a.storage.frameId ?? 'main') !== 'main');
+  const running = outside.find(a => a.alive);
+  if (running)
+    return `${call(running)} has not returned, and C can only be generated once main() is the only call running. Step until ${call(running)} returns`;
+  const pointerTo = a =>
+    resolveRef(state, pointerEdges(state).find(e => e.target.allocationId === a.id).source).label;
+  if (outside.length)
+    return `${pointerTo(outside[0])} still points to '${outside[0].name}' in the returned call ${call(outside[0])}. Point it somewhere else, or show out-of-scope memory and remove that call`;
+  // Out-of-scope variables of main() are declared in an inner block, which a shared name breaks.
+  const names = new Set(stack.filter(a => a.alive).map(a => a.name));
+  for (const a of stack.filter(a => !a.alive)) {
+    if (names.has(a.name))
+      return `${pointerTo(a)} still points to an out-of-scope '${a.name}', and main() has another variable of that name. Point it somewhere else`;
+    names.add(a.name);
+  }
+  return null;
+}
+
+export function generate(source) {
+  validate(source);
+  const state = observableState(source);
+  const stack = stackAllocations(state);
+  const issue = stackIssue(state, stack);
+  if (issue) throw new ValidationError([issue]);
+  // What is left out of scope is the target of a dangling pointer, so it is rebuilt in an
+  // inner block that ends before main() does.
+  const live = stack.filter(a => a.alive),
+    ended = stack.filter(a => !a.alive);
 
   const ctx = {
     state,
@@ -194,31 +231,31 @@ export function generate(state) {
     initializing: new Set(),
     // Interior pointers into heap blocks that no base pointer has allocated yet.
     deferred: [],
+    // Names of the block-scope pointers that allocate what no pointer in the diagram can.
+    temporaries: [],
+    // Stack variables declared so far; a pointer to a later one waits (see deferred).
+    declared: new Set(),
+    // Index in `lines` where main()'s inner block starts, once something needs it.
+    blockStart: null,
+    // Let a pointer to the start of a block allocate it, rather than one into its middle.
+    preferStart: true,
   };
-  const stack = stackAllocations(state);
-  for (const a of stack) ctx.lines.push(`${declarationToC(a.type, a.name)};`);
-  if (stack.length) ctx.lines.push('');
-  for (const a of stack) emitNonPointerStorage(a, ctx);
-  for (const a of stack) emitPointerStorage(a, ctx);
+  for (const a of live) declare(a, ctx);
+  if (ended.length) openBlock(ctx);
+  for (const a of ended) declare(a, ctx);
   emitDeferredPointers(ctx);
 
-  for (const heap of heapAllocations(state)) {
+  // Blocks nothing reaches (leaks, and freed blocks every pointer has left). Those with no
+  // pointer to them at all go first, so that each one also allocates what it points to.
+  const targeted = new Set(pointerEdges(state).map(e => e.target.allocationId));
+  const unreached = heapAllocations(state).filter(heap => !ctx.heapAnchor.has(heap.id));
+  for (const heap of [
+    ...unreached.filter(h => !targeted.has(h.id)),
+    ...unreached.filter(h => targeted.has(h.id)),
+  ]) {
     if (ctx.heapAnchor.has(heap.id)) continue;
-    const incoming = pointerEdges(state).some(e => e.target.allocationId === heap.id);
-    if (!incoming) {
-      const label = allocationDisplayName(state, heap);
-      if (!heap.alive)
-        throw new ValidationError([
-          `${label} is freed but has no surviving pointer; its provenance cannot be reproduced`,
-        ]);
-      if (hasMeaningfulValue(heap.type, heap.value, state))
-        throw new ValidationError([
-          `initialized heap allocation (${label}) is unreachable; add a pointer to it or clear its contents`,
-        ]);
-      throw new ValidationError([
-        `unreachable heap allocation (${label}) cannot be generated without an extra source pointer`,
-      ]);
-    }
+    allocateThroughTemporary(heap, ctx);
+    emitDeferredPointers(ctx);
   }
   // An anchor such as head->next reads its owner block, so free the deepest blocks first.
   const anchorDepth = id => {
@@ -232,7 +269,12 @@ export function generate(state) {
     .forEach(heap => ctx.lines.push(`free(${ctx.heapAnchor.get(heap.id)});`));
 
   const definitions = emitStructDefinitions(state);
-  const cleaned = trimBlankLines(ctx.lines);
+  // Temporaries and out-of-scope variables must be gone when main() ends, so the lines from
+  // the first of them onward form one inner block.
+  const start = ctx.blockStart ?? ctx.lines.length;
+  const cleaned = ctx.lines.slice(0, start);
+  if (ctx.blockStart !== null)
+    cleaned.push(...(start ? [''] : []), '{', ...ctx.lines.slice(start).map(l => `    ${l}`), '}');
   const needsStdlib =
     heapAllocations(state).length > 0 || scalarValues(state).some(v => v.kind === 'null');
   const uses = test =>
@@ -271,19 +313,96 @@ function emitStructDefinitions(state) {
   return [aliases, bodies].filter(Boolean).join('\n\n');
 }
 
-function emitNonPointerStorage(a, ctx) {
-  for (const s of scalarSubobjects(a, ctx.state)) {
-    if (isPointer(s.type) || s.value.kind !== 'scalar') continue;
-    ctx.lines.push(
-      `${lvalueForStackSubobject(a, s.ref.path)} = ${numberToC(s.value.value, s.type)};`,
-    );
+function openBlock(ctx) {
+  ctx.blockStart ??= ctx.lines.length;
+}
+
+/**
+ * Declare one stack variable, with its value where C can write that as an initializer
+ * (`int n = 3;`, `char s[6] = "Hello";`, `int *p = malloc(sizeof(int));`). Otherwise the
+ * declaration is followed by one assignment for each part that has a value.
+ */
+function declare(a, ctx) {
+  const declaration = declarationToC(a.type, a.name);
+  const initializer = initializerFor(a.type, a.value, ctx);
+  ctx.declared.add(a.id);
+  if (initializer !== null) ctx.lines.push(`${declaration} = ${initializer};`);
+  else if (isPointer(a.type))
+    emitPointerAssignment(a.name, a.type, a.value, ctx, null, declaration);
+  else {
+    ctx.lines.push(`${declaration};`);
+    for (const s of scalarSubobjects(a, ctx.state)) {
+      const lhs = lvalueForStackSubobject(a, s.ref.path);
+      if (isPointer(s.type)) emitPointerAssignment(lhs, s.type, s.value, ctx);
+      else if (s.value.kind === 'scalar')
+        ctx.lines.push(`${lhs} = ${numberToC(s.value.value, s.type)};`);
+    }
   }
 }
-function emitPointerStorage(a, ctx) {
-  for (const s of scalarSubobjects(a, ctx.state)) {
-    if (isPointer(s.type))
-      emitPointerAssignment(lvalueForStackSubobject(a, s.ref.path), s.type, s.value, ctx);
+
+/**
+ * The initializer that gives an object of `type` exactly `value`, or null when there is
+ * none: a part is uninitialized (an initializer would zero it), or a pointer's target is
+ * not there to name yet.
+ */
+export function initializerFor(type, value, ctx) {
+  if (isPrimitive(type)) return value.kind === 'scalar' ? numberToC(value.value, type) : null;
+  if (isPointer(type)) return pointerExpr(value, ctx);
+  const text = stringInitializer(type, value);
+  if (text !== null) return text;
+  const parts = isArray(type)
+    ? value.elements.map(v => initializerFor(type.of, v, ctx))
+    : resolveStructType(type, ctx.state.structTypes).fields.map(f =>
+        initializerFor(f.type, value.fields[f.name], ctx),
+      );
+  if (parts.includes(null)) return null;
+  return isZero(type, value, ctx.state) ? '{0}' : `{${parts.join(', ')}}`;
+}
+
+/** "Hello" for a char array holding a string and nothing but '\0' after it; otherwise null. */
+function stringInitializer(type, value) {
+  if (!isArray(type) || !typeEquals(type.of, CHAR)) return null;
+  const codes = value.elements.map(e => (e.kind === 'scalar' ? e.value : null));
+  const end = codes.indexOf(0);
+  if (end < 0 || codes.slice(end).some(c => c !== 0)) return null;
+  const text = codes.slice(0, end);
+  return text.every(readableChar) ? encodeStringLiteral(text) : null;
+}
+/** Printable ASCII, or a character with a short escape such as '\n'. */
+const readableChar = code => (code >= 32 && code < 127) || (code >= 7 && code <= 13);
+
+/** Whether every part of `value` is what `{0}` and calloc give: 0, 0.0, false or NULL. */
+function isZero(type, value, state) {
+  if (isPrimitive(type))
+    return value.kind === 'scalar' && Number(value.value) === 0 && !Object.is(value.value, -0);
+  if (isPointer(type)) return value.kind === 'null';
+  if (isArray(type)) return value.elements.every(v => isZero(type.of, v, state));
+  if (!isStruct(type)) return false;
+  return resolveStructType(type, state.structTypes).fields.every(f =>
+    isZero(f.type, value.fields[f.name], state),
+  );
+}
+
+/** The expression for a pointer value whose target can be named now; otherwise null. */
+export function pointerExpr(value, ctx) {
+  if (value.kind === 'null') return 'NULL';
+  if (value.kind !== 'pointer') return null;
+  const target = getAllocation(ctx.state, value.target.allocationId),
+    path = value.target.path;
+  if (target.storage.kind === 'static')
+    // A literal decays to &literal[0]; any other element is an offset from it.
+    return `${target.name}${path[0] ? ` + ${path[0]}` : ''}`;
+  if (target.storage.kind === 'stack') {
+    if (!ctx.declared.has(target.id)) return null;
+    if (path.at(-1) === '$onePast')
+      return `&${lvalueForStackSubobject(target, path.slice(0, -1))} + 1`;
+    // An array decays to a pointer to its first element, so &a[0] is written a.
+    if (path.at(-1) === 0) return lvalueForStackSubobject(target, path.slice(0, -1));
+    return `&${lvalueForStackSubobject(target, path)}`;
   }
+  return ctx.heapAnchor.has(target.id)
+    ? pointerExprForHeapTarget(target, path, ctx.heapAnchor.get(target.id), ctx.state)
+    : null;
 }
 
 /**
@@ -296,66 +415,123 @@ function emitDeferredPointers(ctx) {
     const pending = ctx.deferred;
     ctx.deferred = [];
     const emitted = pending.map(p => emitPointerAssignment(p.lhs, p.type, p.value, ctx, p.owner));
-    if (!emitted.some(Boolean)) {
-      const { lhs, type, value } = pending[0];
-      const heap = getAllocation(ctx.state, value.target.allocationId);
+    if (emitted.some(Boolean)) continue;
+    // A pointer waiting for a better one to allocate its block (preferStart) may be what
+    // that better one is waiting for; let it allocate after all.
+    if (ctx.preferStart) {
+      ctx.preferStart = false;
+      continue;
+    }
+    // No pointer in the diagram can allocate this block, so a temporary one does.
+    const { lhs, type, value } = pending[0];
+    const heap = getAllocation(ctx.state, value.target.allocationId);
+    // A pointer to a whole array cannot be assigned from the temporary's element pointer.
+    if (isArray(type.to))
       throw new ValidationError([
         `${lhs} has type ${typeToString(type)} but ${allocationDisplayName(ctx.state, heap)} needs a ${typeToString(heapBasePointerType(heap))} pointer to allocate it`,
       ]);
-    }
+    allocateThroughTemporary(heap, ctx);
   }
 }
 
-/** Returns false when the assignment was deferred (see emitDeferredPointers). */
-function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null) {
-  if (value.kind === 'uninit') return true;
-  if (value.kind === 'null') {
-    ctx.lines.push(`${lhs} = NULL;`);
+/**
+ * Allocate `heap` through a pointer declared in main()'s inner block (see generate). The
+ * pointer is out of scope when main() ends, so it is not part of the memory reproduced.
+ */
+function allocateThroughTemporary(heap, ctx) {
+  const taken = new Set([...stackAllocations(ctx.state).map(a => a.name), ...ctx.temporaries]);
+  let name = 'tmp';
+  for (let n = 2; taken.has(name) || variableNameError(name, ctx.state.structTypes); n++)
+    name = `tmp${n}`;
+  ctx.temporaries.push(name);
+  openBlock(ctx);
+  allocate(heap, name, declarationToC(heapBasePointerType(heap), name), null, ctx);
+  initializeHeap(heap, ctx);
+}
+
+/**
+ * Write `lhs = malloc(...)` (through `head`, which may be lhs's declaration), and make lhs
+ * the expression that later statements reach `heap` through.
+ */
+function allocate(heap, lhs, head, owner, ctx) {
+  const { text, zeroed } = allocationExpr(heap, ctx.state);
+  ctx.lines.push(`${head} = ${text};`);
+  if (zeroed) ctx.heapInitialized.add(heap.id);
+  ctx.anchorOwner.set(heap.id, owner);
+  ctx.heapAnchor.set(heap.id, lhs);
+}
+
+/**
+ * The call that allocates `heap`, and whether it also gives the block its values: calloc
+ * says in one call what an assignment per element would, that every one is zero.
+ */
+export function allocationExpr(heap, state) {
+  const zeroed =
+    isArray(heap.type) &&
+    (heap.requestedBytes ?? sizeOf(heap.type, state.structTypes)) ===
+      sizeOf(heap.type, state.structTypes) &&
+    isZero(heap.type, heap.value, state);
+  return {
+    text: zeroed
+      ? `calloc(${heap.type.length}, sizeof(${typeToString(heap.type.of)}))`
+      : mallocExpr(heap, state),
+    zeroed,
+  };
+}
+
+/**
+ * Assign one pointer, through `declaration` when lhs is a variable being declared. Returns
+ * false when the assignment had to be deferred (see emitDeferredPointers).
+ */
+function emitPointerAssignment(lhs, pointerType, value, ctx, owner = null, declaration = null) {
+  const head = declaration ?? lhs;
+  if (value.kind === 'uninit') {
+    if (declaration) ctx.lines.push(`${declaration};`);
     return true;
   }
-  const target = getAllocation(ctx.state, value.target.allocationId);
-  if (target.storage.kind === 'static') {
-    // A literal decays to &literal[0]; any other element is an offset from it.
-    const [index] = value.target.path;
-    ctx.lines.push(`${lhs} = ${target.name}${index ? ` + ${index}` : ''};`);
+  const target =
+    value.kind === 'pointer' ? getAllocation(ctx.state, value.target.allocationId) : null;
+  const ready = pointerExpr(value, ctx);
+  if (ready !== null) {
+    ctx.lines.push(`${head} = ${ready};`);
+    if (target?.storage.kind === 'heap') initializeHeap(target, ctx);
     return true;
   }
-  if (target.storage.kind === 'stack') {
-    const path = value.target.path,
-      singletonPast = path.at(-1) === '$onePast';
-    ctx.lines.push(
-      `${lhs} = &${lvalueForStackSubobject(target, singletonPast ? path.slice(0, -1) : path)}${singletonPast ? ' + 1' : ''};`,
-    );
-    return true;
-  }
-  if (!ctx.heapAnchor.has(target.id) && !canAllocateThrough(target, pointerType)) {
+  // How far into the block this pointer points: it allocates at the start, then moves.
+  const [first] = value.target.path;
+  const offset = first === '$onePast' ? 1 : isArray(target.type) ? first : 0;
+  if (
+    target.storage.kind !== 'heap' ||
+    !canAllocateThrough(target, pointerType) ||
+    (offset && ctx.preferStart && hasStartPointer(target, ctx))
+  ) {
+    if (declaration) ctx.lines.push(`${declaration};`);
     ctx.deferred.push({ lhs, type: pointerType, value, owner });
     return false;
   }
-  ensureHeapAllocated(target, lhs, value.target.path, ctx, owner);
-  const rhs = pointerExprForHeapTarget(
-    target,
-    value.target.path,
-    ctx.heapAnchor.get(target.id),
-    ctx.state,
-  );
-  if (rhs !== lhs) ctx.lines.push(`${lhs} = ${rhs};`);
+  allocate(target, lhs, head, owner, ctx);
+  // Values go in through the pointer before it moves (y[0] = 5; y = y + 1;). A block that
+  // holds pointers is filled afterwards: blocks allocated through them are reached through
+  // this pointer too, so it must already be where it will stay.
+  const fillFirst = !scalarSubobjects(target, ctx.state).some(s => isPointer(s.type));
+  if (offset && fillFirst) initializeHeap(target, ctx);
+  if (offset) {
+    ctx.lines.push(`${lhs} = ${lhs} + ${offset};`);
+    ctx.heapAnchor.set(target.id, `${lhs} - ${offset}`);
+  }
   initializeHeap(target, ctx);
   return true;
 }
 
-/** Allocate through `lhs`, which emitPointerAssignment has checked has the base pointer type. */
-function ensureHeapAllocated(heap, lhs, targetPath, ctx, owner) {
-  if (ctx.heapAnchor.has(heap.id)) return;
-  ctx.anchorOwner.set(heap.id, owner);
-  ctx.lines.push(`${lhs} = ${mallocExpr(heap, ctx.state)};`);
-  if (targetPath.length === 1 && targetPath[0] === '$onePast') {
-    ctx.lines.push(`${lhs} = ${lhs} + 1;`);
-    ctx.heapAnchor.set(heap.id, `(${lhs} - 1)`);
-  } else if (heap.type.kind === 'array' && targetPath.length === 1 && targetPath[0] !== 0) {
-    ctx.lines.push(`${lhs} = ${lhs} + ${targetPath[0]};`);
-    ctx.heapAnchor.set(heap.id, `(${lhs} - ${targetPath[0]})`);
-  } else ctx.heapAnchor.set(heap.id, lhs);
+/** Whether a pointer outside `heap` points at its start and could allocate it. */
+function hasStartPointer(heap, ctx) {
+  return pointerEdges(ctx.state).some(
+    e =>
+      e.target.allocationId === heap.id &&
+      e.source.allocationId !== heap.id &&
+      (e.target.path.length === 0 || (e.target.path.length === 1 && e.target.path[0] === 0)) &&
+      canAllocateThrough(heap, resolveRef(ctx.state, e.source).type),
+  );
 }
 
 function initializeHeap(heap, ctx) {
@@ -372,26 +548,23 @@ function initializeHeap(heap, ctx) {
   ctx.heapInitialized.add(heap.id);
 }
 
-function lvalueForStackSubobject(a, path) {
+export function lvalueForStackSubobject(a, path) {
   let out = a.name;
   for (const part of path) out += typeof part === 'number' ? `[${part}]` : `.${part}`;
   return out;
 }
-function lvalueForHeapSubobject(heap, path, anchor, state) {
+export function lvalueForHeapSubobject(heap, path, anchor, state) {
   let out = anchor,
     type = heap.type;
-  if (!path.length) return `*${parenIfNeeded(anchor)}`;
+  if (!path.length) return `*${operand(anchor)}`;
   for (let i = 0; i < path.length; i++) {
     const part = path[i];
     if (isArray(type)) {
-      out = `${parenIfNeeded(out)}[${part}]`;
+      out = `${operand(out)}[${part}]`;
       type = type.of;
     } else if (isStruct(type)) {
       const def = resolveStructType(type, state?.structTypes ?? {});
-      out =
-        i === 0 && heap.type.kind === 'struct'
-          ? `${parenIfNeeded(out)}->${part}`
-          : `${out}.${part}`;
+      out = i === 0 && heap.type.kind === 'struct' ? `${operand(out)}->${part}` : `${out}.${part}`;
       type = def.fields?.find(f => f.name === part)?.type ?? type;
     }
   }
@@ -401,14 +574,16 @@ function pointerExprForHeapTarget(heap, path, anchor, state) {
   if (!path.length) return anchor;
   if (path.at(-1) === '$onePast')
     return path.length === 1
-      ? `${parenIfNeeded(anchor)} + 1`
+      ? `${operand(anchor)} + 1`
       : `&${lvalueForHeapSubobject(heap, path.slice(0, -1), anchor, state)} + 1`;
   if (isArray(heap.type) && path.length === 1 && typeof path[0] === 'number')
-    return path[0] === 0 ? anchor : `${parenIfNeeded(anchor)} + ${path[0]}`;
+    return path[0] === 0 ? anchor : `${operand(anchor)} + ${path[0]}`;
   return `&${lvalueForHeapSubobject(heap, path, anchor, state)}`;
 }
-function numberToC(value, type) {
+export function numberToC(value, type) {
   if (type.name === 'bool') return value ? 'true' : 'false';
+  // The diagram shows a char as a character, so the code does too where one is readable.
+  if (type.name === 'char' && (value === 0 || readableChar(value))) return encodeCharLiteral(value);
   // 9223372036854775808 has no type (C23 6.4.4.1), so LONG_MIN needs an expression.
   if (type.name === 'long' && BigInt(value) === -(1n << 63n)) return '(-9223372036854775807L - 1)';
   let text = String(value);
@@ -434,7 +609,7 @@ function heapBasePointerType(heap) {
   return pointer(isArray(heap.type) ? heap.type.of : heap.type);
 }
 /** Any pointer can receive an untyped block; a typed block needs its element type. */
-function canAllocateThrough(heap, pointerType) {
+export function canAllocateThrough(heap, pointerType) {
   return isBlock(heap.type) || typeEquals(pointerType, heapBasePointerType(heap));
 }
 function mallocExpr(heap, state) {
@@ -448,8 +623,12 @@ function mallocExpr(heap, state) {
     ? `malloc(${heap.type.length} * sizeof(${typeToString(heap.type.of)}))`
     : `malloc(sizeof(${typeToString(heap.type)}))`;
 }
-function parenIfNeeded(expr) {
-  return /^[A-Za-z_]\w*$/.test(expr) ? expr : `(${expr})`;
+/**
+ * `expr` as the operand of [], -> or unary *. A name followed by member and element
+ * accesses binds tighter than any of them (head->next->v); anything else gets brackets.
+ */
+function operand(expr) {
+  return /^(?:[A-Za-z_]\w*|\([^()]*\))(?:->\w+|\.\w+|\[\d+\])*$/.test(expr) ? expr : `(${expr})`;
 }
 /** A static char array's characters before its one, final '\0', or null if it is not one. */
 function literalCodes(a) {
@@ -459,21 +638,6 @@ function literalCodes(a) {
   if (codes.at(-1) !== 0 || codes.includes(null)) return null;
   return codes.slice(0, -1);
 }
-function hasMeaningfulValue(type, value, state) {
-  if (isPrimitive(type) || isPointer(type)) return value.kind !== 'uninit';
-  if (isArray(type)) return value.elements.some(v => hasMeaningfulValue(type.of, v, state));
-  if (isStruct(type)) {
-    const def = resolveStructType(type, state.structTypes);
-    return def.fields.some(f => hasMeaningfulValue(f.type, value.fields[f.name], state));
-  }
-  return false;
-}
 function scalarValues(state) {
   return state.allocations.flatMap(a => scalarSubobjects(a, state).map(s => s.value));
-}
-function trimBlankLines(lines) {
-  const out = [...lines];
-  while (out[0] === '') out.shift();
-  while (out.at(-1) === '') out.pop();
-  return out.filter((line, i) => line !== '' || out[i - 1] !== '');
 }

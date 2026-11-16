@@ -1,0 +1,71 @@
+{"id":"A1-malloc-one-byte","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A1-malloc-trailing-byte","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A1-malloc-zero","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A1-malloc-discarded","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A1-malloc-nested-free","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A1-malloc-array-pointer","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A1-malloc-comparison","expected":{"accepts":true},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"A2-malloc-floating-argument","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"A3-free-first-member","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"B1-braced-null","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B1-braced-NULL","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B1-braced-array-null","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B2-short-circuit-constant","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B2-short-circuit-overflow","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B3-shadowed-typedef-sizeof","expected":{"accepts":true,"result":4},"actual":{"accepts":true,"result":4},"matches":true}
+{"id":"B3-typedef-function-collision","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"'S' is declared as both a typedef and a function (line 2)"},"matches":true}
+{"id":"B3-independent-tag-namespace","expected":{"accepts":true,"result":12},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'struct_specifier' at line 2: struct tag 'S' collides with a typedef name"},"matches":false}
+{"id":"B4-incomplete-sizeof","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"sizeof requires a complete type; struct S is incomplete at this point (line 3)"},"matches":true}
+{"id":"B4-incomplete-member-sizeof","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"struct S is incomplete at this point (line 3)"},"matches":true}
+{"id":"B5-oversized-unsigned-literal","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"integer constant '18446744073709551616UL' is too large for any type"},"matches":true}
+{"id":"B5-wrapped-allocation-literal","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"integer constant '18446744073709551617UL' is too large for any type"},"matches":true}
+{"id":"B6-void-pointer-addition","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"arithmetic on a pointer to incomplete type void (line 3)"},"matches":true}
+{"id":"B7-nullptr-integer","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"cannot assign nullptr_t to int (line 3)"},"matches":true}
+{"id":"B7-nullptr-sizeof","expected":{"accepts":true,"result":8},"actual":{"accepts":true,"result":8},"matches":true}
+{"id":"B7-nullptr-arithmetic","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"arithmetic requires numbers or a pointer and integer offset (line 3)"},"matches":true}
+{"id":"B7-NULL-integer","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"B7-NULL-sizeof","expected":{"accepts":true,"result":4},"actual":{"accepts":true,"result":4},"matches":true}
+{"id":"B9-size_t-decrement-wrap","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B9-unsigned-long-from-negative","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B9-size_t-countdown-loop","expected":{"accepts":true,"result":3},"actual":{"accepts":true,"result":3},"matches":true}
+{"id":"B10-true-has-type-bool","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"B8-dangling-temporary-member","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"use of dangling pointer whose target lifetime has ended (line 3)"},"matches":true}
+{"id":"L1-array-constant-expression","expected":{"accepts":true,"result":12},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'array_declarator' at line 3: array size must be a positive integer literal"},"matches":false}
+{"id":"L1-unsized-array-parameter","expected":{"accepts":true,"result":2},"actual":{"accepts":true,"result":2},"matches":true}
+{"id":"L2-long-int-spelling","expected":{"accepts":true,"result":1},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'sized_type_specifier' at line 3: type 'long int' is not in the current Mini-C subset"},"matches":false}
+{"id":"L2-short-int-spelling","expected":{"accepts":true,"result":1},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'sized_type_specifier' at line 3: type 'short int' is not in the current Mini-C subset"},"matches":false}
+{"id":"L2-signed-int-spelling","expected":{"accepts":true,"result":1},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'sized_type_specifier' at line 3: type 'signed int' is not in the current Mini-C subset"},"matches":false}
+{"id":"L2-unsigned-spelling","expected":{"accepts":true,"result":1},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'sized_type_specifier' at line 3: type 'unsigned' is not in the current Mini-C subset"},"matches":false}
+{"id":"L3-opaque-struct-pointer","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"L3-void-pointer","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"L4-unused-missing-return","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"L5-C23-empty-initializer","expected":{"accepts":true,"result":0},"actual":{"accepts":true,"result":0},"matches":true}
+{"id":"L5-C23-bool","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"L5-C23-binary","expected":{"accepts":true,"result":5},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported numeric literal '0b101'"},"matches":false}
+{"id":"L5-C23-digit-separator","expected":{"accepts":true,"result":1000},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported numeric literal '1'000'"},"matches":false}
+{"id":"L5-C23-scalar-empty-initializer","expected":{"accepts":true,"result":0},"actual":{"accepts":true,"result":0},"matches":true}
+{"id":"L6-exact-long-range","expected":{"accepts":true},"actual":{"accepts":true,"result":{"$bigint":"9007199254740993"}},"matches":true}
+{"id":"L6-array-limit","expected":{"accepts":true,"result":260},"actual":{"accepts":false,"kind":"limit","diagnostic":"array size must be between 1 and 64 (line 3)"},"matches":false}
+{"id":"L7-bitwise-and","expected":{"accepts":true,"result":1},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"binary operator '&' is not supported (line 3)"},"matches":false}
+{"id":"L7-shift","expected":{"accepts":true,"result":8},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"binary operator '<<' is not supported (line 3)"},"matches":false}
+{"id":"L7-complement","expected":{"accepts":true,"result":-1},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'unary_expression' at line 3"},"matches":false}
+{"id":"L7-comma","expected":{"accepts":true,"result":2},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'comma_expression' at line 3"},"matches":false}
+{"id":"L7-designated-initializer","expected":{"accepts":true,"result":5},"actual":{"accepts":false,"kind":"unsupported","diagnostic":"unsupported C construct 'initializer_pair' at line 3"},"matches":false}
+{"id":"control-normal-allocation","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"control-null-initialization","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"control-one-past","expected":{"accepts":true,"result":2},"actual":{"accepts":true,"result":2},"matches":true}
+{"id":"control-address-cancellation","expected":{"accepts":true,"result":1},"actual":{"accepts":true,"result":1},"matches":true}
+{"id":"control-unsigned-wrap","expected":{"accepts":true,"result":4294967295},"actual":{"accepts":true,"result":4294967295},"matches":true}
+{"id":"control-runtime-short-circuit","expected":{"accepts":true,"result":0},"actual":{"accepts":true,"result":0},"matches":true}
+{"id":"control-free-null","expected":{"accepts":true},"actual":{"accepts":true},"matches":true}
+{"id":"control-unsequenced-UB","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"unsequenced read/modification of the same object (line 3)"},"matches":true}
+{"id":"control-out-of-bounds-UB","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"subscript outside live object bounds (line 3)"},"matches":true}
+{"id":"control-dead-branch-constraint","expected":{"accepts":false},"actual":{"accepts":false,"kind":"invalid","diagnostic":"cannot assign int to int * (line 3)"},"matches":true}
+{"id":"control-sizeof-unevaluated","expected":{"accepts":true,"result":0},"actual":{"accepts":true,"result":0},"matches":true}
+{"id":"control-intmin-division","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"signed integer overflow in division"},"matches":true}
+{"id":"control-uninitialized-read","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"read of uninitialized x (line 3)"},"matches":true}
+{"id":"control-use-after-free","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"use of dangling pointer whose target lifetime has ended (line 3)"},"matches":true}
+{"id":"control-unrelated-ordering","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"relational pointer comparison requires pointers into the same array (line 3)"},"matches":true}
+{"id":"control-null-plus-zero","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"pointer arithmetic requires a concrete pointer (line 3)"},"matches":true}
+{"id":"control-string-literal-write","expected":{"accepts":false},"actual":{"accepts":false,"kind":"undefined","diagnostic":"cannot modify a string literal (undefined behavior) (line 3)"},"matches":true}
+{"summary":{"probes":70,"discrepancies":14,"matches":56}}

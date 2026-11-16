@@ -71,6 +71,7 @@ src/
 └── pipeline/
     ├── interpreter.js          parse + execute facade
     ├── codegen.js              MemoryState → canonical C, validation
+    ├── patch.js                diagram edits → lines added to existing C
     └── equivalence.js          challenge grading
 ```
 
@@ -204,7 +205,15 @@ UI code should normally call this rather than parser/machine internals directly.
 
 Validates an editable memory state and emits one equivalent canonical C program.
 
-It handles declarations, aggregate/scalar initialization, aliases, heap allocation and free. It deliberately does **not** reconstruct arbitrary function bodies or control-flow history from runtime snapshots, because that information is absent from the memory graph.
+It handles declarations, aggregate/scalar initialization, aliases, heap allocation and free. It deliberately does **not** reconstruct arbitrary function bodies or control-flow history from runtime snapshots, because that information is absent from the memory graph. It generates from the allocations grading compares (`gradedIds` in `memory.js`), so unobservable history never blocks it. Variables are emitted in declaration order by `declare`, each with an initializer when `initializerFor` can write its whole value; a pointer whose target cannot be named yet (a later variable, a block no pointer of the right type has allocated) is deferred and assigned afterwards. When it needs a temporary pointer or an out-of-scope variable, the lines from that point on go in one inner block (`openBlock`, `allocateThroughTemporary`). The output must stay predictable from the diagram: do not add rules that guess intent, such as turning repeated assignments into a loop. `test/roundtrip.test.js` checks the exact text of each rule and that every step of every program there regenerates to an equivalent state.
+
+### `src/pipeline/patch.js`
+
+`appendToCode(code, diagram, synced)` keeps the code and adds lines to it. It runs the code, pairs the memory it ends with against the diagram, and writes only the difference before `main()`'s final `return` (or closing brace). It returns `{ code, added }` or `{ reason }`; the Sandbox falls back to `generate()` on a reason and shows it.
+
+The statements are chosen one at a time against a working copy of memory that is updated as it goes (`writeDifference`), so every expression is valid when its statement runs. An assignment that would leave a block the later statements need with no name is postponed; if nothing else can go first, the block is held in a temporary pointer and the lines from there on go in an inner block. Edits that no added line can express are refused up front (`unwritable`): removing, renaming or retyping a variable, un-freeing a block, making a value uninitialized.
+
+Allocation IDs pair the diagram with the code's memory. They agree when the diagram was edited from a run of the same code. After a rewrite they do not, so the Sandbox passes `synced`, the diagram as it stood when it last matched the code, and the pairing comes from `equivalent(...).map`. Every result is run and compared with the diagram before it is returned, so a wrong pairing or ordering can only cause a refusal, never wrong code.
 
 ### `src/pipeline/equivalence.js`
 

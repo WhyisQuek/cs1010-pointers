@@ -2,6 +2,7 @@
 import { typeEquals } from '../language/types.js';
 import { checkAddressCapacity, referenceLocation } from './addresses.js';
 import {
+  frameAllocations,
   getAllocation,
   makeDefaultValue,
   pointerStatus,
@@ -50,6 +51,35 @@ export function changeAllocationType(state, id, type) {
   }
   Object.assign(allocation, replacement);
   return moved;
+}
+
+/**
+ * Remove a returned call and its locals from the diagram. A pointer into it had no usable
+ * value left (C23 6.2.4p2), so each becomes uninitialized, wherever it is stored. Returns
+ * how many pointers changed.
+ */
+export function removeReturnedFrame(state, frameId) {
+  const frame = state.frames.find(f => f.id === frameId);
+  if (!frame) throw new Error(`there is no call frame '${frameId}'`);
+  if (frame.active) throw new Error('only a call that has returned can be removed');
+  const gone = new Set(frameAllocations(state, frameId).map(a => a.id));
+  let cleared = 0;
+  for (const a of state.allocations) {
+    if (gone.has(a.id)) continue;
+    for (const scalar of scalarSubobjects(a, state)) {
+      if (scalar.value.kind !== 'pointer' || !gone.has(scalar.value.target.allocationId)) continue;
+      // Written directly: the pointer may itself be out of scope, which setRefValue refuses.
+      const { container, key } = resolveRef(state, scalar.ref);
+      if (container) container[key] = { kind: 'uninit' };
+      else a.value = { kind: 'uninit' };
+      cleared++;
+    }
+  }
+  state.allocations = state.allocations.filter(a => !gone.has(a.id));
+  state.frames = state.frames.filter(f => f.id !== frameId);
+  // Calls it made have returned too; they now hang from its caller.
+  for (const f of state.frames) if (f.callerId === frameId) f.callerId = frame.callerId;
+  return cleared;
 }
 
 export function removeAllocation(state, id) {

@@ -1,0 +1,14 @@
+{"name":"reported array example","code":"int main(void){int a[3];a[4]=5;}","expected":"undefined","actual":"undefined","matches":true,"message":"pointer arithmetic moves outside allocation bounds (index 4) (line 1)"}
+{"name":"one-past formation","code":"int main(void){int a[3];int *p=a+3;}","expected":"accept","actual":"accept","matches":true,"message":null}
+{"name":"one-past access","code":"int main(void){int a[3];int *p=a+3;*p=5;}","expected":"undefined","actual":"undefined","matches":true,"message":"dereference outside object bounds (line 1)"}
+{"name":"equality of separate objects","code":"int main(void){int x=1;int y=2;int result=&x==&y;}","expected":"accept","actual":"accept","matches":true,"message":null}
+{"name":"ordering of separate objects","code":"int main(void){int x=1;int y=2;int result=&x<&y;}","expected":"undefined","actual":"undefined","matches":true,"message":"relational pointer comparison requires pointers into the same array (line 1)"}
+{"name":"subtraction of separate objects","code":"int main(void){int x=1;int y=2;long result=&x-&y;}","expected":"undefined","actual":"undefined","matches":true,"message":"pointer subtraction requires pointers into the same array (line 1)"}
+{"name":"ordering struct members","code":"struct S{int a;int b;};int main(void){struct S s={1,2};int result=&s.a<&s.b;}","expected":"accept","actual":"accept","matches":true,"message":null}
+{"name":"uninitialised scalar read","code":"int main(void){int x;int y=x;}","expected":"undefined","actual":"undefined","matches":true,"message":"read of uninitialized x (line 1)"}
+{"name":"signed arithmetic overflow","code":"int main(void){int x=2147483647;x=x+1;}","expected":"undefined","actual":"undefined","matches":true,"message":"signed integer overflow in int"}
+{"name":"unsigned arithmetic wraps","code":"int main(void){unsigned int x=4294967295U;x=x+1;}","expected":"accept","actual":"accept","matches":true,"message":null}
+{"name":"C23 bool keyword","code":"int main(void){bool b=true;}","expected":"accept","actual":"accept","matches":true,"message":null}
+{"name":"cast outside subset","code":"int main(void){int x=(int)1.0;}","expected":"unsupported","actual":"unsupported","matches":true,"message":"unsupported C construct 'cast_expression' at line 1"}
+{"name":"generated aliasing example round trip","generated":"int main(void) {\n    int x;\n    int *p;\n    int *q;\n\n    x = 5;\n    p = &x;\n    q = &x;\n    return 0;\n}\n","matches":true}
+{"summary":{"examples":13,"failures":0,"builtInChallenges":18}}

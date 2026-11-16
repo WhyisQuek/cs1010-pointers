@@ -27,6 +27,8 @@ export function CodePanel({
   readOnly,
   activeLine = null,
   activeError = false,
+  // Line numbers to mark as just added (a Set), or null.
+  addedLines = null,
   breakpoints = null,
   onToggleBreakpoint = null,
 }) {
@@ -133,7 +135,7 @@ export function CodePanel({
           {lines.map((tokens, i) => (
             <div
               key={i}
-              className={`code-line${i + 1 === activeLine ? ` next-line${activeClass}` : ''}`}
+              className={`code-line${i + 1 === activeLine ? ` next-line${activeClass}` : ''}${addedLines?.has(i + 1) ? ' added-line' : ''}`}
             >
               {tokens.length
                 ? tokens.map((t, j) => (

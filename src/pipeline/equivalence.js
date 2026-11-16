@@ -18,6 +18,7 @@ import {
 import {
   allocationDisplayName,
   getAllocation,
+  gradedIds,
   heapAllocations,
   pointerStatus,
   samePath,
@@ -36,27 +37,7 @@ const MEMORY_MISMATCH = "Your memory doesn't match the expected layout";
 const SEARCH_EXHAUSTED =
   'PointerViz could not finish comparing your memory: it has too many similar heap blocks';
 
-/**
- * The allocations grading compares: every live stack object and every heap block (freed or
- * not), plus any out-of-scope local or string literal that a graded pointer refers to.
- * An out-of-scope local nothing points to (a returned call's parameter, a loop temporary)
- * is history the program can no longer observe; one a pointer still refers to is a
- * dangling target, which is part of the answer.
- */
-export function gradedIds(state) {
-  const optional = a => (a.storage.kind === 'stack' && !a.alive) || a.storage.kind === 'static';
-  const ids = new Set(state.allocations.filter(a => !optional(a)).map(a => a.id));
-  for (let added = true; added;) {
-    added = false;
-    for (const a of state.allocations.filter(a => ids.has(a.id)))
-      for (const s of scalarSubobjects(a, state))
-        if (s.value.kind === 'pointer' && !ids.has(s.value.target.allocationId)) {
-          ids.add(s.value.target.allocationId);
-          added = true;
-        }
-  }
-  return ids;
-}
+export { gradedIds };
 
 /**
  * Why a student could not draw the graded part of `state` in the diagram editor, or [] when
@@ -194,7 +175,8 @@ export function equivalent(expected, actual, options = {}) {
       diffs: [MEMORY_MISMATCH],
       badIds: new Set(actual.allocations.map(a => a.id)),
     };
-  if (best.score === 0) return { equal: true, diffs: [], badIds: new Set() };
+  // `map` pairs each compared allocation of `expected` with its match in `actual`.
+  if (best.score === 0) return { equal: true, diffs: [], badIds: new Set(), map: best.map };
   return collectDiffs(expected, actual, best.map, config);
 }
 

@@ -48,6 +48,7 @@ function FrameGroupNode({ id, data, selected }) {
           <div className="frame-actions nodrag nopan">
             <button onClick={data.onFit}>Fit frame to contents</button>
             {data.editable && <button onClick={data.onAdd}>+ Variable</button>}
+            {data.onRemove && <button onClick={data.onRemove}>Remove returned call</button>}
           </div>
           {['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'].map(direction => (
             <FrameResize key={direction} id={id} direction={direction} data={data} />
