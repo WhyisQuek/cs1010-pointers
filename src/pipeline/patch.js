@@ -58,8 +58,25 @@ const sameValue = (a, b) =>
  * with, such as the diagram as it was when it was last generated. It lets blocks be paired
  * when the IDs of a fresh run differ from the diagram's. Without it the IDs must agree, as
  * they do for a diagram edited from a run of this same code.
+ *
+ * `before` is for a diagram edited from an earlier step of the run: the line of the
+ * statement that step is paused at. The code is first cut back to that point (see
+ * cutMainBefore), since nothing added at the end could undo what the later statements do.
+ * `synced` must then be that step's memory, and the result also carries `removed`, the
+ * number of lines cut, and `from`, the line they started at.
  */
-export function appendToCode(code, diagram, synced = null) {
+export function appendToCode(original, diagram, synced = null, { before = null } = {}) {
+  let code = original,
+    cut = null;
+  if (before !== null) {
+    try {
+      cut = cutMainBefore(original, before);
+    } catch {
+      cut = null;
+    }
+    if (!cut) return refuse('the step shown is not at the start of a statement of main()');
+    code = cut.code;
+  }
   let base, at;
   try {
     base = interpret(code).state;
@@ -68,6 +85,10 @@ export function appendToCode(code, diagram, synced = null) {
     return refuse('the code in the editor does not run to the end');
   }
   if (!at) return refuse("main()'s last statement shares its line with other code");
+  // Cut back, the code must end with exactly the memory of that step. It does not when the
+  // step is partway through a statement or a loop, whose earlier work the cut would lose.
+  if (cut && !sameMemory(base, synced))
+    return refuse('the step shown is partway through a statement or a loop');
 
   const work = workingState(base, synced);
   if (!work) return refuse('the diagram did not come from this code');
@@ -85,7 +106,37 @@ export function appendToCode(code, diagram, synced = null) {
   } catch {
     return refuse('the added lines would not rebuild this memory');
   }
-  return result;
+  return cut ? { ...result, removed: cut.removed, from: cut.from } : result;
+}
+
+function sameMemory(a, b) {
+  try {
+    return !!b && equivalent(a, b).equal;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `code` without main()'s statements from the one starting on `line` onward, keeping a
+ * final return. Null when no top-level statement of main() starts there, or when the
+ * statements to go share a line with code that stays.
+ */
+function cutMainBefore(code, line) {
+  const main = parseMiniC(code).functions.find(f => f.name === 'main');
+  const first = main.statements.findIndex(s => s.loc.startLine === line);
+  if (first < 0) return null;
+  const source = code.split('\n');
+  const startsItsLine = s => !source[s.loc.startLine - 1].slice(0, s.loc.startColumn - 1).trim();
+  const last = main.statements.at(-1);
+  const going = main.statements.slice(first, last.kind === 'Return' ? -1 : undefined);
+  if (!going.length) return { code, removed: 0, from: line };
+  const end = going.at(-1).loc.endLine;
+  const after = last.kind === 'Return' ? last.loc.startLine : main.loc.endLine;
+  if (!startsItsLine(going[0]) || end >= after) return null;
+  if (last.kind === 'Return' && !startsItsLine(last)) return null;
+  source.splice(line - 1, end - line + 1);
+  return { code: source.join('\n'), removed: end - line + 1, from: line };
 }
 
 /**
@@ -259,16 +310,40 @@ function writeDifference(work, goal) {
         .map(a => a.id),
     ),
   });
-  /** `malloc(...)` for a block that does not exist yet, if `type` can point at its start. */
+  /**
+   * `malloc(...)` for a block that does not exist yet, through a pointer of `type` that is
+   * to hold `value`. A pointer into the block (p = heap[1]) allocates it too: `holds` is
+   * then the block's start, so its elements are written through it (p[0] = 1;) and the
+   * pointer moves to where it belongs as a later statement (p = p + 1;). It leaves the
+   * allocating to a pointer that is to point at the start, if the diagram has one.
+   */
   const allocation = (type, value) => {
     if (value.kind !== 'pointer') return null;
     const block = wanted.get(value.target.allocationId);
     if (block?.storage.kind !== 'heap' || current(block.id)) return null;
-    if (!canAllocateThrough(block, type) || startOffset(block, value.target.path) !== 0)
-      return null;
+    const offset = startOffset(block, value.target.path);
+    if (!canAllocateThrough(block, type) || offset === null) return null;
+    const startsThere = s =>
+      s.value.kind === 'pointer' &&
+      s.value.target.allocationId === block.id &&
+      startOffset(block, s.value.target.path) === 0 &&
+      canAllocateThrough(block, s.type);
+    const better = goal.allocations.some(
+      g =>
+        g.id !== block.id &&
+        (current(g.id) || (g.storage.kind === 'stack' && g.alive && inMain(g))) &&
+        scalarSubobjects(g, goal).some(startsThere),
+    );
+    if (offset && better) return null;
     const { text, zeroed } = allocationExpr(block, goal);
     return {
       text,
+      holds: offset
+        ? {
+            kind: 'pointer',
+            target: { allocationId: block.id, path: isArray(block.type) ? [0] : [] },
+          }
+        : value,
       create: () =>
         work.allocations.push({
           ...structuredClone(block),
@@ -345,7 +420,7 @@ function writeDifference(work, goal) {
       const made = text === null && isPointer(g.type) ? allocation(g.type, g.value) : null;
       if (text === null && !made) continue;
       made?.create();
-      declare(g, structuredClone(g.value), text ?? made.text);
+      declare(g, structuredClone(made ? made.holds : g.value), text ?? made.text);
       return true;
     }
     const rest = pending(),
@@ -372,7 +447,7 @@ function writeDifference(work, goal) {
         frees,
       );
       made?.create();
-      set(p.a, p.path, p.value);
+      set(p.a, p.path, made ? made.holds : p.value);
       const after = anchors(work);
       if ([...must].every(id => !reach.has(id) || after.has(id))) {
         lines.push(`${lhs} = ${ready ?? made.text};`);

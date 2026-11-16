@@ -370,6 +370,30 @@ test('Generate C adds lines to code it can keep, and rewrites when it cannot', a
   await expect(code(page)).not.toHaveValue(/make/);
 });
 
+test('Generate C from an earlier step keeps the code above it', async ({ page }) => {
+  await openApp(page);
+  await code(page).fill(
+    'int main(void) {\n    int a = 1;\n    int b = 2;\n    int c = 3;\n    return 0;\n}\n',
+  );
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  // Enter main(), then run `int a = 1;` and `int b = 2;`: paused at line 4.
+  for (let i = 0; i < 3; i++)
+    await page.getByRole('button', { name: 'Step into', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.locator('.mem-cell').nth(1).click();
+  await page.getByRole('spinbutton', { name: 'Value of b' }).fill('9');
+  await page.getByRole('button', { name: 'Generate C' }).click();
+  await expect(
+    page.getByText('Kept your code above line 4 and replaced the 1 line after it with 1 line.'),
+  ).toBeVisible();
+  await expect(code(page)).toHaveValue(
+    'int main(void) {\n    int a = 1;\n    int b = 2;\n    b = 9;\n    return 0;\n}\n',
+  );
+  await expect(page.locator('.added-line')).toHaveText('    b = 9;');
+  await page.getByRole('button', { name: 'Restore previous code' }).click();
+  await expect(code(page)).toHaveValue(/int c = 3;/);
+});
+
 test('generate during playback uses the step on screen', async ({ page }) => {
   await openApp(page);
   await page.getByRole('button', { name: 'Run', exact: true }).click();

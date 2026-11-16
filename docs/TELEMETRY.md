@@ -26,7 +26,7 @@ login or IP address, only:
 | Event | When | `data` |
 | --- | --- | --- |
 | `run` | **Run** in the sandbox | `code`; `steps` (`null` if the code did not compile); `error` (message, or `null`) |
-| `generate` | **Generate C** in the sandbox | `state` (the memory shown, as MemoryState JSON); `step` (the playback step, or `null` for an edited diagram); `code` (the C generated, or `null`); `error`; `mode` (`append` when lines were added to the existing code, `rewrite` when the program was written from the memory alone) |
+| `generate` | **Generate C** in the sandbox | `state` (the memory shown, as MemoryState JSON); `step` (the playback step, or `null` for an edited diagram); `code` (the C generated, or `null`); `error`; `mode` (`append` when lines were added to the existing code, `cut` when the code was also cut back to an earlier step, `rewrite` when the program was written from the memory alone) |
 | `check` | **Check answer** in Challenges | `level`, `kind`, `attempt`, `pass`, `failure` (`crash`, `mismatch`, `level` or `null`), `diffs`; the answer as `code` (diagram → code) or `state` (code → diagram) |
 
 Runs don't include their snapshots. The interpreter is deterministic, so running the same

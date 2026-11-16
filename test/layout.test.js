@@ -70,11 +70,59 @@ test('each invocation has a separate non-overlapping frame, independent of depth
   for (let i = 0; i < frames.length; i++)
     for (let j = i + 1; j < frames.length; j++) assert.ok(!overlaps(frames[i], frames[j]));
   assert.ok(frames.every(n => !n.deletable && n.dragHandle === '.frame-group-label'));
-  // Live calls can be dragged; returned ones sit on the shelf, placed afresh each step.
-  assert.deepEqual(
-    frames.filter(n => n.draggable).map(n => n.id),
-    ['frame:main', 'frame:second'],
+  // Live and returned calls can both be dragged.
+  assert.ok(frames.every(n => n.draggable));
+});
+
+test('a returned frame stays put when main is dragged, and can be moved and resized itself', () => {
+  const state = fixture();
+  endFrame(state, 'first');
+  endFrame(state, 'second');
+  const flow = layout => stateToFlow(state, { ...layout, showExpired: true }).nodes;
+  const nodes = flow(emptyLayout());
+  const layout = captureLayout(emptyLayout(), nodes);
+  const world = (all, id) => {
+    const n = all.find(x => x.id === id),
+      parent = all.find(x => x.id === n.parentId)?.position ?? { x: 0, y: 0 };
+    return { x: n.position.x + parent.x, y: n.position.y + parent.y };
+  };
+  // Dragging main sideways and up leaves the shelf where it was.
+  const mainMoved = flow(moveNode(layout, nodes, 'frame:main', { x: 900, y: -400 }));
+  for (const id of ['frame:first', 'frame:second'])
+    assert.deepEqual(world(mainMoved, id), world(nodes, id));
+  // A returned frame goes where it is dragged, and the other one does not follow.
+  const dragged = flow(moveNode(layout, nodes, 'frame:first', { x: 700, y: 40 }));
+  assert.deepEqual(world(dragged, 'frame:first'), { x: 700, y: 40 });
+  assert.deepEqual(world(dragged, 'frame:second'), world(nodes, 'frame:second'));
+  // Resizing up and left moves those edges; the far edges and the contents stay put.
+  const frame = nodes.find(n => n.id === 'frame:first');
+  const resized = flow(
+    resizeFrame(
+      layout,
+      nodes,
+      frame.id,
+      {
+        x: frame.position.x - 80,
+        y: frame.position.y - 60,
+        width: frame.width + 80,
+        height: frame.height + 60,
+      },
+      'nw',
+    ),
   );
+  const after = resized.find(n => n.id === frame.id);
+  assert.deepEqual(after.position, { x: frame.position.x - 80, y: frame.position.y - 60 });
+  assert.equal(after.position.x + after.width, frame.position.x + frame.width);
+  assert.equal(after.position.y + after.height, frame.position.y + frame.height);
+  assert.deepEqual(world(resized, 'p'), world(nodes, 'p'));
+  // Dragging a variable up and left grows its returned frame that way.
+  const child = nodes.find(n => n.id === 'p');
+  const grown = flow(moveNode(layout, nodes, 'p', { x: child.position.x - 50, y: -30 }));
+  assert.deepEqual(world(grown, 'p'), {
+    x: world(nodes, 'p').x - 50,
+    y: frame.position.y - 30,
+  });
+  assert.ok(grown.find(n => n.id === frame.id).position.y < frame.position.y);
 });
 
 test('frames are not remembered until dragged, so the column reflows', () => {

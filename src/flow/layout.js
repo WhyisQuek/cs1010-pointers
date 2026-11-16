@@ -266,11 +266,20 @@ function layoutFlow(
     if (positions[box.id]) placedFrames.push({ ...positions[box.id], ...box.size });
   let above = null,
     columnWidth = 0;
+  // Where the column would end had no frame been dragged: the shelf of returned calls starts
+  // under that, so dragging a live frame does not carry the shelf along.
+  let columnBottom = STACK_COLUMN.y,
+    nextTop = STACK_COLUMN.y;
+  const extendColumn = height => {
+    columnBottom = nextTop + height;
+    nextTop = columnBottom + STACK_COLUMN.gap;
+  };
   for (const entry of column) {
     if (entry.folded) {
       const position = placeAt(below(above), { width: STACK.width, height: STACK.header });
       nodes.push(foldNode(entry.folded, position, labels));
       above = { ...position, height: STACK.header };
+      extendColumn(STACK.header);
       continue;
     }
     const box = columnBoxes.get(entry.frame.id);
@@ -278,6 +287,7 @@ function layoutFlow(
     pushFrame(entry.frame, box, position);
     above = { ...position, height: box.size.height };
     columnWidth = Math.max(columnWidth, box.size.width);
+    extendColumn(box.size.height);
   }
   const heapX = STACK_COLUMN.x + Math.max(reserve, columnWidth) + FRAME_SPACING;
 
@@ -331,8 +341,7 @@ function layoutFlow(
       type: 'frameGroup',
       position,
       data: { frame, editable: editable && frame.active },
-      // Returned calls sit on the shelf, which is laid out afresh every step.
-      draggable: frame.active,
+      draggable: true,
       dragHandle: '.frame-group-label',
       selectable: true,
       deletable: false,
@@ -557,18 +566,21 @@ function layoutFlow(
     heapY += size.height + g.gap;
   }
   // Returned calls, when shown, sit on a shelf under the live stack. It is placed afresh every
-  // step, so showing or hiding it never moves the live layout, and keeps clear of heap boxes.
+  // step, so showing or hiding it never moves the live layout, and keeps clear of heap boxes
+  // and dragged frames. A returned call the user dragged or resized stays where they put it.
   if (!structure && showExpired) {
     const shelf = foldReturned(
       frames.filter(f => !f.active),
       unfold,
       keepOpen,
     );
-    let start = {
-      x: STACK_COLUMN.x,
-      y: Math.max(STACK_COLUMN.y, ...placedFrames.map(r => r.y + r.height)) + SHELF_GAP,
-    };
+    let start = { x: STACK_COLUMN.x, y: columnBottom + SHELF_GAP };
     placedFrames.push(...occupiedHeap);
+    const shelfBoxes = new Map(
+      shelf.flatMap(e => (e.frame ? [[e.frame.id, frameBox(e.frame)]] : [])),
+    );
+    for (const box of shelfBoxes.values())
+      if (positions[box.id]) placedFrames.push({ ...positions[box.id], ...box.size });
     for (const entry of shelf) {
       if (entry.folded) {
         const position = placeAt(start, { width: STACK.width, height: STACK.header });
@@ -576,7 +588,13 @@ function layoutFlow(
         start = below({ ...position, height: STACK.header });
         continue;
       }
-      const box = frameBox(entry.frame);
+      const box = shelfBoxes.get(entry.frame.id);
+      if (positions[box.id]) {
+        pushFrame(entry.frame, box, positions[box.id]);
+        // Its slot on the shelf stays empty, so the calls after it do not jump up.
+        start = below({ ...start, height: box.size.height });
+        continue;
+      }
       const position = placeAt(start, box.size);
       pushFrame(entry.frame, box, position);
       start = below({ ...position, height: box.size.height });

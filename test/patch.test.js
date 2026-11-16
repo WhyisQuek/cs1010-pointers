@@ -9,6 +9,7 @@ import { initParser, interpret } from '../src/pipeline/interpreter.js';
 import { appendToCode } from '../src/pipeline/patch.js';
 import { generate } from '../src/pipeline/codegen.js';
 import { equivalent } from '../src/pipeline/equivalence.js';
+import { pausedLine } from '../src/machine/navigation.js';
 import { addAllocation, addFrame, makeState } from '../src/machine/memory.js';
 import { CHAR, pointer, primitive } from '../src/language/types.js';
 
@@ -57,6 +58,7 @@ const SIMPLE = `int main(void) {
     return 0;
 }
 `;
+const WITH_HEADER = `#include <stdlib.h>\n\n${SIMPLE}`;
 const HEAP = `#include <stdlib.h>
 
 int main(void) {
@@ -184,6 +186,37 @@ const appended = [
     ['q[1] = 8;', 'p = q + 1;'],
   ],
   [
+    'a new block that its only pointer points into: allocate, fill, then move',
+    WITH_HEADER,
+    s => {
+      const elements = [num(1), num(4)];
+      const h = heap(s, { kind: 'array', of: INT, length: 2 }, { kind: 'aggregate', elements });
+      named(s, 'p').value = to(h, [1]);
+    },
+    ['p = malloc(2 * sizeof(int));', 'p[0] = 1;', 'p[1] = 4;', 'p = p + 1;'],
+  ],
+  [
+    'a new block for a new pointer that points into it',
+    WITH_HEADER,
+    s => {
+      const elements = [num(1), { kind: 'uninit' }, num(3)];
+      const h = heap(s, { kind: 'array', of: INT, length: 3 }, { kind: 'aggregate', elements });
+      addAllocation(s, { name: 'q', type: pointer(INT), value: to(h, [2]) });
+    },
+    ['int *q = malloc(3 * sizeof(int));', 'q[0] = 1;', 'q[2] = 3;', 'q = q + 2;'],
+  ],
+  [
+    'a new block with a pointer to its start and one into it: the start allocates',
+    WITH_HEADER,
+    s => {
+      const elements = [num(1), num(4)];
+      const h = heap(s, { kind: 'array', of: INT, length: 2 }, { kind: 'aggregate', elements });
+      named(s, 'p').value = to(h, [1]);
+      addAllocation(s, { name: 'q', type: pointer(INT), value: to(h, [0]) });
+    },
+    ['int *q = malloc(2 * sizeof(int));', 'q[0] = 1;', 'q[1] = 4;', 'p = q + 1;'],
+  ],
+  [
     'a block nothing points to, through a temporary',
     HEAP,
     s => heap(s, INT, num(5)),
@@ -275,6 +308,56 @@ test('append: a diagram drawn by hand is paired with its generated code through 
   assert.deepEqual(added(result), ['x = 2;', '*p = 40;']);
   // Without it the allocation IDs do not line up, and the edit is refused, not mis-written.
   assert.ok(appendToCode(code, s).reason);
+});
+
+/** The first step of a run of `code` that is paused at `line`, as { state, line }. */
+function pausedBefore(code, line) {
+  const { snapshots } = interpret(code);
+  const k = snapshots.findIndex((_, i) => pausedLine(snapshots, i + 1) === line) + 1;
+  assert.ok(k > 0, `no step is paused at line ${line}`);
+  return structuredClone(snapshots[k - 1].state);
+}
+
+test('cut: a diagram edited from an earlier step keeps the code above that step', () => {
+  // Paused before `int *p = &a;` on line 4, with b changed in the diagram.
+  const step = pausedBefore(SIMPLE, 4);
+  const diagram = structuredClone(step);
+  named(diagram, 'b').value = num(5);
+  const result = appendToCode(SIMPLE, diagram, step, { before: 4 });
+  assert.equal(
+    result.code,
+    'int main(void) {\n    int a = 1;\n    int b = 2;\n    b = 5;\n    return 0;\n}\n',
+  );
+  assert.deepEqual([result.removed, result.from, result.added], [1, 4, [4]]);
+});
+
+test('cut: with nothing edited, the statements after the step are removed', () => {
+  // Paused before the loop, after `struct N *head = NULL;`.
+  const step = pausedBefore(LIST, 14);
+  const result = appendToCode(LIST, step, step, { before: 14 });
+  assert.deepEqual([result.removed, result.from, result.added], [3, 14, []]);
+  assert.match(result.code, /struct N \*head = NULL;\n {4}return 0;\n}\n$/);
+  // push() is no longer called, but it is not main()'s to remove.
+  assert.match(result.code, /struct N \*push\(/);
+});
+
+test('cut: a step inside a call or partway through a loop is refused', () => {
+  const { snapshots } = interpret(LIST);
+  const reasons = new Set();
+  let kept = 0;
+  snapshots.forEach(({ state }, i) => {
+    const before = pausedLine(snapshots, i + 1);
+    if (before === null) return;
+    const result = appendToCode(LIST, state, state, { before });
+    if (result.reason) return reasons.add(result.reason);
+    // Whatever is not refused must rebuild exactly that step.
+    assert.ok(equivalent(state, interpret(result.code).state).equal, `step ${i + 1}`);
+    kept++;
+  });
+  assert.ok(kept >= 2);
+  assert.ok(reasons.has('the step shown is not at the start of a statement of main()'));
+  // The loop line is reached again after each iteration, with the list partly built.
+  assert.ok(reasons.has('the step shown is partway through a statement or a loop'));
 });
 
 test('append: history the code still produces does not get in the way', () => {

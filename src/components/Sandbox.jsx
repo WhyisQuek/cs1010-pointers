@@ -62,6 +62,9 @@ export default function Sandbox({ example, onExampleDeclined }) {
   const synced = useRef(null);
   // The code as Generate C last wrote it whole; while unchanged, nobody else has written any.
   const written = useRef(null);
+  // For a diagram edited from a step before the last: the line that step was paused at,
+  // which is where the code stops building its memory. Null once the code ends with it.
+  const cutLine = useRef(null);
   const errorText = e => (e instanceof ValidationError ? e.errors.join('\n') : describeError(e));
   const reportError = e => setNotice({ kind: 'err', text: errorText(e) });
   useEffect(() => {
@@ -130,6 +133,7 @@ export default function Sandbox({ example, onExampleDeclined }) {
     step,
     savedPlayback,
     synced: synced.current,
+    cutLine: cutLine.current,
   });
   const alreadyBuilt = () =>
     setNotice({ kind: 'ok', text: 'The code already builds the memory shown.', rewrite: true });
@@ -137,31 +141,46 @@ export default function Sandbox({ example, onExampleDeclined }) {
     // The last step of a finished run is the memory this code ends with.
     const finished = snapshots && step === snapshots.length && !shownSnapshot?.error;
     if (finished) return alreadyBuilt();
-    // An earlier step is not: adding to the end cannot go back to it.
-    if (snapshots) return rewrite();
-    // Adding lines is for keeping code someone wrote. Code that Generate C wrote whole is
-    // written whole again, which stays tidier; so is starter or example code beside a
-    // diagram that was drawn rather than edited from a run of it.
-    if (code === written.current || (!synced.current && REPLACEABLE.has(code))) return rewrite();
-    const result = appendToCode(code, state, synced.current);
+    // An earlier step is what the code builds up to the statement it is paused at, so the
+    // code is kept up to there. `known` is that step's memory, unedited.
+    const known = snapshots ? shownState : synced.current;
+    const before = snapshots ? nextLine : cutLine.current;
+    if (snapshots && before === null) return rewrite();
+    // Keeping code is for code someone wrote. Code that Generate C wrote whole is written
+    // whole again, which stays tidier; so is starter or example code, unless the diagram
+    // was edited from a run of it.
+    if (code === written.current || (REPLACEABLE.has(code) && (snapshots || !known)))
+      return rewrite();
+    const result = appendToCode(code, shownState, known, { before });
     if (!result.code) return rewrite(result.reason);
-    if (!result.added.length) return alreadyBuilt();
+    if (!result.added.length && !result.removed) return alreadyBuilt();
     telemetry.track('generate', {
-      state,
-      step: null,
+      state: shownState,
+      step: snapshots ? step : null,
       code: result.code,
       error: null,
-      mode: 'append',
+      mode: result.removed ? 'cut' : 'append',
     });
     const undo = everything();
     setBreakpoints(b => shiftBreakpoints(code, result.code, b));
     setCode(result.code);
     setAddedLines(new Set(result.added));
-    synced.current = state;
+    // The code now ends with this memory, so the diagram stops being a step of a run.
+    const next = snapshots ? structuredClone(shownState) : state;
+    setState(next);
+    setSnapshots(null);
+    setSavedPlayback(null);
+    synced.current = next;
+    cutLine.current = null;
+    const lines = n => `${n} line${n === 1 ? '' : 's'}`;
     const count = result.added.length;
     setNotice({
       kind: 'ok',
-      text: `Added ${count} line${count === 1 ? '' : 's'} to your code.`,
+      text: !result.removed
+        ? `Added ${lines(count)} to your code.`
+        : count
+          ? `Kept your code above line ${result.from} and replaced the ${lines(result.removed)} after it with ${lines(count)}.`
+          : `Kept your code above line ${result.from} and removed the ${lines(result.removed)} after it, which run after this step.`,
       undo,
       rewrite: true,
     });
@@ -191,6 +210,7 @@ export default function Sandbox({ example, onExampleDeclined }) {
       const next = snapshots || tidied ? structuredClone(built) : state;
       setState(next);
       synced.current = next;
+      cutLine.current = null;
       setSnapshots(null);
       setSavedPlayback(null);
       const same = generated === undo.code;
@@ -219,6 +239,7 @@ export default function Sandbox({ example, onExampleDeclined }) {
     setSavedPlayback(undo.savedPlayback);
     setAddedLines(null);
     synced.current = undo.synced;
+    cutLine.current = undo.cutLine;
     setNotice({ kind: 'ok', text: 'Restored your code and the memory it was generated from.' });
   };
   const cannotGenerate = e => `Cannot generate C: ${errorText(e)}`;
@@ -228,13 +249,13 @@ export default function Sandbox({ example, onExampleDeclined }) {
    * Says straight away when the diagram cannot become code, so that nobody finds out only
    * after editing it. A diagram that can clears the earlier error and any offered action.
    */
-  const checkGeneratable = (diagram, known = synced.current) => {
+  const checkGeneratable = (diagram, known = synced.current, before = cutLine.current) => {
     try {
       generate(diagram);
       setNotice(n => (n?.kind === 'err' || hasAction(n) ? null : n));
     } catch (e) {
       // It may still be reachable by adding lines to code that builds the rest.
-      if (appendToCode(code, diagram, known).code)
+      if (appendToCode(code, diagram, known, { before }).code)
         setNotice(n => (n?.kind === 'err' || hasAction(n) ? null : n));
       else setNotice({ kind: 'err', text: cannotGenerate(e) });
     }
@@ -246,18 +267,27 @@ export default function Sandbox({ example, onExampleDeclined }) {
   };
 
   const editSnapshot = () => {
-    setSavedPlayback({ state, snapshots, step, synced: synced.current });
+    setSavedPlayback({
+      state,
+      snapshots,
+      step,
+      synced: synced.current,
+      cutLine: cutLine.current,
+    });
     setState(structuredClone(shownState));
     setSnapshots(null);
     // The copy keeps the run's allocation IDs, which is how its edits are told apart.
     synced.current = shownState;
-    checkGeneratable(shownState, shownState);
+    // Before the last step, the code builds this memory only up to the line it is paused at.
+    cutLine.current = nextLine;
+    checkGeneratable(shownState, shownState, nextLine);
   };
   const returnToPlayback = () => {
     setState(savedPlayback.state);
     setSnapshots(savedPlayback.snapshots);
     setStep(savedPlayback.step);
     synced.current = savedPlayback.synced;
+    cutLine.current = savedPlayback.cutLine;
     setSavedPlayback(null);
   };
   const onCode = value => {
@@ -269,6 +299,8 @@ export default function Sandbox({ example, onExampleDeclined }) {
       // than falling back to the run's final state, and say why the steps went away.
       setState(structuredClone(shownState));
       synced.current = shownState;
+      // The line numbers of the run no longer describe the code being typed.
+      cutLine.current = null;
       setNotice({
         kind: 'ok',
         text: `Code changed, so playback ended. The diagram still shows step ${step}; Run to replay.`,

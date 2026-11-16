@@ -213,6 +213,8 @@ It handles declarations, aggregate/scalar initialization, aliases, heap allocati
 
 The statements are chosen one at a time against a working copy of memory that is updated as it goes (`writeDifference`), so every expression is valid when its statement runs. An assignment that would leave a block the later statements need with no name is postponed; if nothing else can go first, the block is held in a temporary pointer and the lines from there on go in an inner block. Edits that no added line can express are refused up front (`unwritable`): removing, renaming or retyping a variable, un-freeing a block, making a value uninitialized.
 
+With `{ before: line }` the code is first cut back to the statement of `main()` starting on that line (`cutMainBefore`), for a diagram that came from an earlier step of the run. The cut is accepted only if the shortened code ends with exactly that step's memory (`synced`), which rules out steps partway through a statement or a loop. The Sandbox keeps the paused line in `cutLine` from **Edit** until the next generation.
+
 Allocation IDs pair the diagram with the code's memory. They agree when the diagram was edited from a run of the same code. After a rewrite they do not, so the Sandbox passes `synced`, the diagram as it stood when it last matched the code, and the pairing comes from `equivalent(...).map`. Every result is run and compared with the diagram before it is returned, so a wrong pairing or ordering can only cause a refusal, never wrong code.
 
 ### `src/pipeline/equivalence.js`

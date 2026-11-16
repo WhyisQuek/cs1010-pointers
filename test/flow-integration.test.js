@@ -126,7 +126,8 @@ test('returned calls go on a shelf under the live stack, folded by function', ()
   assert.ok(shelf.length > 0);
   for (const n of shelf) {
     assert.ok(n.position.y > liveBottom);
-    assert.equal(n.draggable, false);
+    // Returned calls can be dragged; fold rows cannot.
+    assert.equal(n.draggable, n.type === 'frameGroup');
   }
   assert.ok(shelf.some(n => n.type === 'frameFold' && n.data.calls.length > 1));
   const unfolded = stateToFlow(state, { showExpired: true, unfold: true }).nodes;
