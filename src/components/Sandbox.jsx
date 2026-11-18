@@ -9,6 +9,7 @@ import { interpret } from '../pipeline/interpreter.js';
 import { describeError } from '../language/diagnostics.js';
 import { generate, observableState, ValidationError } from '../pipeline/codegen.js';
 import { appendToCode } from '../pipeline/patch.js';
+import { equivalent } from '../pipeline/equivalence.js';
 import { makeState } from '../machine/memory.js';
 import { loadDraft, saveDraft } from '../data/drafts.js';
 import { pausedLine } from '../machine/navigation.js';
@@ -141,6 +142,17 @@ export default function Sandbox({ example, onExampleDeclined }) {
     // The last step of a finished run is the memory this code ends with.
     const finished = snapshots && step === snapshots.length && !shownSnapshot?.error;
     if (finished) return alreadyBuilt();
+    // Test the target before choosing append/rewrite: edit identities can change
+    // while the named values and pointer graph remain equivalent to this code.
+    try {
+      if (equivalent(interpret(code).state, shownState).equal) {
+        synced.current = shownState;
+        cutLine.current = null;
+        return alreadyBuilt();
+      }
+    } catch {
+      // Code that cannot run may still be replaced by generation from the diagram.
+    }
     // An earlier step is what the code builds up to the statement it is paused at, so the
     // code is kept up to there. `known` is that step's memory, unedited.
     const known = snapshots ? shownState : synced.current;

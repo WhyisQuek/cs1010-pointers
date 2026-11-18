@@ -84,6 +84,12 @@ export function appendToCode(original, diagram, synced = null, { before = null }
   } catch {
     return refuse('the code in the editor does not run to the end');
   }
+  // Equivalent named objects may carry different IDs after diagram edits. Nothing
+  // needs writing in that case, even if following edit identities looks like a rename.
+  if (sameMemory(base, diagram)) {
+    const result = { code, added: [] };
+    return cut ? { ...result, removed: cut.removed, from: cut.from } : result;
+  }
   if (!at) return refuse("main()'s last statement shares its line with other code");
   // Cut back, the code must end with exactly the memory of that step. It does not when the
   // step is partway through a statement or a loop, whose earlier work the cut would lose.

@@ -235,6 +235,41 @@ for (const [name, code, edit, lines] of appended) {
   });
 }
 
+test('append: swapped names and values need no code changes when the state is equivalent', () => {
+  const code = 'int main(void) {\n    int x = 1;\n    int y = 2;\n    return 0;\n}\n';
+  const synced = interpret(code).state;
+  const diagram = structuredClone(synced);
+  const x = named(diagram, 'x');
+  const y = named(diagram, 'y');
+  Object.assign(x, { name: 'y', value: num(2) });
+  Object.assign(y, { name: 'x', value: num(1) });
+  assert.ok(equivalent(synced, diagram).equal);
+  for (const known of [null, synced]) {
+    assert.deepEqual(appendToCode(code, diagram, known), { code, added: [] });
+  }
+  // Once the equivalent diagram is synchronised, subsequent changes use its IDs.
+  const edited = structuredClone(diagram);
+  named(edited, 'x').value = num(7);
+  const result = appendToCode(code, edited, diagram);
+  assert.deepEqual(added(result), ['x = 7;']);
+  assert.ok(equivalent(edited, interpret(result.code).state).equal);
+});
+
+test('append: equivalent renamed allocations must preserve pointer relationships', () => {
+  const synced = interpret(SIMPLE).state;
+  const diagram = structuredClone(synced);
+  const a = named(diagram, 'a');
+  const b = named(diagram, 'b');
+  Object.assign(a, { name: 'b', value: num(2) });
+  Object.assign(b, { name: 'a', value: num(1) });
+  // p must follow the corresponding named object, not the original allocation ID.
+  named(diagram, 'p').value = to(b);
+  assert.deepEqual(appendToCode(SIMPLE, diagram, synced), { code: SIMPLE, added: [] });
+  named(diagram, 'p').value = to(a);
+  assert.equal(equivalent(synced, diagram).equal, false);
+  assert.equal(appendToCode(SIMPLE, diagram, synced).code, undefined);
+});
+
 const refused = [
   [
     'a variable removed',
